@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    font-family: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    background-color: #FAF6EC;
+    color: #1A1A1A;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #F4EFE2;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #D9D1BC;
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #B8AE94;
+  }
+}
+
+@layer components {
+  /* Defter — paper line texture utility */
+  .paper-bg {
+    background-color: #FAF6EC;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 31px,
+      rgba(230, 223, 206, 0.55) 31px,
+      rgba(230, 223, 206, 0.55) 32px
+    );
+    background-position: 0 64px;
+  }
+
+  /* Tipografi — Instrument Serif başlık ve italik vurgu */
+  .serif {
+    font-family: 'Instrument Serif', ui-serif, Georgia, serif;
+  }
+  .serif-italic {
+    font-family: 'Instrument Serif', ui-serif, Georgia, serif;
+    font-style: italic;
+  }
+
+  /* Sticky tape — kart üstünde duran sarımsı bant */
+  .tape {
+    position: absolute;
+    top: -10px;
+    left: 36px;
+    width: 64px;
+    height: 18px;
+    background: rgba(216, 155, 42, 0.55);
+    transform: rotate(-3deg);
+    border-radius: 2px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    pointer-events: none;
+  }
+
+  /* Defter kartı — kağıt tonu, sıcak kenarlık, yumuşak gölge */
+  .card-defter {
+    background-color: #FFFDF8;
+    border: 1px solid #E8E0CB;
+    border-radius: 1rem;
+    box-shadow:
+      0 1px 0 rgba(0, 0, 0, 0.02),
+      0 8px 24px -12px rgba(30, 63, 174, 0.18);
+  }
+}
+
+/* Login demo animasyon keyframe'leri (birebir port — d1slideUp + d1pulse) */
+@keyframes d1slideUp {
+  from {
+    transform: translateY(5px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes d1pulse {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@layer components {
+  /* boş — yukarıdaki components layer'ın devamı; keyframe'ler arada başka layer'a düşmesin diye */
+
+  /* Eski "btn" utility'leri — geriye uyum için, defter palette'iyle */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-white hover:bg-primary-600 active:bg-primary-700;
+  }
+  .btn-secondary {
+    @apply btn bg-paper2 text-ink-700 hover:bg-cardBorder/40 border border-cardBorder;
+  }
+  .btn-ghost {
+    @apply btn text-ink-700 hover:bg-paper2;
+  }
+  .btn-danger {
+    @apply btn bg-accent-err text-white hover:bg-red-700;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-cardBorder bg-card px-3 py-2 text-sm text-ink-800 placeholder:text-ink-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary-50;
+  }
+
+  .card {
+    @apply rounded-xl bg-card border border-cardBorder shadow-soft;
+  }
+}

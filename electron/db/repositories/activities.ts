@@ -1,0 +1,230 @@
+import { getDb } from '../connection.js';
+import { schoolsRepo } from './schools.js';
+import type { Activity, ActivityInput } from '../../../src/lib/types.js';
+
+type ActivityRow = {
+  id: number;
+  class_id: number;
+  subject_id: number;
+  teacher_id: number | null;
+  weekly_hours: number;
+  block_duration: number;
+  notes: string | null;
+  split_group_id: number | null;
+};
+
+function rowToActivity(r: ActivityRow): Activity {
+  return {
+    id: r.id,
+    classId: r.class_id,
+    subjectId: r.subject_id,
+    teacherId: r.teacher_id,
+    weeklyHours: r.weekly_hours,
+    blockDuration: r.block_duration,
+    notes: r.notes,
+    splitGroupId: r.split_group_id,
+  };
+}
+
+const SELECT_COLS =
+  'id, class_id, subject_id, teacher_id, weekly_hours, block_duration, notes, split_group_id';
+
+export const activitiesRepo = {
+  list(): Activity[] {
+    const rows = getDb()
+      .prepare(
+        `SELECT ${SELECT_COLS}
+         FROM activities WHERE school_id = ?
+         ORDER BY id ASC`,
+      )
+      .all(schoolsRepo.getActiveId()) as ActivityRow[];
+    return rows.map(rowToActivity);
+  },
+
+  get(id: number): Activity | null {
+    const row = getDb()
+      .prepare(
+        `SELECT ${SELECT_COLS}
+         FROM activities WHERE id = ? AND school_id = ?`,
+      )
+      .get(id, schoolsRepo.getActiveId()) as ActivityRow | undefined;
+    return row ? rowToActivity(row) : null;
+  },
+
+  /**
+   * (class_id, subject_id, teacher_id) üçlüsünde varsa update, yoksa insert.
+   * UI tarafı tek bir "upsert" endpoint kullanıyor.
+   */
+  upsert(input: ActivityInput & { id?: number }): number {
+    const db = getDb();
+    const schoolId = schoolsRepo.getActiveId();
+
+    if (input.id !== undefined && input.id !== null) {
+      db.prepare(
+        `UPDATE activities SET
+           class_id = ?, subject_id = ?, teacher_id = ?,
+           weekly_hours = ?, block_duration = ?, notes = ?
+         WHERE id = ? AND school_id = ?`,
+      ).run(
+        input.classId,
+        input.subjectId,
+        input.teacherId ?? null,
+        input.weeklyHours,
+        input.blockDuration ?? 1,
+        input.notes ?? null,
+        input.id,
+        schoolId,
+      );
+      return input.id;
+    }
+
+    const result = db
+      .prepare(
+        `INSERT INTO activities
+           (school_id, class_id, subject_id, teacher_id, weekly_hours, block_duration, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(school_id, class_id, subject_id, teacher_id)
+         DO UPDATE SET
+           weekly_hours = excluded.weekly_hours,
+           block_duration = excluded.block_duration,
+           notes = excluded.notes`,
+      )
+      .run(
+        schoolId,
+        input.classId,
+        input.subjectId,
+        input.teacherId ?? null,
+        input.weeklyHours,
+        input.blockDuration ?? 1,
+        input.notes ?? null,
+      );
+
+    if (result.lastInsertRowid && Number(result.lastInsertRowid) > 0) {
+      return Number(result.lastInsertRowid);
+    }
+    const existing = db
+      .prepare(
+        `SELECT id FROM activities
+         WHERE school_id = ? AND class_id = ? AND subject_id = ?
+           AND (teacher_id IS ? OR teacher_id = ?)`,
+      )
+      .get(
+        schoolId,
+        input.classId,
+        input.subjectId,
+        input.teacherId ?? null,
+        input.teacherId ?? null,
+      ) as { id: number } | undefined;
+    if (!existing) {
+      throw new Error('Aktivite kaydedildikten sonra bulunamadı.');
+    }
+    return existing.id;
+  },
+
+  delete(id: number): void {
+    getDb().prepare('DELETE FROM activities WHERE id = ?').run(id);
+  },
+
+  /**
+   * Verilen aktivite kümesini ortak bir split grubuna bağlar.
+   *
+   * Davranış:
+   *  - activityIds.length < 2 → eski split bağları temizlenir (unset).
+   *  - Aktif okulun split_group_id'leri arasında en büyük + 1 yeni grup id olarak
+   *    seçilir; verilen tüm aktiviteler bu id ile güncellenir.
+   *  - Verilen aktivitelerden birinin önceki grubu varsa, o grubun *diğer*
+   *    üyeleri yetim kalmasın diye eski gruptaki tek üye olarak kalırsa
+   *    onun split_group_id'si NULL'a çekilir (tek üyeli split anlamsız).
+   *
+   * Hepsi tek transaction içinde yapılır.
+   */
+  setSplitGroup(activityIds: number[]): number | null {
+    const db = getDb();
+    const schoolId = schoolsRepo.getActiveId();
+
+    if (!Array.isArray(activityIds) || activityIds.length === 0) return null;
+
+    const trx = db.transaction(() => {
+      if (activityIds.length === 1) {
+        const prev = db
+          .prepare(
+            'SELECT split_group_id FROM activities WHERE id = ? AND school_id = ?',
+          )
+          .get(activityIds[0], schoolId) as { split_group_id: number | null } | undefined;
+        db.prepare(
+          'UPDATE activities SET split_group_id = NULL WHERE id = ? AND school_id = ?',
+        ).run(activityIds[0], schoolId);
+        if (prev?.split_group_id != null) cleanupOrphanGroup(db, schoolId, prev.split_group_id);
+        return null;
+      }
+
+      const prevGroups = db
+        .prepare(
+          `SELECT DISTINCT split_group_id FROM activities
+           WHERE school_id = ? AND id IN (${activityIds.map(() => '?').join(',')})
+             AND split_group_id IS NOT NULL`,
+        )
+        .all(schoolId, ...activityIds) as { split_group_id: number }[];
+
+      const next =
+        ((db
+          .prepare(
+            'SELECT COALESCE(MAX(split_group_id), 0) AS m FROM activities WHERE school_id = ?',
+          )
+          .get(schoolId) as { m: number }).m ?? 0) + 1;
+
+      const upd = db.prepare(
+        'UPDATE activities SET split_group_id = ? WHERE id = ? AND school_id = ?',
+      );
+      for (const id of activityIds) upd.run(next, id, schoolId);
+
+      for (const g of prevGroups) {
+        if (g.split_group_id === next) continue;
+        cleanupOrphanGroup(db, schoolId, g.split_group_id);
+      }
+      return next;
+    });
+
+    return trx();
+  },
+
+  /** Bir tek aktivitenin split grubunu sıfırlar (bağı koparır). */
+  clearSplitGroup(activityId: number): void {
+    const db = getDb();
+    const schoolId = schoolsRepo.getActiveId();
+    const trx = db.transaction(() => {
+      const prev = db
+        .prepare(
+          'SELECT split_group_id FROM activities WHERE id = ? AND school_id = ?',
+        )
+        .get(activityId, schoolId) as { split_group_id: number | null } | undefined;
+      db.prepare(
+        'UPDATE activities SET split_group_id = NULL WHERE id = ? AND school_id = ?',
+      ).run(activityId, schoolId);
+      if (prev?.split_group_id != null) {
+        cleanupOrphanGroup(db, schoolId, prev.split_group_id);
+      }
+    });
+    trx();
+  },
+};
+
+/** Bir grupta sadece tek üye kaldıysa onun da split_group_id'sini sıfırlar. */
+function cleanupOrphanGroup(
+  db: ReturnType<typeof getDb>,
+  schoolId: number,
+  groupId: number,
+): void {
+  const cnt = (
+    db
+      .prepare(
+        'SELECT COUNT(*) AS c FROM activities WHERE school_id = ? AND split_group_id = ?',
+      )
+      .get(schoolId, groupId) as { c: number }
+  ).c;
+  if (cnt < 2) {
+    db.prepare(
+      'UPDATE activities SET split_group_id = NULL WHERE school_id = ? AND split_group_id = ?',
+    ).run(schoolId, groupId);
+  }
+}

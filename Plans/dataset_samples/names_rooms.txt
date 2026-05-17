@@ -1,0 +1,39 @@
+101
+102
+103
+104
+105
+106
+107
+108
+201
+202
+203
+204
+205
+206
+301
+302
+303
+A-101
+A-102
+B-201
+Z-01
+Z-02
+Lab1
+Lab2
+Fizik Lab
+Kimya Lab
+Biyoloji Lab
+Bilgisayar Lab
+BT Sınıfı
+Müzik Sınıfı
+Resim Atölyesi
+Görsel Sanatlar Atölyesi
+Spor Salonu
+Konferans Salonu
+Çok Amaçlı Salon
+Kütüphane
+Bahçe
+Beden Salonu
+Yemekhane

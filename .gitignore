@@ -1,0 +1,6 @@
+node_modules/
+out/
+*.log
+.DS_Store
+Plans/dataset_samples/*.jsonl
+Plans/dataset_samples/train_test_split/

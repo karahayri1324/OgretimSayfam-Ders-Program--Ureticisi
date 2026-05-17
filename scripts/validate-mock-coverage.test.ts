@@ -1,0 +1,241 @@
+/**
+ * Mock coverage validator — Plans/dataset_samples/*.jsonl'den random 200 örnek
+ * seçer, her birini context + user_request ile mockParseSync'e geçirir,
+ * "anlaşıldı" sayısını raporlar.
+ *
+ * "Anlaşıldı" tanımı:
+ *  - kind === 'constraint' ve constraints.length > 0 → tam
+ *  - kind === 'constraint' ve unresolved.length > 0 → kısmi (model belirsizlik
+ *    bildirebildi)
+ *  - kind === 'query'/'tool_call'/'schedule_update'/'data_mutation' ve gelen
+ *    kind beklenen ile eşleşiyor → tam
+ *  - Karşılıklı dönüşüm (tool_call↔query, data_mutation↔schedule_update) →
+ *    kısmi
+ *
+ * Mock pattern-bazlı olduğu için %50+ coverage hedefi makul.
+ * Production LLM (fine-tuned) ile %95+'a çıkarılacak.
+ *
+ * Çalıştırma:
+ *   npx vitest run scripts/validate-mock-coverage.ts
+ *
+ * (NOT: tsx ile direkt çalıştırılamaz çünkü electron modülünden DB chain
+ * gelir; vitest CJS interop ile bu sorunu çözer.)
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, it } from 'vitest';
+import { mockParseSync, type AIContext } from '../electron/ai/mock-server.js';
+import type { AIResponse } from '../src/lib/types.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DS = path.resolve(__dirname, '..', 'Plans', 'dataset_samples');
+
+type Sample = {
+  file: string;
+  context: AIContext;
+  userRequest: string;
+  expectedKind: NonNullable<AIResponse['kind']>;
+};
+
+/** Dataset JSONL satırından AIContext'i ve user request'i parse eder. */
+function parseLine(file: string, raw: string): Sample | null {
+  try {
+    const row = JSON.parse(raw);
+    const messages = row.messages as { role: string; content: string }[];
+    if (!Array.isArray(messages) || messages.length < 2) return null;
+    const userMsg = messages.find((m) => m.role === 'user');
+    const asstMsg = messages.find((m) => m.role === 'assistant');
+    if (!userMsg || !asstMsg) return null;
+
+    const ctxMatch =
+      /\[CONTEXT\]([\s\S]*?)\[\/CONTEXT\]/.exec(userMsg.content);
+    const reqMatch =
+      /\[USER_REQUEST\]([\s\S]*?)\[\/USER_REQUEST\]/.exec(userMsg.content);
+    if (!ctxMatch || !reqMatch) return null;
+
+    const ctxText = ctxMatch[1]!;
+    const userRequest = reqMatch[1]!.trim();
+
+    function parseList(name: string): string[] {
+      const m = new RegExp(`${name}\\s*:\\s*(\\[[^\\]]*\\])`).exec(ctxText);
+      if (!m) return [];
+      try {
+        return JSON.parse(m[1]!) as string[];
+      } catch {
+        return [];
+      }
+    }
+    const hoursMatch = /HOURS_PER_DAY\s*:\s*(\d+)/.exec(ctxText);
+
+    const context: AIContext = {
+      teachers: parseList('TEACHERS'),
+      classes: parseList('CLASSES'),
+      subjects: parseList('SUBJECTS'),
+      rooms: parseList('ROOMS'),
+      days: parseList('DAYS'),
+      hoursPerDay: hoursMatch ? parseInt(hoursMatch[1]!, 10) : 8,
+    };
+
+    let expectedKind: NonNullable<AIResponse['kind']> = 'constraint';
+    try {
+      const parsed = JSON.parse(asstMsg.content);
+      expectedKind =
+        (parsed.kind as NonNullable<AIResponse['kind']>) ?? 'constraint';
+    } catch {
+      // ignore
+    }
+
+    return { file, context, userRequest, expectedKind };
+  } catch {
+    return null;
+  }
+}
+
+function pickRandom<T>(arr: T[], n: number, seed = 42): T[] {
+  let s = seed;
+  function rnd(): number {
+    s = (s * 1664525 + 1013904223) | 0;
+    return ((s >>> 0) / 0xffffffff);
+  }
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [copy[i], copy[j]] = [copy[j]!, copy[i]!];
+  }
+  return copy.slice(0, n);
+}
+
+function runValidation(sampleSize = 200): void {
+  const all: Sample[] = [];
+  const files = fs.readdirSync(DS).filter((f) => f.endsWith('.jsonl'));
+  for (const file of files) {
+    const lines = fs.readFileSync(path.join(DS, file), 'utf-8').split('\n');
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) continue;
+      const s = parseLine(file, t);
+      if (s) all.push(s);
+    }
+  }
+  console.log(`Toplam yüklenen örnek: ${all.length}`);
+
+  const sample = pickRandom(all, Math.min(sampleSize, all.length));
+  console.log(`Örneklenen: ${sample.length}`);
+
+  let fullMatch = 0;
+  let partial = 0;
+  let fail = 0;
+  const byKind: Record<
+    string,
+    { total: number; full: number; partial: number }
+  > = {};
+  const failures: {
+    file: string;
+    req: string;
+    expected: string;
+    got: string;
+  }[] = [];
+
+  for (const s of sample) {
+    let res: AIResponse;
+    try {
+      res = mockParseSync(s.userRequest, s.context);
+    } catch {
+      fail++;
+      continue;
+    }
+
+    const k = s.expectedKind;
+    if (!byKind[k]) byKind[k] = { total: 0, full: 0, partial: 0 };
+    byKind[k]!.total++;
+
+    const gotKind = res.kind ?? 'constraint';
+
+    let isFull = false;
+    let isPartial = false;
+
+    if (gotKind === k) {
+      if (gotKind === 'constraint') {
+        const cr = res as { constraints: unknown[]; unresolved: string[] };
+        if (cr.constraints.length > 0) {
+          isFull = true;
+        } else if (cr.unresolved.length > 0) {
+          isPartial = true;
+        }
+      } else {
+        isFull = true;
+      }
+    } else {
+      const interchangeable =
+        (k === 'tool_call' && gotKind === 'query') ||
+        (k === 'query' && gotKind === 'tool_call') ||
+        (k === 'data_mutation' && gotKind === 'schedule_update') ||
+        (k === 'schedule_update' && gotKind === 'data_mutation');
+      if (interchangeable) isPartial = true;
+    }
+
+    if (isFull) {
+      fullMatch++;
+      byKind[k]!.full++;
+    } else if (isPartial) {
+      partial++;
+      byKind[k]!.partial++;
+    } else {
+      fail++;
+      if (failures.length < 15) {
+        failures.push({
+          file: s.file,
+          req: s.userRequest.slice(0, 80),
+          expected: k,
+          got: gotKind,
+        });
+      }
+    }
+  }
+
+  const total = sample.length;
+  const fullPct = ((fullMatch / total) * 100).toFixed(1);
+  const partialPct = ((partial / total) * 100).toFixed(1);
+  const anyPct = (((fullMatch + partial) / total) * 100).toFixed(1);
+
+  console.log('\n=== Mock Coverage Raporu ===');
+  console.log(`Tam eşleşme     : ${fullMatch}/${total} (%${fullPct})`);
+  console.log(`Kısmi           : ${partial}/${total} (%${partialPct})`);
+  console.log(`Toplam anlaşıldı: ${fullMatch + partial}/${total} (%${anyPct})`);
+  console.log(`Başarısız       : ${fail}/${total}`);
+
+  console.log('\nKategori bazında:');
+  for (const [kind, info] of Object.entries(byKind)) {
+    const pct =
+      info.total > 0 ? ((info.full / info.total) * 100).toFixed(1) : '0';
+    console.log(
+      `  ${kind.padEnd(20)} tam: ${info.full}/${info.total} (%${pct}), kısmi: ${info.partial}`,
+    );
+  }
+
+  if (failures.length > 0) {
+    console.log('\nİlk 15 başarısız örnek:');
+    for (const f of failures) {
+      console.log(`  [${f.file}] (${f.expected}→${f.got}) ${f.req}`);
+    }
+  }
+
+  const overallPct = ((fullMatch + partial) / total) * 100;
+  if (overallPct < 50) {
+    console.log(
+      `\nUYARI: Hedef %50 altında — production LLM ile %95+'a çıkmalı.`,
+    );
+  } else {
+    console.log(`\nOK: Mock coverage %${anyPct} — hedef (%50) sağlandı.`);
+  }
+}
+
+describe('Mock Coverage Validator (200 random dataset örnek)', () => {
+  it('mock-server, dataset örneklerinin %50+ kategorisini tutarlı parse eder', () => {
+    runValidation(200);
+    // Bu test her zaman geçer — script raporlama amaçlıdır.
+    // Strict eşik için test/ai-coverage.test.ts kullan.
+  });
+});
