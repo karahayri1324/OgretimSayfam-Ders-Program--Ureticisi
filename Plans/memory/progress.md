@@ -91,8 +91,8 @@ Tüm büyük iş bitti. Uygulama production-deploy edilebilir durumda.
 
 ### Sonraki Adımlar (Kullanıcının İşi)
 
-1. Train.jsonl'yi (97K örnek) fine-tune sunucusunda kullan
-2. Önerilen: Qwen2.5-7B-Instruct LoRA, 2 epoch, lr=2e-4, batch=4
+1. Train.jsonl'yi (~170K örnek) fine-tune sunucusunda kullan
+2. Hedef base model: Qwen3-30B-A3B (MoE, 3B aktif parametre) + LoRA
 3. Best checkpoint'i deploy et
 4. Ayarlar → AI Endpoint URL'i production server'ına yönlendir
 5. Mock'tan production'a sorunsuz geçiş

@@ -66,7 +66,7 @@
 
 | İş | Sahip |
 |---|---|
-| Local LLM fine-tune (Qwen2.5-7B LoRA, 2 epoch) | Kullanıcı |
+| Local LLM fine-tune (Qwen3-30B-A3B LoRA) | Kullanıcı |
 | Production AI endpoint deploy | Kullanıcı |
 | Ayarlar → AI Endpoint URL bağla | Kullanıcı |
 | Windows NSIS + Mac DMG build | İhtiyaç olduğunda |

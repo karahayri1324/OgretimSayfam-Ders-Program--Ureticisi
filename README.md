@@ -95,7 +95,7 @@ Kullanıcı manuel UI'da yapabildiği **her şeyi** AI'a da yaptırabilir: kıs�
           ▼
 ┌─────────────────────────────────────────────────────────────┐
 │       Local LLM Server (kullanıcı sunucusunda)              │
-│       Qwen2.5-7B + LoRA (Türkçe fine-tuned)                 │
+│       Qwen3-30B-A3B + LoRA (Türkçe fine-tuned)                 │
 │       HTTP endpoint — sadece bu uygulamadan istek alır      │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -223,7 +223,7 @@ Detaylı tasarım belgeleri: [`Plans/`](Plans/) klasörü.
 - [x] **M7**: Test kapsama (110 test), TS strict, ESLint
 - [x] **M8**: AppImage paketleme, FET binary bundling
 - [x] **M9**: Disambiguation + out-of-scope + multi-step planning davranışları
-- [ ] **M10**: Local LLM fine-tune (Qwen2.5-7B + LoRA)
+- [ ] **M10**: Local LLM fine-tune (Qwen3-30B-A3B + LoRA)
 - [ ] **M11**: Drag-and-drop slot editing
 - [ ] **M12**: Multi-user / cloud sync (opsiyonel)
 

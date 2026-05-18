@@ -145,7 +145,8 @@ Plans/dataset_samples/
 
 (Kullanıcının kendi sunucusunda yapacağı, bilgi amaçlı)
 
-- **Base model adayları:** Trendyol/Trendyol-LLM-7b-chat, ytu-ce-cosmos/Turkish-Llama-8b, Qwen2.5-7B-Instruct (Türkçe iyi), Qwen3-4B-instruct (küçük donanım için)
+- **Hedef base model:** Qwen3-30B-A3B (Mixture-of-Experts, 30B toplam / 3B aktif parametre — Türkçe kalitesi yüksek, çıkarım hızı küçük model gibi)
+- **Diğer adaylar:** Trendyol/Trendyol-LLM-7b-chat, ytu-ce-cosmos/Turkish-Llama-8b, Qwen2.5-7B-Instruct
 - **LoRA fine-tuning:** Her parametreyi güncellemek yerine LoRA adapter — GPU memory tasarrufu
 - **Hyperparams (başlangıç önerisi):** lr=2e-4, batch=4, epochs=3, max_seq_len=2048
 - **Eval metric:** JSON schema validity rate + exact match rate + semantic equivalence (constraint type doğru mu?)

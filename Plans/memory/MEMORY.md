@@ -1,7 +1,7 @@
 - [Proje Final State (2026-05-17)](progress.md) — Production-ready: 99/99 test, 102K dataset, AppImage 125MB, 60 constraint, 5 AI kind
 - [Geliştirme fazları](../09_MILESTONES.md) — M0-M8 tamamlandı
 - [Test stratejisi](../10_TESTING.md) — 99 test, 10 dosya
-- [AI dataset](../03_AI_DATASET.md) — 97K train / 5K eval, fine-tune önerileri (Qwen2.5-7B LoRA, 2 epoch)
+- [AI dataset](../03_AI_DATASET.md) — ~200K örnek (87 kategori, dengeli), Qwen3-30B-A3B LoRA fine-tune planlanıyor
 - [Frontend UI](../06_FRONTEND_UI.md) — AI panel sağda, 13 sayfa, "Dersler/Ders Dağılımı" terminoloji
 - [Backend API](../07_BACKEND_API.md) — IPC handler'ları, yeni: applyMutations, applyScheduleUpdate, exportPdf
 - [DB schema](../08_DATABASE_SCHEMA.md) — v2 (split_group_id, day_hours), Documents/.../veri.db
