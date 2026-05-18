@@ -142,22 +142,18 @@ function findHours(text: string): number[] {
   return Array.from(found).sort((a, b) => a - b);
 }
 
-/** "max N", "en fazla N", "günde N saat" — tek bir sayı çıkar. */
 function findCount(text: string): number | null {
   const lower = text.toLocaleLowerCase('tr');
-  // "max 6", "en fazla 4", "günde 2"
   const re = /(?:max|en\s+fazla|en\s+cok|en\s+çok|gunde|günde|toplamda|haftada)\s+(\d{1,2})/;
   const m = lower.match(re);
   if (m) {
     const n = parseInt(m[1]!, 10);
     if (n > 0 && n <= 50) return n;
   }
-  // cardinal Türkçe sayı kelimesi
   for (const [word, n] of Object.entries(WORD_NUMBERS_CARDINAL)) {
     const pat = new RegExp(`\\b(?:max|en\\s+fazla|en\\s+cok|en\\s+çok|gunde|günde|haftada)\\s+${word}\\b`);
     if (pat.test(lower)) return n;
   }
-  // fallback: ilk geçen 1-2 haneli sayı
   const fallback = lower.match(/\b(\d{1,2})\b/);
   if (fallback) {
     const n = parseInt(fallback[1]!, 10);
@@ -166,22 +162,18 @@ function findCount(text: string): number | null {
   return null;
 }
 
-/** Aday adlardan input'la en iyi eşleşeni döner. {match, ambiguous} */
 function fuzzyMatch(text: string, candidates: string[]): { exact: string | null; matches: string[] } {
   if (candidates.length === 0) return { exact: null, matches: [] };
   const lowText = deburr(text);
   const hits: string[] = [];
   for (const c of candidates) {
     const lowC = deburr(c);
-    // tam isim geçiyor mu?
     if (lowText.includes(lowC)) {
       hits.push(c);
       continue;
     }
-    // adın herhangi bir kelimesi geçiyor mu?
     const parts = lowC.split(/\s+/).filter((p) => p.length >= 3);
     for (const part of parts) {
-      // kelime sınırıyla eşleş
       const re = new RegExp(`\\b${escapeRegex(part)}\\b`);
       if (re.test(lowText)) {
         if (!hits.includes(c)) hits.push(c);
@@ -219,13 +211,7 @@ function fuzzyMatchMany(text: string, candidates: string[]): string[] {
   return hits;
 }
 
-/**
- * "X'i Y olarak değiştir/yap" pattern'inden Y'yi çıkartır.
- * X = currentName parametresi (matched fuzzy). Y trimlenmiş olarak döner,
- * boş/eşitse null.
- */
 function extractRenameTarget(text: string, currentName: string): string | null {
-  // "X olarak ..." veya "X'i Y olarak" — Y kısmını yakala
   const re = new RegExp(
     `(?:${escapeRegex(currentName)})['"’ʼ]?[a-zçğıöşü]?[\\s]+(?:olarak|adini|adıni|adını|olarak\\s+yap|yeniden\\s+adlandir|yeniden\\s+adlandır)[\\s]+([\\wçğıöşüÇĞİÖŞÜ0-9._-]{1,40})`,
     'i',
@@ -314,7 +300,6 @@ const detectTeacherNotAvailableFullDay: Detector = (text, lower, ctx) => {
   };
 };
 
-/** 2) "X hoca Y günü Z. derste olmasın" (tekli veya çoklu saat) */
 const detectTeacherNotAvailableHours: Detector = (text, lower, ctx) => {
   const teacherTrigger = /(hoca|ogretmen|öğretmen)/.test(lower);
   if (!teacherTrigger) return null;
@@ -353,19 +338,14 @@ const detectTeacherNotAvailableHours: Detector = (text, lower, ctx) => {
   };
 };
 
-/** 7) "X hoca günde en fazla N ders" — Ya da X bir öğretmen adı ise direkt eşleşir. */
 const detectTeacherMaxHoursDaily: Detector = (text, lower, ctx) => {
-  // "haftada ... gün" pattern'i TEACHER_MAX_DAYS_PER_WEEK detector'ına ait —
-  // burada işlemeyelim.
   if (/(haftada|hafta).*(gun|gün)/.test(lower)) return null;
-  // Max-hours sözlük tetikleyicisi yoksa atla
   if (!/(gunde|günde|max|en\s+fazla|en\s+cok|en\s+çok)/.test(lower)) return null;
 
   const teacherTrigger = /(hoca|ogretmen|öğretmen)/.test(lower);
   const teacherMatch = fuzzyMatch(text, ctx.teachers);
   const subjectMatch = fuzzyMatch(text, ctx.subjects);
 
-  // Eğer "hoca" yoksa ve metin bir derse de eşleşiyorsa (öğretmen değil), subject pattern'e bırak.
   if (!teacherTrigger) {
     if (subjectMatch.exact) return null;
     if (!teacherMatch.exact && teacherMatch.matches.length === 0) return null;
@@ -400,7 +380,6 @@ const detectTeacherMaxHoursDaily: Detector = (text, lower, ctx) => {
   };
 };
 
-/** 6) "X dersi günde en fazla N saat" */
 const detectSubjectMaxHoursDaily: Detector = (text, lower, ctx) => {
   if (!/(ders|brans|branş)/.test(lower)) return null;
   if (!/(gunde|günde|haftada)/.test(lower) && !/(max|en\s+fazla|en\s+cok|en\s+çok)/.test(lower)) {
@@ -412,7 +391,6 @@ const detectSubjectMaxHoursDaily: Detector = (text, lower, ctx) => {
   if (n === null) return null;
 
   const { exact, matches } = fuzzyMatch(text, ctx.subjects);
-  // Eğer metin ders adıyla eşleşmiyorsa (sadece "ders" kelimesi geçiyorsa) bu detector'a uygun değil.
   if (!exact && matches.length === 0) return null;
 
   const klass = fuzzyMatch(text, ctx.classes);
@@ -439,13 +417,10 @@ const detectSubjectMaxHoursDaily: Detector = (text, lower, ctx) => {
   };
 };
 
-/** 4) "X dersi son derste olsun" */
 const detectSubjectLastHour: Detector = (text, lower, ctx) => {
   if (!/son\s+ders/.test(lower)) return null;
   if (!/(olsun|yapilsin|yapılsın|olmali|olmalı|olacak)/.test(lower)) {
-    // "son derste olmasın" yine SUBJECT_LAST_HOUR_OF_DAY değil — atla
     if (/(olmasin|olmasın|yok\b)/.test(lower)) return null;
-    // Aksi takdirde "son derste olsun" var sayalım ama açık ifade yoksa zayıf eşleşme
   }
 
   const { exact, matches } = fuzzyMatch(text, ctx.subjects);
@@ -476,20 +451,17 @@ const detectSubjectLastHour: Detector = (text, lower, ctx) => {
   };
 };
 
-/** 3) "X dersi Y günü olmasın/yok" */
 const detectSubjectNotOnDay: Detector = (text, lower, ctx) => {
   if (!/(ders|brans|branş)/.test(lower) && !findDays(text).length) return null;
   if (!/(olmasin|olmasın|yok\b|girmesin)/.test(lower)) return null;
-  if (/(hoca|ogretmen|öğretmen)/.test(lower)) return null; // teacher pattern'leri
+  if (/(hoca|ogretmen|öğretmen)/.test(lower)) return null;
   if (/son\s+ders/.test(lower)) return null;
 
   const days = findDays(text);
   if (days.length === 0) return null;
 
-  // Saat verilmişse bu CLASS_NOT_AVAILABLE değil ama yine SUBJECT_NOT_ON_DAY için saat
-  // gerekli değil — saat varsa farklı pattern eşleşmiş olur.
   const { exact, matches } = fuzzyMatch(text, ctx.subjects);
-  if (!exact && matches.length === 0) return null; // ders adayı yoksa muhtemelen başka pattern
+  if (!exact && matches.length === 0) return null;
 
   const klass = fuzzyMatch(text, ctx.classes);
   const weight = inferWeight(text);
@@ -515,7 +487,6 @@ const detectSubjectNotOnDay: Detector = (text, lower, ctx) => {
   };
 };
 
-/** 5) "X sınıfı Y günü Z. derste yok" */
 const detectClassNotAvailable: Detector = (text, lower, ctx) => {
   if (!/(sinif|sınıf)/.test(lower)) return null;
   if (!/(olmasin|olmasın|yok\b|kapali|kapalı|musait\s+degil|müsait\s+değil)/.test(lower)) return null;
@@ -554,7 +525,6 @@ const detectClassNotAvailable: Detector = (text, lower, ctx) => {
   };
 };
 
-/** 8) "X derliği Y günü kapalı" */
 const detectRoomNotAvailable: Detector = (text, lower, ctx) => {
   if (!/(derslik|derligi|derliği|oda|lab|salon)/.test(lower)) return null;
   if (!/(kapali|kapalı|olmasin|olmasın|yok\b|musait\s+degil|müsait\s+değil)/.test(lower)) return null;
@@ -594,9 +564,6 @@ const detectRoomNotAvailable: Detector = (text, lower, ctx) => {
   };
 };
 
-/**
- * Detector sırası önemli — daha spesifik olanlar (saat verilmiş teacher) önce gelmeli.
- */
 const detectors: Detector[] = [
   detectTeacherNotAvailableHours,
   detectTeacherMaxHoursDaily,
@@ -620,17 +587,6 @@ function failResponse(): AIResponse {
   };
 }
 
-/**
- * mockParse — text + context (+ optional history) alıp deterministik bir AIResponse üretir.
- *
- * Önce data_mutation / schedule_update / wizard guide / query pattern'lerini dener
- * (agentic mode); eşleşme olmazsa eski constraint detector zincirine düşer.
- * Pattern bulunmazsa düşük güvenli "anlayamadım" döner.
- *
- * `history`: önceki kullanıcı/asistan mesajları — multi-turn context için.
- * Mock şu an history'i kullanmıyor (deterministik pattern bazlı çalışır), ama
- * imza gerçek LLM client'la uyumlu kalsın diye burada.
- */
 export type MockHistoryEntry = {
   role: 'user' | 'assistant' | 'system';
   text: string;
@@ -656,85 +612,57 @@ export function mockParseSync(
   const lower = text.toLocaleLowerCase('tr');
   const lowerDeburr = deburr(lower);
 
-  // 0) Conversational wizard — kullanıcı yardım/devam istiyorsa context'e göre
-  //    TEK ADIM (1 soru, 1 örnek) ile yanıt ver. History'i de hesaba katar.
   const conv = detectConversationalWizard(lowerDeburr, context, history);
   if (conv) return conv;
 
-  // 0.4) "Kısıtlamayı gevşet" / "çözüm önerisi" — generate başarısız olduğunda
-  //      veya kullanıcı manuel istediğinde, ağırlığı yüksek kısıtlamaları
-  //      düşürmeyi öneren data_mutation döndürür.
   const relax = detectRelaxRequest(lowerDeburr, context);
   if (relax) return relax;
 
-  // 0.45) "Programı üret" / "şimdi başlat" / "150 saniyede üret" — AI doğrudan
-  //       FET'i tetikleyebilir. run_solver kindi döner, kullanıcı onay kartından
-  //       "Üretimi başlat" basınca generate IPC çalışır.
   const runSolver = detectRunSolverRequest(text, lowerDeburr, context);
   if (runSolver) return runSolver;
 
-  // 0.46) "9. sınıfların müzik derslerini X salonunda yap" — class-filtreli
-  //       subject-room. SUBJECT_PREFERRED_ROOM global olduğu için bu tip
-  //       filtreli istekler ACTIVITY_PREFERRED_ROOM olarak per-aktivite
-  //       eklenmeli. data_mutation ile add_activity_constraint çağırılır.
   const perClass = detectPerClassSubjectRoom(text, lowerDeburr, context);
   if (perClass) return perClass;
 
-  // 0.47) Split activity — "X sınıfı sanat saatinde 2 gruba bölünür"
   const split = detectSplitActivity(text, lowerDeburr, context);
   if (split) return split;
 
-  // 0.48) Slot editing — "9A salı 3. ders fizik olsun"
   const slot = detectSetTimetableSlot(text, lowerDeburr, context);
   if (slot) return slot;
 
-  // 0.49) Substitute teacher — "Ahmet hocanın 9A fiziğini Cem'e ver"
   const sub = detectSubstituteTeacher(text, lowerDeburr, context);
   if (sub) return sub;
 
-  // 0.50) Merge activities — "9A ve 9B beraber müzik dinleyecek"
   const merge = detectMergeActivities(text, lowerDeburr, context);
   if (merge) return merge;
 
-  // 0.51) Export — "9A programını PDF olarak indir"
   const exp = detectExport(text, lowerDeburr, context);
   if (exp) return exp;
 
-  // 0.52) Slot swap — "9A salı 3 ile cuma 5 yer değiştirsin"
   const swap = detectSwapSlots(text, lowerDeburr, context);
   if (swap) return swap;
 
-  // 0.53) Pair consecutive — "Fizik ve Matematik peş peşe olsun"
   const pair = detectPairConsecutive(text, lowerDeburr, context);
   if (pair) return pair;
 
-  // 0.54) Navigate — "Öğretmenler sayfasına geç"
   const nav = detectNavigate(text, lowerDeburr);
   if (nav) return nav;
 
-  // 0.5) Belirsiz kısa istek ("Öğretmen ekle", "Sil", "Ders ekle") — netleştir.
-  //      Data_mutation'dan önce çalışmalı, aksi takdirde "Öğretmen" adında
-  //      bir öğretmen yaratmaya çalışır (extractPersonName "Öğretmen"i ad sayar).
   const clarifyEarly = detectAmbiguousIntent(lowerDeburr, context);
   if (clarifyEarly) return clarifyEarly;
 
-  // 2) Genel sorgu — "tüm öğretmenleri listele", "kaç dersliğim var", "özet"
   const summary = detectSummaryOrListQuery(lowerDeburr, context, text);
   if (summary) return summary;
 
-  // 3) Data mutation — CRUD intent
   const dm = detectDataMutation(text, lower, lowerDeburr, context);
   if (dm) return dm;
 
-  // 4) Schedule update — "teneffüsleri uzat", "cuma 1 saat ekle"
   const su = detectScheduleUpdate(text, lower, lowerDeburr, context);
   if (su) return su;
 
-  // 5) Query pattern'leri — mock kısayol: tool'u çağır, query döndür
   const q = detectQuery(text, lower, lowerDeburr, context);
   if (q) return q;
 
-  // 6) Eski constraint detector zinciri
   for (const detect of detectors) {
     const hit = detect(text, lower, context);
     if (hit) {
@@ -753,8 +681,6 @@ export function mockParseSync(
     }
   }
 
-  // 7) Ek constraint detector'ları (sabah saatleri, son saat global, blok,
-  //    no-gaps, teacher-max-days, vb. — extendedDetectors).
   for (const detect of extendedDetectors) {
     const hit = detect(text, lower, context);
     if (hit) {
@@ -773,34 +699,12 @@ export function mockParseSync(
     }
   }
 
-  // 8) Belirsiz/eksik intent — kullanıcıya netleştirici soru sor (query)
   const clarify = detectAmbiguousIntent(lowerDeburr, context);
   if (clarify) return clarify;
 
   return failResponse();
 }
 
-/**
- * Conversational wizard — slop liste yerine ADIM ADIM konuşma.
- *
- * Tetikleyiciler:
- *   - "yardım", "başla", "nereden başlayalım", "ders programı yapalım"
- *   - "devam", "sonraki adım", "tamam sonra ne", "şimdi ne"
- *   - "bitti", "ekledim", "tamamladım"  (kullanıcı bir adımı bitirdiğinde)
- *
- * Context-aware sıra (boş → soru):
- *   1. subjects boş    → "Hangi dersler okutuluyor?"
- *   2. classes boş     → "Hangi sınıflarınız var?"
- *   3. rooms boş       → "Hangi dersliklerınız var?"
- *   4. teachers boş    → "Öğretmenler ve branşları?"
- *   5. activities yok  → "Ders dağıtımı: hangi sınıfa hangi ders kaç saat?"
- *   6. hepsi tamam     → "Kısıtlama var mı? Yoksa 'Programı Üret' diyebilirsiniz."
- *
- * History-aware: son asistan turunda hangi adımı sorduysak, kullanıcının
- * cevabına "süper, X eklendi" şeklinde acknowledge ekler.
- *
- * Yanıt KISA + TEK ADIM (1 soru, 1 örnek).
- */
 function detectConversationalWizard(
   lowerDeburr: string,
   ctx: AIContext,
@@ -850,7 +754,6 @@ function detectConversationalWizard(
   );
   if (!isFirst && !isCont) return null;
 
-  // History'den önceki adımı anla — son assistant mesajında hangi alanı sorduk?
   const lastAssistant = [...history].reverse().find((h) => h.role === 'assistant');
   const ack = buildWizardAck(lastAssistant?.text ?? '', ctx);
   const step = buildWizardNextStep(ctx);
@@ -863,10 +766,6 @@ function detectConversationalWizard(
   };
 }
 
-/**
- * Context'e bakarak SONRAKİ tek adımı soran kısa metni kurar.
- * Hiç boş alan yoksa "Kısıtlama söyleyin ya da Programı Üret" der.
- */
 function buildWizardNextStep(ctx: AIContext): string {
   if (ctx.subjects.length === 0) {
     return 'İlk olarak: okulunuzda hangi dersler okutuluyor? (Örnek: Matematik, Fizik, Türkçe, Tarih)';
@@ -880,7 +779,6 @@ function buildWizardNextStep(ctx: AIContext): string {
   if (ctx.teachers.length === 0) {
     return 'Öğretmenleri ekleyelim. Adlarını ve verdikleri dersi söyle. (Örnek: "Ahmet Yılmaz, Matematik öğretmeni ekle")';
   }
-  // Son adım: ders dağıtımı / kısıtlamalar
   return (
     'Şimdi ders dağıtımını yapalım: her sınıf hangi dersten kaç saat görecek? ' +
     '(Örnek: "9A sınıfına 5 saat Matematik ekle"). ' +
@@ -888,20 +786,13 @@ function buildWizardNextStep(ctx: AIContext): string {
   );
 }
 
-/**
- * Son asistan mesajının içeriğine göre kısa bir "süper" / "harika" acknowledgement
- * üretir. Eğer önceki turda "hangi dersler" sorduysak ve şimdi ctx.subjects dolu
- * görünüyorsa: "Süper, N ders eklendi: ...". Aksi takdirde boş string döner.
- */
 function buildWizardAck(prevAssistantText: string, ctx: AIContext): string {
   if (!prevAssistantText) return '';
-  // prev içerikten JSON parse edebiliyorsak answer içine bakalım
   let prevAnswer = prevAssistantText;
   try {
     const parsed = JSON.parse(prevAssistantText) as { answer?: string };
     if (parsed.answer) prevAnswer = parsed.answer;
   } catch {
-    // text düz string olabilir — sorun yok
   }
   const p = deburr(prevAnswer);
 
@@ -920,19 +811,11 @@ function buildWizardAck(prevAssistantText: string, ctx: AIContext): string {
   return '';
 }
 
-/**
- * Liste/özet sorularını yakala — "tüm öğretmenler", "kaç sınıfım var", "özet ver",
- * "sınıflar nasıl", "kaç derslik var", "şu anda durum ne".
- *
- * Gerçek LLM bu noktada context-builder DB'den çektiği listelerden cevap üretir;
- * mock tarafı doğrudan AIContext'ten çeker.
- */
 function detectSummaryOrListQuery(
   lowerDeburr: string,
   ctx: AIContext,
   text?: string,
 ): AIResponse | null {
-  // ÖNCELİK: "hangi sınıfların [DERS] dersi var" → tool_call (subject teachers)
   if (
     text &&
     /(hangi\s+sinif|hangi\s+sınıf)/.test(lowerDeburr) &&
@@ -949,7 +832,6 @@ function detectSummaryOrListQuery(
     }
   }
 
-  // "tüm öğretmenleri listele" / "öğretmenler kimler"
   if (
     /\b(tum|tüm)?\s*(ogretmenler|öğretmenler|hocalar)/.test(lowerDeburr) &&
     /(listele|kimler|hangileri|neler|nelerdir|var)/.test(lowerDeburr)
@@ -964,7 +846,6 @@ function detectSummaryOrListQuery(
       confidence: 0.95,
     };
   }
-  // "sınıflar nasıl" / "tüm sınıfları listele"
   if (
     /\b(siniflar|sınıflar)/.test(lowerDeburr) &&
     /(nasil|nasıl|listele|hangileri|neler|var)/.test(lowerDeburr)
@@ -979,9 +860,6 @@ function detectSummaryOrListQuery(
       confidence: 0.95,
     };
   }
-  // "kaç X var" / "kaç X tanımlı" — derslik / sınıf / öğretmen / branş / gün
-  // Not: lowerDeburr'de ğ→g olduğu için "dersliğim" → "dersligim" olur;
-  // "derslig" kökü ile yakalanır.
   if (/\b(kac|kaç)\b/.test(lowerDeburr)) {
     if (/(derslik|derslig|oda)/.test(lowerDeburr)) {
       return {
@@ -1034,14 +912,6 @@ function detectSummaryOrListQuery(
   return null;
 }
 
-/**
- * Belirsiz intent yakalandığında kullanıcıya netleştirici soru sor.
- *  - "öğretmen ekle" → ad iste
- *  - "sil" → hedef iste
- *  - "ders ekle" → sınıf+saat iste
- *  - "sınıf ekle" → ad iste
- *  - "derslik ekle" → ad+kapasite iste
- */
 function detectAmbiguousIntent(
   lowerDeburr: string,
   _ctx: AIContext,
@@ -1102,18 +972,7 @@ function detectAmbiguousIntent(
   return null;
 }
 
-// --- Query / schedule_update detectors -------------------------------------
 
-/**
- * Mock için query pattern'leri:
- *   - "X hoca hangi derslere", "X hocanın dersleri"  → getTeacherActivities
- *   - "X hangi sınıflara giriyor"                    → getTeacherActivities (sınıflar)
- *   - "[branş] kim veriyor", "[branş] hocası"        → getSubjectTeachers
- *   - "[sınıf] hangi dersler", "[sınıf] programı"    → getClassActivities
- *   - "kaç kısıtlama", "kısıtlamalar"                → countConstraints
- *   - "saat kaç", "program ayarları", "günde ders"   → getScheduleSettings
- *   - "kaç saat", "toplam saati"                     → getTeacherActivities (totalHours)
- */
 function detectQuery(
   text: string,
   lower: string,
@@ -1124,7 +983,6 @@ function detectQuery(
     text.trim().endsWith('?') ||
     /\b(hangi|kim|kac|kaç|neyi|nedir|ne\s+kadar|ne\s+zaman|nasil|nasıl)\b/.test(lowerDeburr);
 
-  // Kısıtlama sayısı
   if (
     /(kac|kaç)\s+kisitlama|kac\s+kisit/.test(lowerDeburr) ||
     /(kisitlamalar|kısıtlamalar)\s+(neler|listesi|kac)/.test(lowerDeburr) ||
@@ -1150,7 +1008,6 @@ function detectQuery(
     );
   }
 
-  // Program ayarları
   if (
     /(program\s+ayar|saat\s+kac|saat\s+kaç|gunde\s+(kac|kaç)\s+ders|kac\s+gun|kaç\s+gün|haftada\s+(kac|kaç)\s+gun|teneffus)/.test(
       lowerDeburr,
@@ -1172,7 +1029,6 @@ function detectQuery(
     );
   }
 
-  // Aktif kısıtlama listesi
   if (/(kisitlama|kısıtlama).*(liste|neler|var)/.test(lowerDeburr) && isQuestion) {
     const tool = executeTool('listActiveConstraints', {});
     return toQueryResponse(
@@ -1186,7 +1042,6 @@ function detectQuery(
     );
   }
 
-  // Sınıf programı — "[sınıf] hangi dersler", "[sınıf] programı"
   const klassMatch = fuzzyMatch(text, ctx.classes);
   if (
     klassMatch.exact &&
@@ -1223,7 +1078,6 @@ function detectQuery(
     );
   }
 
-  // Branşı veren öğretmenler — "X kim veriyor", "X hocası kim"
   const subjMatch = fuzzyMatch(text, ctx.subjects);
   if (
     subjMatch.exact &&
@@ -1245,7 +1099,6 @@ function detectQuery(
     );
   }
 
-  // Öğretmen aktiviteleri — "X hoca hangi dersler", "X kaç saat", "X hocanın dersleri"
   const teacherMatch = fuzzyMatch(text, ctx.teachers);
   if (
     teacherMatch.exact &&
@@ -1278,7 +1131,6 @@ function detectQuery(
     );
   }
 
-  // Birden çok öğretmen aday — fuzzy ambig
   if (
     teacherMatch.matches.length > 1 &&
     /(hangi|kac|kaç|ne)/.test(lowerDeburr)
@@ -1293,7 +1145,6 @@ function detectQuery(
   return null;
 }
 
-/** Mock için tool sonucunu query response'a çevirir. */
 function toQueryResponse(
   tool: ToolResult,
   formatAnswer: (result: unknown) => string,
@@ -1316,20 +1167,12 @@ function toQueryResponse(
   };
 }
 
-/**
- * Schedule update detector:
- *   - "teneffüsleri 20 dk uzat" → action='extend_breaks'
- *   - "Cuma'ya 1 saat ekle"     → action='add_hour_to_day'
- *   - "günde 9 saat olsun"      → action='set_hours_per_day'
- *   - "[gun] kaldir/cikar"      → action='remove_day'
- */
 function detectScheduleUpdate(
   text: string,
   lower: string,
   lowerDeburr: string,
   ctx: AIContext,
 ): AIResponse | null {
-  // "teneffüs/teneffus ... uzat" — break extension
   if (/(teneffus|teneffüs).*(uzat|artir|artır|ekle)/.test(lowerDeburr)) {
     const minutes = findCount(text) ?? 5;
     return {
@@ -1341,7 +1184,6 @@ function detectScheduleUpdate(
     };
   }
 
-  // "[gun] ... saat ekle" / "[gun]'a saat ekle"
   const days = findDays(text);
   if (days.length > 0 && /(saat|ders).*(ekle|ilave)/.test(lowerDeburr)) {
     const count = findCount(text) ?? 1;
@@ -1354,10 +1196,6 @@ function detectScheduleUpdate(
     };
   }
 
-  // "günde N saat" — hours per day set
-  // Branş/öğretmen kelimesi varsa bu schedule değil, constraint amaçlı.
-  // Bu yüzden burada subject/teacher token'ları varsa atla — constraint
-  // detector'ları (SUBJECT_MAX_HOURS_DAILY vb.) yakalayacak.
   if (/(gunde|günde).*(\d+).*(saat|ders).*(olsun|yap|olmali|olmalı)/.test(lowerDeburr)) {
     const hasSubjectMention = fuzzyMatch(text, ctx.subjects).matches.length > 0;
     const hasTeacherMention = fuzzyMatch(text, ctx.teachers).matches.length > 0;
@@ -1376,7 +1214,6 @@ function detectScheduleUpdate(
     }
   }
 
-  // "[gun] kaldir / cikar / iptal"
   if (days.length > 0 && /(kaldir|kaldır|cikar|çıkar|iptal|kaldirilsin|kaldırılsın)/.test(lowerDeburr)) {
     return {
       kind: 'schedule_update',
@@ -1387,7 +1224,6 @@ function detectScheduleUpdate(
     };
   }
 
-  // "[gun] ekle" — add day
   if (days.length > 0 && /(ekle|ilave)/.test(lowerDeburr) && !ctx.days.includes(days[0]!)) {
     return {
       kind: 'schedule_update',
@@ -1401,23 +1237,13 @@ function detectScheduleUpdate(
   return null;
 }
 
-// --- Data mutation detectors -----------------------------------------------
 
-/**
- * "Ahmet hocayı ekle", "10F sınıfını ekle", "Lab1 dersliği kapasite 25"...
- * Tek mesajdan çoklu action çıkartır:
- *  - "Ahmet hocaya 10F'ye 2 saat sanat dersi ekle" → 3 action (subject + link + activity)
- *  - "Mehmet hocayı sil" → 1 action (delete_teacher, destructive)
- *
- * Bu detector pattern-bazlı; gerçek LLM çok daha esnek olur. Test/dev için yeterli.
- */
 function detectDataMutation(
   text: string,
   lower: string,
   lowerDeburr: string,
   ctx: AIContext,
 ): AIResponse | null {
-  // 0) ÇOKLU silme: "Ahmet ve Ayşe öğretmenlerini sil"
   if (
     /(hoca|ogretmen|öğretmen)/.test(lower) &&
     /\b(sil|kaldir|kaldır)\b/.test(lowerDeburr) &&
@@ -1438,8 +1264,6 @@ function detectDataMutation(
     }
   }
 
-  // 0b) "Lab1 dersliğini 102 olarak değiştir/yeniden adlandır" — update_room
-  // Önce update_X pattern'lerini yakalamamız lazım (sil/ekle'den önce).
   if (
     /(derslik|oda|lab|salon)/.test(lower) &&
     /(yeniden\s+adlandir|yeniden\s+adlandır|olarak\s+degistir|olarak\s+değiştir|adini\s+degistir|adını\s+değiştir|olarak\s+yap)/.test(
@@ -1464,7 +1288,6 @@ function detectDataMutation(
     }
   }
 
-  // 0c) "9A'yı 9F olarak değiştir/yap" — update_class
   if (
     /(sinif|sınıf)/.test(lower) &&
     /(olarak\s+degistir|olarak\s+değiştir|olarak\s+yap|yeniden\s+adlandir|yeniden\s+adlandır|adini\s+degistir|adını\s+değiştir)/.test(
@@ -1489,7 +1312,6 @@ function detectDataMutation(
     }
   }
 
-  // 0d) "Ahmet hocayı Matematikten çıkar/al" — unlink_teacher_subject
   if (
     /(hoca|ogretmen|öğretmen)/.test(lower) &&
     /(cikar|çıkar|al(?:\s|$))/.test(lowerDeburr) &&
@@ -1513,8 +1335,6 @@ function detectDataMutation(
     }
   }
 
-  // 0e) "Tüm 9. sınıflara fizik 3 saat ekle" — kademe bazlı çoklu activity
-  // "Tüm 10. sınıflara matematik 5 saat ekle"
   const allYearMatch = /(tum|tüm)\s*(\d{1,2})\.?\s*(sinif|sınıf)/i.exec(text);
   if (
     allYearMatch &&
@@ -1522,7 +1342,6 @@ function detectDataMutation(
     /(ekle|ata|olsun|gir)/.test(lowerDeburr)
   ) {
     const yearNumber = allYearMatch[2]!;
-    // Context'teki "9X" sınıflarını filtrele
     const yearClasses = ctx.classes.filter((c) =>
       new RegExp(`^${yearNumber}[A-Za-zÇĞİÖŞÜçğıöşü]`).test(c),
     );
@@ -1546,7 +1365,6 @@ function detectDataMutation(
     }
   }
 
-  // "Cumartesi günü ekle" / "Pazar gününü ekle" — add_day (öncelik: gun kelimesi)
   if (/\b(gun|gün)\b/.test(lower) && /(ekle|ilave)/.test(lowerDeburr)) {
     const days = findDays(text);
     for (const d of days) {
@@ -1564,10 +1382,6 @@ function detectDataMutation(
       }
     }
   }
-  // "Pazartesi gününü sil", "Pazar gününü sil"
-  // "gün" / "günü" / "gününü" form'larını kapsayacak şekilde gevşetildi.
-  // ctx.days'de olmasa bile delete_day önerisi gönderilir — backend
-  // mutation-executor "bulunamadı" hatası ile düzgün kapanır.
   if (
     /\b(gun|gün)[uü]?n?[uü]?\b/.test(lower) &&
     /\b(sil|kaldir|kaldır|cikar|çıkar)\b/.test(lowerDeburr)
@@ -1588,7 +1402,6 @@ function detectDataMutation(
     }
   }
 
-  // Destructive — "X hocasını sil", "X öğretmenini sil"
   if (
     /(hoca|ogretmen|öğretmen)/.test(lower) &&
     /\b(sil|kaldir|kaldır|cikar|çıkar)\b/.test(lowerDeburr) &&
@@ -1609,7 +1422,6 @@ function detectDataMutation(
     }
   }
 
-  // "X dersini sil", "X branşını sil"
   if (
     /(ders|brans|branş)/.test(lower) &&
     /\b(sil|kaldir|kaldır)\b/.test(lowerDeburr) &&
@@ -1631,7 +1443,6 @@ function detectDataMutation(
     }
   }
 
-  // "X dersliğini sil" / "X odasını sil"
   if (
     /(derslik|oda|salon|lab)/.test(lower) &&
     /\b(sil|kaldir|kaldır)\b/.test(lowerDeburr) &&
@@ -1652,7 +1463,6 @@ function detectDataMutation(
     }
   }
 
-  // "X sınıfını sil"
   if (
     /(sinif|sınıf)/.test(lower) &&
     /\b(sil|kaldir|kaldır)\b/.test(lowerDeburr) &&
@@ -1673,7 +1483,6 @@ function detectDataMutation(
     }
   }
 
-  // "X dersliği ekle, kapasite N" → add_room
   if (
     /(derslik|oda|salon|lab)/.test(lower) &&
     /(ekle|ilave|olustur|oluştur)/.test(lowerDeburr)
@@ -1695,14 +1504,10 @@ function detectDataMutation(
     }
   }
 
-  // Çoklu: "X hocaya Y sınıfına Z saat W dersi ekle"
-  // Yeni: "Matematik 6 saat 9A,9B,9C sınıflarında olsun"
-  // "Matematik dersini 9A 9B 9C'ye 6 saat olarak ata"
   const mActivity =
     /(\d+)\s*saat\s+([\w\sığüşöçİĞÜŞÖÇ]+?)\s+(?:dersi|brans[ıi]|branş[ıi])/i.exec(
       text,
     ) ??
-    // Alternatif: "[Ders adı] [N saat] [Sınıflar]..."
     /([\w\sığüşöçİĞÜŞÖÇ]+?)\s+(\d+)\s*saat/i.exec(text) ??
     null;
   if (
@@ -1711,7 +1516,6 @@ function detectDataMutation(
       lowerDeburr,
     )
   ) {
-    // İki regex farklı capture gruplarına sahip — birleşik mantık:
     const hours = parseInt(
       mActivity[1] && /^\d+$/.test(mActivity[1]) ? mActivity[1] : mActivity[2]!,
       10,
@@ -1720,24 +1524,20 @@ function detectDataMutation(
       mActivity[1] && /^\d+$/.test(mActivity[1])
         ? mActivity[2]!
         : mActivity[1]!;
-    // Trim ve "dersi"/"branşı" gibi son ekleri temizle
     const subjectName = subjectNameRaw
       .trim()
       .replace(/\s+(dersi|brans[ıi]|branş[ıi])\s*$/i, '')
       .trim();
 
     const tm = fuzzyMatch(text, ctx.teachers);
-    // ÇOKLU SINIF: cümleden tüm class token'lerini çıkar
     const classTokens = extractClassTokens(text);
     const matchedClasses = classTokens.filter((tok) =>
       ctx.classes.some((c) => deburr(c) === deburr(tok)),
     );
-    // Eğer context'te eşleşen yoksa: yine de kullan (AI tarafı yeni ders ataması yapıyor olabilir)
     const targetClasses = matchedClasses.length > 0 ? matchedClasses : classTokens;
 
     if (targetClasses.length > 0 && hours > 0) {
       const actions: DataMutationAction[] = [];
-      // 1. ensure subject
       const subjectExists = ctx.subjects.some(
         (s) => deburr(s) === deburr(subjectName),
       );
@@ -1748,7 +1548,6 @@ function detectDataMutation(
           description: `"${subjectName}" dersini ekle (yoksa)`,
         });
       }
-      // 2. teacher link (optional)
       if (tm.exact) {
         actions.push({
           op: 'link_teacher_subject',
@@ -1756,7 +1555,6 @@ function detectDataMutation(
           description: `${tm.exact} öğretmenine "${subjectName}" yeterliliği ekle`,
         });
       }
-      // 3. her sınıf için ayrı activity
       for (const className of targetClasses) {
         actions.push({
           op: 'add_activity',
@@ -1778,16 +1576,13 @@ function detectDataMutation(
     }
   }
 
-  // "X hocasını ekle" / "X öğretmeni ekle, branşı Y"
   if (
     /(hoca|ogretmen|öğretmen)/.test(lower) &&
     /(ekle|ilave|olustur|oluştur)/.test(lowerDeburr) &&
     !/saat/.test(lower)
   ) {
-    // teacher name candidate — context'te varsa atla, yoksa user'ın yazdığı isim al
     const tmExisting = fuzzyMatch(text, ctx.teachers);
     if (tmExisting.exact) {
-      // zaten var → idempotent skip
       return buildMutation(
         [
           {
@@ -1847,7 +1642,6 @@ function detectDataMutation(
         `${subjectNames.length} branş eklenecek: ${subjectNames.join(', ')}.`,
       );
     }
-    // Tek branş — eski davranış
     if (subjectNames.length === 1) {
       return buildMutation(
         [
@@ -1875,21 +1669,17 @@ function detectDataMutation(
     }
   }
 
-  // "X sınıfı ekle" / "10F, 11A, 12FEN sınıflarını ekle" / "9A 9B 9C 9D ekle"
-  // Sınıf adından kademe (year) otomatik çıkarılır: "10F" → "10. Sınıf"
   if (
     /(sinif|sınıf|şube|sube)/.test(lower) &&
     /(ekle|ilave|olustur|oluştur|ayir|ayır)/.test(lowerDeburr)
   ) {
     const names = extractClassTokens(text);
     if (names.length > 0) {
-      // Cümlede açıkça belirtilmiş bir kademe var mı? ("10. sınıfa ekle")
       const explicitYearMatch =
         /(\d{1,2})\.?\s*(kademe|sınıfa|sinifa|sınıfta|sinifta)/i.exec(text);
       const explicitYear = explicitYearMatch ? `${explicitYearMatch[1]}. Sınıf` : null;
 
       const actions: DataMutationAction[] = names.map((name) => {
-        // Adın başındaki rakamları yakalayıp kademe çıkar: 10F → 10. Sınıf
         const yearFromName = /^(\d{1,2})/.exec(name);
         const yearName =
           explicitYear ?? (yearFromName ? `${yearFromName[1]}. Sınıf` : undefined);
@@ -1924,7 +1714,6 @@ function buildMutation(actions: DataMutationAction[], explanation: string): AIRe
 function extractQuotedOrAfter(text: string, keyword: RegExp): string | null {
   const quoted = text.match(/['"`]([^'"`]{1,40})['"`]/);
   if (quoted) return quoted[1]!.trim();
-  // "Lab1 dersliği" pattern — keyword'den ÖNCE 1-3 kelime
   const beforeRe = new RegExp(
     `([\\wığüşöçİĞÜŞÖÇ.-]+(?:\\s+[\\wığüşöçİĞÜŞÖÇ.-]+){0,2})\\s+${keyword.source}`,
     'i',
@@ -1932,50 +1721,21 @@ function extractQuotedOrAfter(text: string, keyword: RegExp): string | null {
   const m = text.match(beforeRe);
   if (m && m[1]) {
     const candidate = m[1].trim();
-    // genel/yapısal kelimelerse atla
     if (/^(yeni|ek|bir|bu|şu|o)$/i.test(candidate)) return null;
     return candidate;
   }
   return null;
 }
 
-/**
- * Türkçe insan adı çıkarımı: "Ahmet Yılmaz öğretmeni ekle" → "Ahmet Yılmaz".
- * Çok basit heuristic — büyük harfle başlayan ardışık 2 kelime.
- */
 function extractPersonName(text: string): string | null {
   const m = text.match(/([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+)+)/);
   if (m && m[1]) return m[1].trim();
-  // tek kelime: "Ahmet öğretmen ekle"
   const m2 = text.match(/([A-ZÇĞİÖŞÜ][a-zçğıöşü]{2,})/);
   if (m2 && m2[1]) return m2[1].trim();
   return null;
 }
 
-/**
- * Sınıf adı: "10F", "11FEN", "9-A", "9A", "11SAY" gibi
- */
-/** Cümleden birden fazla sınıf adı çıkarır (virgül/boşluk ayrımı destekli).
- *  Örnek: "9A, 9B, 9C sınıflarını ekle" → ["9A","9B","9C"]
- *         "10F sınıfı ekle" → ["10F"]
- *         "11FEN ve 11SAY ekle" → ["11FEN","11SAY"]
- */
-/**
- * Çoklu branş çıkarımı:
- *   "Matematik, Fizik, Türkçe derslerini ekle" → ["Matematik","Fizik","Türkçe"]
- *   "Matematik ve Fizik ekle"                  → ["Matematik","Fizik"]
- *   "Tarih ve Coğrafya derslerini sisteme ekle"→ ["Tarih","Coğrafya"]
- *
- * Strateji:
- *   1. Cümleden "ders/branş/ekle" anahtar kelimelerinden ÖNCEKİ kısmı al.
- *   2. Bu kısmı virgül ve "ve"/"ile" ile böl.
- *   3. Her token için: context'te birebir eşleşme varsa onu al; yoksa
- *      stop-word filtresinden geçer ve büyük harfle başlayan ise alınır.
- */
 function extractSubjectList(text: string, ctx: AIContext): string[] {
-  // Anchor: "X ekle/ilave/oluştur"; ya da "X dersini/derslerini/branşını ekle"
-  // Önce "dersleri/derslerini/dersini/branşını/branşlarını" gibi belirleyici
-  // sufix'i bul, ondan önceki kısmı al.
   const anchorRe =
     /^(.+?)\s+(?:dersler(?:i(?:ni)?)?|dersini|dersi|brans(?:lar)?[ıi](?:n[ıi])?|branş(?:lar)?ı(?:nı)?)\s+(?:ekle|ilave|olustur|oluştur|sisteme\s+ekle|programa\s+ekle)/i;
   let head: string;
@@ -1983,23 +1743,19 @@ function extractSubjectList(text: string, ctx: AIContext): string[] {
   if (m) {
     head = m[1]!;
   } else {
-    // "X ekle" — daha gevşek; "ekle" kelimesine kadar kısmı al
     const re2 = /^(.+?)\s+(?:ekle|ilave|olustur|oluştur)\b/i;
     const m2 = re2.exec(text);
     if (!m2) return [];
     head = m2[1]!;
   }
 
-  // "Yeni" / "Sisteme" / "Programa" gibi giriş kelimelerini temizle
   head = head.replace(/^\s*(yeni|sisteme|programa|okula|musfredata|müfredata|ders\s+olarak)\s+/i, '').trim();
 
-  // Virgül, noktalı virgül, "ve", "ile" ile böl
   const parts = head
     .split(/\s*,\s*|\s+ve\s+|\s+ile\s+|\s*;\s*/i)
     .map((p) => p.trim())
     .filter((p) => p.length > 0);
 
-  // STOP-WORD filtresi — eğitim domain'inde anlamsız tokenları at
   const STOP = new Set([
     'yeni', 'okula', 'okulda', 'okulumuza', 'okulumuzda', 'sisteme', 'programa',
     'müfredata', 'mufredata', 'ders', 'dersi', 'dersini', 'dersleri',
@@ -2011,12 +1767,10 @@ function extractSubjectList(text: string, ctx: AIContext): string[] {
   const seen = new Set<string>();
   for (const raw of parts) {
     let token = raw.trim();
-    // Trailing "dersi/branşı" gibi ekleri temizle
     token = token.replace(/\s+(dersi(?:ni)?|dersleri(?:ni)?|brans[ıi](?:n[ıi])?|branş[ıi](?:n[ıi])?)\s*$/i, '').trim();
     if (!token) continue;
     if (STOP.has(deburr(token).toLowerCase())) continue;
 
-    // 1. Context'te eşleşme var mı? (Var ise canonical adını kullan)
     const ctxMatch = ctx.subjects.find((s) => deburr(s) === deburr(token));
     if (ctxMatch) {
       if (!seen.has(ctxMatch)) {
@@ -2026,9 +1780,7 @@ function extractSubjectList(text: string, ctx: AIContext): string[] {
       continue;
     }
 
-    // 2. Yeni branş — sadece isim olarak görünüyorsa al (sayı/sembol değil)
     if (/^[A-ZÇĞİÖŞÜa-zçğıöşü][A-ZÇĞİÖŞÜa-zçğıöşü0-9 .'-]{1,30}$/.test(token)) {
-      // Title case'e çevir — kullanıcı "matematik" yazdı diye DB'ye "matematik" yazmayalım
       const titled = token
         .split(/\s+/)
         .map((w) => (w.length > 1 ? w[0]!.toLocaleUpperCase('tr') + w.slice(1).toLocaleLowerCase('tr') : w))
@@ -2049,7 +1801,6 @@ function extractClassTokens(text: string): string[] {
   let m: RegExpExecArray | null;
   while ((m = regex.exec(text)) !== null) {
     const raw = m[1].trim();
-    // Pür sayı (örn. "5") veya çok kısa (sadece 2 karakter ama harfsiz) → atla
     if (/^\d+$/.test(raw)) continue;
     if (seen.has(raw)) continue;
     seen.add(raw);
@@ -2102,13 +1853,8 @@ function groupByDay(slots: Slot[]): Record<string, number[]> {
   return out;
 }
 
-/** TipleConstraintType kullanmayı dışarıya açık tutalım (helper). */
 export type { ConstraintType };
 
-// ---------------------------------------------------------------------------
-// Genişletilmiş constraint detector'ları (ek pattern seti)
-// mockParseSync zinciri arkasından kullanılır (extendedDetectors loop).
-// ---------------------------------------------------------------------------
 
 const detectSubjectLastHourGlobal: Detector = (text, lower, ctx) => {
   if (!/(son\s+saat|son\s+ders|son\s+saate)/.test(lower)) return null;
@@ -2277,7 +2023,6 @@ const detectSubjectBlock: Detector = (text, lower, ctx) => {
   };
 };
 
-/** "Tuncay günün son saatinde olmasın" → TEACHER_NOT_LAST_HOUR */
 const detectTeacherNotLastHour: Detector = (text, lower, ctx) => {
   if (!/(son\s+saat|son\s+ders)/.test(lower)) return null;
   if (!/(olmasin|olmasın|girmesin|yok\b|musait\s+degil|müsait\s+değil)/.test(lower))
@@ -2297,7 +2042,6 @@ const detectTeacherNotLastHour: Detector = (text, lower, ctx) => {
   };
 };
 
-/** "X öğretmeni ilk saatte olmasın" → TEACHER_NOT_FIRST_HOUR */
 const detectTeacherNotFirstHour: Detector = (text, lower, ctx) => {
   if (!/(ilk\s+saat|ilk\s+ders|birinci\s+saat|birinci\s+ders)/.test(lower))
     return null;
@@ -2318,7 +2062,6 @@ const detectTeacherNotFirstHour: Detector = (text, lower, ctx) => {
   };
 };
 
-/** "X için Y ilk saatte yapılmasın" → SUBJECT_NOT_FIRST_HOUR */
 const detectSubjectNotFirstHour: Detector = (text, lower, ctx) => {
   if (!/(ilk\s+saat|ilk\s+ders|birinci\s+saat|birinci\s+ders)/.test(lower))
     return null;
@@ -2337,7 +2080,6 @@ const detectSubjectNotFirstHour: Detector = (text, lower, ctx) => {
   };
 };
 
-/** "X sınıfı günde en fazla N ders alsın" → CLASS_MAX_HOURS_DAILY */
 const detectClassMaxHoursDaily: Detector = (text, lower, ctx) => {
   if (!/(sinif|sınıf)/.test(lower)) return null;
   if (!/(gunde|günde|haftada)/.test(lower) && !/(max|en\s+fazla)/.test(lower)) {
@@ -2359,7 +2101,6 @@ const detectClassMaxHoursDaily: Detector = (text, lower, ctx) => {
   };
 };
 
-/** "Tüm öğretmenler haftada en fazla N gün gelsin" → ALL_TEACHERS_MAX_DAYS_PER_WEEK */
 const detectAllTeachersMaxDays: Detector = (_text, lower) => {
   if (
     !/(tum\s+(hoca|ogretmen|öğretmen)|tüm\s+(hoca|ogretmen|öğretmen)|butun\s+(hoca|ogretmen|öğretmen)|bütün\s+(hoca|ogretmen|öğretmen))/.test(
@@ -2398,16 +2139,6 @@ const extendedDetectors: Detector[] = [
   detectAllTeachersMaxDays,
 ];
 
-/**
- * "Çözüm bulunamadı, kısıtlamayı gevşet" → context.constraints içindeki
- * weight=100 olan en agresif 3-5 kısıtlamayı 70'e düşürmeyi öneren
- * data_mutation döndürür. Kullanıcı kartlardan tek tek seçip onaylar.
- *
- * Tetikleyiciler:
- *   - "kısıtlamayı/kuralı/önemi gevşet", "ağırlık düşür", "esnet"
- *   - "çözüm bulunamadı", "neden çözülmedi", "fet hata", "öneri", "çözemedi"
- *   - "programı üret çalışmadı / olmadı"
- */
 function detectRelaxRequest(
   lowerDeburr: string,
   ctx: AIContext,
@@ -2434,7 +2165,6 @@ function detectRelaxRequest(
     };
   }
 
-  // En "katı" 5 kısıtlamayı al (weight desc, type uzunluğu desc — daha spesifik olanlar önce).
   const top = [...list]
     .sort(
       (a, b) => b.weight - a.weight || b.type.length - a.type.length,
@@ -2517,26 +2247,11 @@ function detectRunSolverRequest(
   };
 }
 
-/**
- * "9. sınıfların müzik derslerini Bilgisayar salonunda yap" gibi
- * class-filtreli subject-room atamaları.
- *
- * Algoritma:
- *   1. Sınıf yılı parse et: "9." / "9. sınıf" / "9. sınıflar" / "10. sınıfların"
- *      → yearPrefix = "9" / "10"
- *      veya tek sınıf: "9A", "10F" → class adı
- *   2. Subject fuzzy match (ctx.subjects)
- *   3. Room fuzzy match (ctx.rooms)
- *   4. data_mutation döndür: tek action add_activity_constraint, filter ile
- *
- * Tetikleyici: salonunda/dersliginde/odasinda/labında/atölyesinde + yap/olsun
- */
 function detectPerClassSubjectRoom(
   text: string,
   lowerDeburr: string,
   ctx: AIContext,
 ): AIResponse | null {
-  // Trigger
   const isRoomAssign =
     /(salonunda|salonda|dersliginde|dersliğinde|odasinda|odasında|labinda|labında|atolyesinde|atölyesinde|laboratuvarinda|laboratuvarında)/.test(
       lowerDeburr,
@@ -2544,7 +2259,6 @@ function detectPerClassSubjectRoom(
   if (!isRoomAssign) return null;
   if (/(olmasin|olmasın|yok\b|kapali|kapalı)/.test(lowerDeburr)) return null;
 
-  // Sınıf filtresi tespit et — önce tek-sınıf (9A, 10F), sonra yıl (9., 10. sınıf)
   let filterClass: string | null = null;
   let filterClassYear: string | null = null;
 
@@ -2556,7 +2270,6 @@ function detectPerClassSubjectRoom(
     if (yr) filterClassYear = yr[1]!;
   }
 
-  // En az bir filtre olmalı — yoksa zaten global SUBJECT_PREFERRED_ROOM yeter
   if (!filterClass && !filterClassYear) return null;
 
   const subj = fuzzyMatch(text, ctx.subjects);
@@ -2596,9 +2309,6 @@ function detectPerClassSubjectRoom(
   };
 }
 
-/**
- * "X sınıfı sanat saatinde 2 gruba bölünür: görsel sanatlar ve müzik"
- */
 function detectSplitActivity(
   text: string,
   lowerDeburr: string,
@@ -2611,7 +2321,6 @@ function detectSplitActivity(
     /aynı\s+saatte\s+(farkli|farklı)\s+ders/.test(text.toLocaleLowerCase('tr'));
   if (!isSplit) return null;
 
-  // Class
   const classMatch = lowerDeburr.match(/\b(\d{1,2})\s*([a-z])\b/);
   let className: string | null = null;
   if (classMatch) {
@@ -2622,10 +2331,8 @@ function detectSplitActivity(
   }
   if (!className) return null;
 
-  // En az 2 subject çıkar
   const subjects = extractSubjectList(text, ctx);
   if (subjects.length < 2) {
-    // Tek subject geçmiş ama 2+ grup denmiş — netleştir
     return {
       kind: 'query',
       answer: `${className} sınıfını gruplara bölecek dersleri tek tek söyle. Örnek: "Görsel Sanatlar ve Müzik"`,
@@ -2658,9 +2365,6 @@ function detectSplitActivity(
   };
 }
 
-/**
- * "9A salı 3. ders fizik olsun" / "9A pazartesi 1. ders matematik kilitle"
- */
 function detectSetTimetableSlot(
   text: string,
   lowerDeburr: string,
@@ -2673,12 +2377,10 @@ function detectSetTimetableSlot(
     /(slot|hucre|hücre).*?(olsun|degis|değiş)/.test(lowerDeburr);
   if (!hasSlotKeywords) return null;
 
-  // Class
   const classMatch = lowerDeburr.match(/\b(\d{1,2})\s*([a-z])\b/);
   if (!classMatch) return null;
   const className = `${classMatch[1]}${classMatch[2]!.toUpperCase()}`;
 
-  // Day
   let day: string | null = null;
   for (const [key, full] of Object.entries(DAY_NORMALIZE)) {
     if (lowerDeburr.includes(key)) {
@@ -2688,13 +2390,11 @@ function detectSetTimetableSlot(
   }
   if (!day) return null;
 
-  // Hour
   const hourMatch = text.match(/(\d{1,2})\.?\s*(?:ders|saat)/);
   if (!hourMatch) return null;
   const hour = parseInt(hourMatch[1]!, 10);
   if (!Number.isFinite(hour) || hour < 1 || hour > 20) return null;
 
-  // Subject
   const subj = fuzzyMatch(text, ctx.subjects);
   if (!subj.exact) return null;
 
@@ -2730,11 +2430,9 @@ function detectSubstituteTeacher(
   if (!classMatch) return null;
   const className = `${classMatch[1]}${classMatch[2]!.toUpperCase()}`;
 
-  // Subject
   const subj = fuzzyMatch(text, ctx.subjects);
   if (!subj.exact) return null;
 
-  // 2 teacher — eski + yeni
   const teachers = ctx.teachers
     .map((t) => {
       const escapedName = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -2747,7 +2445,7 @@ function detectSubstituteTeacher(
     .filter((x): x is string => x !== null);
   if (teachers.length < 1) return null;
 
-  const newTeacher = teachers[teachers.length - 1]!; // son geçen = yeni
+  const newTeacher = teachers[teachers.length - 1]!;
   const description = `${className} × ${subj.exact} → öğretmen: ${newTeacher}`;
 
   return {
@@ -2771,9 +2469,6 @@ function detectSubstituteTeacher(
   };
 }
 
-/**
- * "9A ve 9B beraber müzik dinleyecek" — multi-class shared activity
- */
 function detectMergeActivities(
   text: string,
   lowerDeburr: string,
@@ -2785,7 +2480,6 @@ function detectMergeActivities(
     );
   if (!hasMerge) return null;
 
-  // Multiple classes
   const classRegex = /\b(\d{1,2}\s*[a-z])\b/g;
   const matches = [...lowerDeburr.matchAll(classRegex)];
   if (matches.length < 2) return null;
@@ -2821,9 +2515,6 @@ function detectMergeActivities(
   };
 }
 
-/**
- * "9A programını PDF olarak indir" / "Tüm programı excel'e aktar"
- */
 function detectExport(
   text: string,
   lowerDeburr: string,
@@ -2838,7 +2529,6 @@ function detectExport(
   if (/excel|xls|xlsx/.test(lowerDeburr)) format = 'excel';
   else if (/html/.test(lowerDeburr)) format = 'html';
 
-  // Sınıf scope (opsiyonel)
   let cls: string | null = null;
   const classMatch = lowerDeburr.match(/\b(\d{1,2})\s*([a-z])\b/);
   if (classMatch) {
@@ -2879,10 +2569,6 @@ function parseLeadingInt(text: string): number | null {
   return n;
 }
 
-/**
- * "9A salı 3 ile cuma 5 yer değiştirsin" → swap_timetable_slots
- * İki (class, day, hour) çiftini parse eder.
- */
 function detectSwapSlots(
   text: string,
   lowerDeburr: string,
@@ -2893,11 +2579,9 @@ function detectSwapSlots(
     /(ile|le|la).*(yer\s+degis|yer\s+değiş)/.test(lowerDeburr);
   if (!hasSwap) return null;
 
-  // İki sınıf + iki gün + iki saat çıkar
   const classMatches = [...lowerDeburr.matchAll(/\b(\d{1,2})\s*([a-z])\b/g)];
   if (classMatches.length < 1) return null;
 
-  // Gün eşleştirme
   const days: string[] = [];
   for (const [key, full] of Object.entries(DAY_NORMALIZE)) {
     if (lowerDeburr.includes(key)) {
@@ -2906,13 +2590,11 @@ function detectSwapSlots(
   }
   if (days.length < 2) return null;
 
-  // Saat eşleştirme
   const hourMatches = [...text.matchAll(/(\d{1,2})\.?\s*(?:ders|saat)/g)];
   if (hourMatches.length < 2) return null;
   const hours = hourMatches.slice(0, 2).map((m) => parseInt(m[1]!, 10));
   if (hours.some((h) => !Number.isFinite(h) || h < 1 || h > 20)) return null;
 
-  // İkinci sınıf yoksa aynısı varsay (aynı sınıf içi swap)
   const class1 = `${classMatches[0]![1]}${classMatches[0]![2]!.toUpperCase()}`;
   const class2 =
     classMatches.length >= 2
@@ -2962,7 +2644,6 @@ function detectPairConsecutive(
   } else if (ctx.classes.length === 1) {
     className = ctx.classes[0]!;
   } else {
-    // Sınıf belli değilse netleştir
     return {
       kind: 'query',
       answer: `'${subjects[0]}' ve '${subjects[1]}' hangi sınıf için peş peşe olsun? Örnek: "9A için Fizik ve Matematik peş peşe"`,
@@ -2992,15 +2673,7 @@ function detectPairConsecutive(
   };
 }
 
-/**
- * "Öğretmenler sayfasına geç" → navigate_to
- *
- * SIKI: hem "sayfa/ekran/page" gibi navigation anchor hem de uygun verb gerekli.
- * Aksi takdirde "Beden eğitimi son derste olsun" veya "Kaç dersliğim var?"
- * gibi başka intent'ler false positive olur.
- */
 function detectNavigate(text: string, lowerDeburr: string): AIResponse | null {
-  // Anchor: explicit "sayfa" veya "ekran" veya "page" + navigation verb
   const hasPageAnchor =
     /\b(sayfa(?:ya|sina|sina|sını|sinin|sının|si|sı)?|ekran(?:a|ina|ına|ini|ını|i|ı)?|page)\b/.test(
       lowerDeburr,
@@ -3012,7 +2685,6 @@ function detectNavigate(text: string, lowerDeburr: string): AIResponse | null {
     );
   if (!hasNavVerb) return null;
 
-  // CRUD niyeti varsa atla — "öğretmen sayfasına yeni ekle" gibi
   if (/\b(ekle|sil|kaldir|kaldır|guncelle|güncelle|olustur|oluştur)\b/.test(lowerDeburr)) {
     return null;
   }

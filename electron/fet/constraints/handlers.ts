@@ -211,14 +211,9 @@ function teachersMaxGapsPerWeek(c: Constraint, ctx: BuilderContext): HandlerResu
   }];
 }
 
-// ---------- sınıf handler'ları ----------
 
 function classNotAvailable(c: Constraint, ctx: BuilderContext): HandlerResult {
   const cls = getStr(c.params, 'class');
-  // class alanı boşsa "tüm sınıflar için" niyeti varsayılır — her sınıf
-  // için ayrı ConstraintStudentsSetNotAvailableTimes üretilir.
-  // (Eskiden burada "class alanı boş" diye atlanıyordu, "Cuma kısa gün"
-  // gibi global niyetler için bu yanlıştı.)
   const targetClassNames: string[] = cls
     ? [cls]
     : ctx.classes.map((k) => k.name);
@@ -269,9 +264,7 @@ function classMaxGapsPerWeek(c: Constraint, ctx: BuilderContext): HandlerResult 
   }];
 }
 
-// ---------- ders/aktivite handler'ları ----------
 
-/** subject (+ optional class) eşleşen Activity DB id'lerini bulur. */
 function activitiesForSubject(
   ctx: BuilderContext,
   subjectName: string,
@@ -296,7 +289,7 @@ function subjectNotOnDay(c: Constraint, ctx: BuilderContext): HandlerResult {
   const subj = getStr(c.params, 'subject');
   if (!subj) return skip(ctx, c, 'subject alanı boş');
   if (!ctx.subjectByName.has(subj)) return skip(ctx, c, `Bilinmeyen ders: "${subj}"`);
-  const cls = getStr(c.params, 'class'); // null olabilir
+  const cls = getStr(c.params, 'class');
   if (cls && !ctx.classByName.has(cls)) return skip(ctx, c, `Bilinmeyen sınıf: "${cls}"`);
   const days = getArr(c.params, 'days')
     .filter((d): d is string => typeof d === 'string')
@@ -313,7 +306,6 @@ function subjectNotOnDay(c: Constraint, ctx: BuilderContext): HandlerResult {
     return skip(ctx, c, `Eşleşen aktivite bulunamadı (subject="${subj}", class="${cls ?? '*'}")`);
   }
 
-  // Pozitif slot listesi: yasaklanmayan günlerin tüm saatleri
   const allowedSlots: FetSlot[] = [];
   for (const d of ctx.days) {
     if (days.includes(d.name)) continue;
@@ -322,7 +314,6 @@ function subjectNotOnDay(c: Constraint, ctx: BuilderContext): HandlerResult {
     }
   }
 
-  // Her Activity için ConstraintActivityPreferredTimeSlots
   const preferredAllowed = toPreferredSlots(allowedSlots);
   return fetIds.map(id => ({
     section: 'time' as const,
@@ -360,7 +351,6 @@ function subjectPreferredHours(c: Constraint, ctx: BuilderContext): HandlerResul
     }
   }
 
-  // FET'te branş bazlı tercih: ConstraintSubjectPreferredTimeSlots (sınıf bağımsız)
   const preferredSlots = toPreferredSlots(slots);
   if (!cls) {
     return [{
@@ -376,7 +366,6 @@ function subjectPreferredHours(c: Constraint, ctx: BuilderContext): HandlerResul
     }];
   }
 
-  // Sınıf belirtilmişse: ilgili Activity'lere ConstraintActivityPreferredTimeSlots
   const { fetIds } = activitiesForSubject(ctx, subj, cls);
   if (fetIds.length === 0) return skip(ctx, c, 'Eşleşen aktivite yok');
   return fetIds.map(id => ({
@@ -448,8 +437,6 @@ function subjectConsecutiveHours(c: Constraint, ctx: BuilderContext): HandlerRes
   const { fetIds } = activitiesForSubject(ctx, subj, cls);
   if (fetIds.length < 2) return skip(ctx, c, 'Ardışıklık için en az 2 aktivite gerekli');
 
-  // Activity'leri ardışık olarak ikili gruplara ayır:
-  // (a1,a2), (a3,a4), ...  — kalan tek ise bağımsız bırak.
   const pairs: ConstraintNode[] = [];
   for (let i = 0; i + 1 < fetIds.length; i += 2) {
     pairs.push({
@@ -467,7 +454,6 @@ function subjectConsecutiveHours(c: Constraint, ctx: BuilderContext): HandlerRes
   return pairs;
 }
 
-// ---------- mekan handler'ları ----------
 
 function roomNotAvailable(c: Constraint, ctx: BuilderContext): HandlerResult {
   const room = getStr(c.params, 'room');
@@ -553,7 +539,6 @@ function classHomeRoom(c: Constraint, ctx: BuilderContext): HandlerResult {
   }];
 }
 
-// ---------- yeni öğretmen handler'ları ----------
 
 function teacherMinHoursDaily(c: Constraint, ctx: BuilderContext): HandlerResult {
   const name = getStr(c.params, 'teacher');
@@ -589,8 +574,6 @@ function teacherNotAvailableInterval(c: Constraint, ctx: BuilderContext): Handle
     if (hourObj) slots.push({ Day: day, Hour: hourObj.name });
   }
   if (slots.length === 0) return skip(ctx, c, 'Geçerli saat aralığı yok');
-  // NOT: FET'te doğrudan TeacherIntervalMaxDaysPerWeek var ancak burada
-  // interval'ı not-available olarak modelliyoruz (daha temiz).
   return [{
     section: 'time',
     tag: 'ConstraintTeacherNotAvailableTimes',
@@ -740,8 +723,6 @@ function teacherMinRestBetweenDays(c: Constraint, ctx: BuilderContext): HandlerR
   if (!ctx.teacherByName.has(name)) return skip(ctx, c, `Bilinmeyen öğretmen: "${name}"`);
   const minRest = getNum(c.params, 'minRestHours');
   if (minRest === null) return skip(ctx, c, 'minRestHours eksik');
-  // NOT: FET'te direkt karşılığı yok; yaklaşık olarak son N saat + ertesi gün ilk N saat
-  // kombinasyonu not-available olarak modellenebilir. Burada basitleştirip son saatleri yasaklıyoruz.
   const totalHours = ctx.hours.length;
   const restrictHours = Math.min(Math.floor(minRest), totalHours);
   const slots: FetSlot[] = [];
@@ -765,7 +746,6 @@ function teacherMinRestBetweenDays(c: Constraint, ctx: BuilderContext): HandlerR
   }];
 }
 
-// ---------- yeni sınıf handler'ları ----------
 
 function classMaxHoursDaily(c: Constraint, ctx: BuilderContext): HandlerResult {
   const cls = getStr(c.params, 'class');
@@ -828,9 +808,6 @@ function classEarlyMaxBeginnings(c: Constraint, ctx: BuilderContext): HandlerRes
   if (!ctx.classByName.has(cls)) return skip(ctx, c, `Bilinmeyen sınıf: "${cls}"`);
   const max = getNum(c.params, 'maxBeginnings');
   if (max === null) return skip(ctx, c, 'maxBeginnings eksik');
-  // FET, bu constraint'i sadece weight=100 ile optimize edebiliyor (lower
-  // weight'lerde "Cannot optimize" uyarısı veriyor). Kullanıcı slider'la
-  // %95'e indirse bile XML'e %100 yazıyoruz.
   return [{
     section: 'time',
     tag: 'ConstraintStudentsSetEarlyMaxBeginningsAtSecondHour',
@@ -917,7 +894,6 @@ function classMaxHoursContinuously(c: Constraint, ctx: BuilderContext): HandlerR
   }];
 }
 
-// ---------- yeni aktivite/branş handler'ları ----------
 
 function activityFixedTime(c: Constraint, ctx: BuilderContext): HandlerResult {
   const aid = getNum(c.params, 'activityId');
@@ -1038,7 +1014,6 @@ function subjectNotFirstHour(c: Constraint, ctx: BuilderContext): HandlerResult 
   const { fetIds } = activitiesForSubject(ctx, subj, cls);
   if (fetIds.length === 0) return skip(ctx, c, 'Eşleşen aktivite yok');
 
-  // İlk saat hariç tüm slotlar tercih edilen.
   const allowedSlots: FetSlot[] = [];
   for (const d of ctx.days) {
     for (const h of ctx.hours) {
@@ -1114,12 +1089,6 @@ function minGapsBetweenActivities(c: Constraint, ctx: BuilderContext): HandlerRe
   }];
 }
 
-/**
- * İki aktiviteyi ardışık yapar — act2, act1'in HEMEN ardından gelmeli.
- * FET ConstraintTwoActivitiesConsecutive. Tipik kullanım: "Fizik ve
- * Matematik peş peşe olsun (lab-teorik)". Bir activityId split grubuna
- * aitse her grup üyesi için ayrı constraint expand edilir.
- */
 function twoActivitiesConsecutive(c: Constraint, ctx: BuilderContext): HandlerResult {
   const firstId = getNum(c.params, 'firstActivityId');
   const secondId = getNum(c.params, 'secondActivityId');
@@ -1131,7 +1100,6 @@ function twoActivitiesConsecutive(c: Constraint, ctx: BuilderContext): HandlerRe
   if (firstFetIds.length === 0 || secondFetIds.length === 0) {
     return skip(ctx, c, `Aktivite bulunamadı: ${firstId} veya ${secondId}`);
   }
-  // Her FET-id çifti için ayrı constraint
   const out: ReturnType<typeof maxGapsBetweenActivities> = [];
   for (const f of firstFetIds) {
     for (const s of secondFetIds) {
@@ -1163,7 +1131,6 @@ function maxGapsBetweenActivities(c: Constraint, ctx: BuilderContext): HandlerRe
   const max = getNum(c.params, 'maxGaps');
   if (max === null) return skip(ctx, c, 'maxGaps eksik');
   if (ids.length < 2) return skip(ctx, c, 'En az 2 aktivite gerekli');
-  // NOT: FET'te ConstraintMaxGapsBetweenActivities, students set bazlı.
   return [{
     section: 'time',
     tag: 'ConstraintMaxGapsBetweenActivities',
@@ -1202,7 +1169,6 @@ function activityPreferredStartingTimes(c: Constraint, ctx: BuilderContext): Han
   }));
 }
 
-// ---------- yeni mekan handler'ları ----------
 
 function subjectPreferredRooms(c: Constraint, ctx: BuilderContext): HandlerResult {
   const subj = getStr(c.params, 'subject');
@@ -1232,7 +1198,6 @@ function teacherPreferredRoom(c: Constraint, ctx: BuilderContext): HandlerResult
   const room = getStr(c.params, 'room');
   if (!room) return skip(ctx, c, 'room alanı boş');
   if (!ctx.roomByName.has(room)) return skip(ctx, c, `Bilinmeyen derslik: "${room}"`);
-  // NOT: FET'te öğretmen-derslik tercihi genelde TeacherHomeRoom; benzer.
   return [{
     section: 'space',
     tag: 'ConstraintTeacherHomeRoom',
@@ -1378,7 +1343,6 @@ function studentsSetHomeRooms(c: Constraint, ctx: BuilderContext): HandlerResult
   }];
 }
 
-// ---------- yeni genel handler'ları ----------
 
 function breakTimes(c: Constraint, ctx: BuilderContext): HandlerResult {
   const rawSlots = getArr(c.params, 'slots');
@@ -1442,11 +1406,6 @@ function studentsMaxGapsPerWeek(c: Constraint, ctx: BuilderContext): HandlerResu
 function studentsEarlyMaxBeginnings(c: Constraint, ctx: BuilderContext): HandlerResult {
   const max = getNum(c.params, 'maxBeginnings');
   if (max === null) return skip(ctx, c, 'maxBeginnings eksik');
-  // FET, bu constraint'i sadece weight=100 ile optimize edebiliyor (lower
-  // weight'lerde "Cannot optimize for subgroup ... because you have an early
-  // max beginnings at second hour constraint with weight percentage less
-  // than 100%" uyarısı veriyor). Kullanıcı slider'la düşürse bile XML'e
-  // %100 yazıyoruz.
   return [{
     section: 'time',
     tag: 'ConstraintStudentsEarlyMaxBeginningsAtSecondHour',
@@ -1498,7 +1457,6 @@ function maxTotalActivitiesFromSet(c: Constraint, ctx: BuilderContext): HandlerR
   }];
 }
 
-// ---------- dispatch ----------
 
 type Handler = (c: Constraint, ctx: BuilderContext) => HandlerResult;
 
@@ -1580,7 +1538,6 @@ export function dispatchConstraint(
     return null;
   }
   if (!c.active) {
-    // İnaktif constraint'leri atla (kullanıcı kapatmış)
     return null;
   }
   return handler(c, ctx);

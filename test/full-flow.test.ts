@@ -148,29 +148,23 @@ describe('Full-flow E2E: boş veri → XML → FET → doğrulama', () => {
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain('Simulation successful');
-      // sanity: stdout boş olmamalı
       expect(result.stdout.length).toBeGreaterThan(20);
 
-      // Sonuçları parse et + doğrula
       const slots = await parseTimetable(outDir, {
         bundle,
         fetActivityIdsByActivity,
       });
 
-      // Beklenen slot sayısı = activity haftalık saatlerinin toplamı
       const expectedSlots = bundle.activities.reduce((s, a) => s + a.weeklyHours, 0);
       expect(slots.length).toBe(expectedSlots);
 
-      // Constraint 1: Ahmet Yılmaz Cuma günü (dayIndex=4) hiç ders vermiyor
       const ahmetFriday = slots.filter(
         (s) => s.teacherName === 'Ahmet Yılmaz' && s.dayIndex === 4,
       );
       expect(ahmetFriday).toEqual([]);
 
-      // Constraint 2: Beden Eğitimi yerleştiği günün son saati olmalı
-      // (aynı sınıf, aynı gün, daha sonraki saat = hiç olmamalı)
       const beden = slots.filter((s) => s.subjectName === 'Beden Eğitimi');
-      expect(beden.length).toBe(2); // 10A için haftada 2 saat
+      expect(beden.length).toBe(2);
       for (const b of beden) {
         const laterSameDay = slots.filter(
           (s) =>
@@ -181,7 +175,6 @@ describe('Full-flow E2E: boş veri → XML → FET → doğrulama', () => {
         expect(laterSameDay).toEqual([]);
       }
 
-      // Her aktivitenin haftalık saat sayısı kadar slot olmalı
       for (const a of bundle.activities) {
         const placedCount = slots.filter(
           (s) => s.classId === a.classId && s.subjectId === a.subjectId,
@@ -189,7 +182,6 @@ describe('Full-flow E2E: boş veri → XML → FET → doğrulama', () => {
         expect(placedCount).toBe(a.weeklyHours);
       }
 
-      // Cleanup
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
     },
     120_000,

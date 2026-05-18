@@ -115,7 +115,6 @@ function makeHeavySchool(): SchoolBundle {
     }
   }
 
-  // === 20 KISITLAMA ===
   const mkConstraint = (type: any, weight: number, params: any, id: number): Constraint => ({
     id, type, weight, active: true, params,
     source: 'manual' as const, aiMessageId: null,
@@ -126,48 +125,37 @@ function makeHeavySchool(): SchoolBundle {
   const allDayPzt = Array.from({ length: 8 }, (_, h) => ({ day: 'Pazartesi', hour: h + 1 }));
 
   const constraints: Constraint[] = [
-    // 1-4: 4 öğretmen Cuma yok
     mkConstraint('TEACHER_NOT_AVAILABLE', 100, { teacher: 'Ahmet Yılmaz', slots: allDayCuma }, 1),
     mkConstraint('TEACHER_NOT_AVAILABLE', 100, { teacher: 'Ayşe Demir', slots: allDayCuma }, 2),
     mkConstraint('TEACHER_NOT_AVAILABLE', 100, { teacher: 'Cem Toprak', slots: allDayCuma }, 3),
     mkConstraint('TEACHER_NOT_AVAILABLE', 100, { teacher: 'Ferhan Köse', slots: allDayCuma }, 4),
 
-    // 5: 1 öğretmen Pazartesi 1-3. ders yok (yarım gün)
     mkConstraint('TEACHER_NOT_AVAILABLE', 100, {
       teacher: 'Mehmet Kaya',
       slots: [{ day: 'Pazartesi', hour: 1 }, { day: 'Pazartesi', hour: 2 }, { day: 'Pazartesi', hour: 3 }],
     }, 5),
 
-    // 6-7: Beden eğitimi + Görsel sanatlar son derste
     mkConstraint('SUBJECT_LAST_HOUR_OF_DAY', 100, { subject: 'Beden Eğitimi', class: null }, 6),
     mkConstraint('SUBJECT_LAST_HOUR_OF_DAY', 100, { subject: 'Görsel Sanatlar', class: null }, 7),
 
-    // 8-9: Matematik & Türkçe günde max 1 saat (her sınıf için)
     mkConstraint('SUBJECT_MAX_HOURS_DAILY', 100, { subject: 'Matematik', class: null, maxHours: 2 }, 8),
     mkConstraint('SUBJECT_MAX_HOURS_DAILY', 100, { subject: 'Türk Dili ve Edebiyatı', class: null, maxHours: 2 }, 9),
 
-    // 10-12: 3 öğretmen günde max 6 ders
     mkConstraint('TEACHER_MAX_HOURS_DAILY', 100, { teacher: 'Mustafa Demir', maxHours: 6 }, 10),
     mkConstraint('TEACHER_MAX_HOURS_DAILY', 100, { teacher: 'Fatma Aksoy', maxHours: 6 }, 11),
     mkConstraint('TEACHER_MAX_HOURS_DAILY', 100, { teacher: 'Hasan Öztürk', maxHours: 5 }, 12),
 
-    // 13-14: Bazı dersler Pazartesi yok
     mkConstraint('SUBJECT_NOT_ON_DAY', 100, { subject: 'Felsefe', class: null, days: ['Pazartesi'] }, 13),
     mkConstraint('SUBJECT_NOT_ON_DAY', 100, { subject: 'Almanca', class: null, days: ['Cuma'] }, 14),
 
-    // 15: 1 sınıf haftada 0 boşluk
     mkConstraint('CLASS_MAX_GAPS_PER_WEEK', 100, { class: '9A', maxGaps: 0 }, 15),
-    // 16: 1 sınıf haftada 0 boşluk
     mkConstraint('CLASS_MAX_GAPS_PER_WEEK', 100, { class: '10A', maxGaps: 0 }, 16),
 
-    // 17-18: 2 öğretmen günde max 2 boşluk
     mkConstraint('TEACHER_MAX_GAPS_PER_DAY', 100, { teacher: 'Pelin Tan', maxGaps: 2 }, 17),
     mkConstraint('TEACHER_MAX_GAPS_PER_DAY', 100, { teacher: 'Zeynep Akın', maxGaps: 2 }, 18),
 
-    // 19: Tüm öğretmenler haftada max 5 boşluk (FET bu constraint için weight=100 ister)
     mkConstraint('TEACHERS_MAX_GAPS_PER_WEEK', 100, { maxGaps: 5 }, 19),
 
-    // 20: 1 öğretmen haftada max 4 gün
     mkConstraint('TEACHER_MAX_DAYS_PER_WEEK', 100, { teacher: 'Tolga Çiftçi', maxDays: 4 }, 20),
   ];
 
@@ -212,7 +200,6 @@ describe('FET 20 kısıtlamalı stres testi', () => {
     console.log(`FET çözüm süresi: ${elapsed}s`);
     console.log('FET stdout:', result.stdout?.split('\n').slice(-10).join('\n'));
     console.log('FET stderr:', result.stderr ?? '(boş)');
-    // Persist xml so we can inspect manually
     fs.copyFileSync(inputPath, '/tmp/dpo-heavy-DEBUG.fet');
     console.log('XML saved to /tmp/dpo-heavy-DEBUG.fet for manual inspection');
 
@@ -222,9 +209,7 @@ describe('FET 20 kısıtlamalı stres testi', () => {
     const slots = await parseTimetable(outDir, { bundle, fetActivityIdsByActivity });
     console.log(`Üretilen slot sayısı: ${slots.length}`);
 
-    // === DOĞRULAMALAR ===
 
-    // 1-4 + 5: Belirli öğretmenler belirli günlerde yok
     const checkTeacherDay = (teacher: string, day: number, hours: number[] | 'all') => {
       const conflicts = slots.filter(
         (s) =>
@@ -236,13 +221,12 @@ describe('FET 20 kısıtlamalı stres testi', () => {
         throw new Error(`${teacher} ${day}. günde ${hours} ihlali: ${conflicts.length} slot`);
       }
     };
-    checkTeacherDay('Ahmet Yılmaz', 4, 'all');     // Cuma=4
+    checkTeacherDay('Ahmet Yılmaz', 4, 'all');
     checkTeacherDay('Ayşe Demir', 4, 'all');
     checkTeacherDay('Cem Toprak', 4, 'all');
     checkTeacherDay('Ferhan Köse', 4, 'all');
-    checkTeacherDay('Mehmet Kaya', 0, [0, 1, 2]);  // Pzt 1-3. ders
+    checkTeacherDay('Mehmet Kaya', 0, [0, 1, 2]);
 
-    // 6-7: Beden + Görsel sanatlar her zaman o sınıfın o günkü son dersi
     for (const subjectName of ['Beden Eğitimi', 'Görsel Sanatlar']) {
       const ss = slots.filter((s) => s.subjectName === subjectName);
       expect(ss.length).toBeGreaterThan(0);
@@ -259,7 +243,6 @@ describe('FET 20 kısıtlamalı stres testi', () => {
       }
     }
 
-    // 8-9: Aynı gün aynı sınıfta Matematik ≤ 2, Türkçe ≤ 2
     for (const subjectName of ['Matematik', 'Türk Dili ve Edebiyatı']) {
       const byClassDay = new Map<string, number>();
       for (const s of slots.filter((x) => x.subjectName === subjectName)) {
@@ -271,7 +254,6 @@ describe('FET 20 kısıtlamalı stres testi', () => {
       }
     }
 
-    // 10-12: Öğretmen günde max saat
     const teacherDailyHours = (teacher: string) => {
       const m = new Map<number, number>();
       for (const s of slots.filter((x) => x.teacherName === teacher)) {
@@ -286,11 +268,9 @@ describe('FET 20 kısıtlamalı stres testi', () => {
       }
     }
 
-    // 13-14: Felsefe Pazartesi yok, Almanca Cuma yok
     expect(slots.filter((s) => s.subjectName === 'Felsefe' && s.dayIndex === 0).length).toBe(0);
     expect(slots.filter((s) => s.subjectName === 'Almanca' && s.dayIndex === 4).length).toBe(0);
 
-    // 15-16: 9A ve 10A haftada 0 boşluk — sınıfın bir günündeki tüm dersler ardışık olmalı
     const classGaps = (className: string): number => {
       let total = 0;
       for (let d = 0; d < 5; d++) {
@@ -309,11 +289,9 @@ describe('FET 20 kısıtlamalı stres testi', () => {
     if (gaps9A > 0) throw new Error(`9A haftada ${gaps9A} boşluk var (limit 0)`);
     if (gaps10A > 0) throw new Error(`10A haftada ${gaps10A} boşluk var (limit 0)`);
 
-    // 20: Tolga Çiftçi haftada max 4 gün
     const tolgaDays = new Set(slots.filter((s) => s.teacherName === 'Tolga Çiftçi').map((s) => s.dayIndex));
     if (tolgaDays.size > 4) throw new Error(`Tolga ${tolgaDays.size} gün gelmiş`);
 
-    // Çakışma kontrolleri
     const teacherSlot = new Map<string, number>();
     for (const s of slots) {
       const k = `${s.teacherName}|${s.dayIndex}|${s.hourIndex}`;

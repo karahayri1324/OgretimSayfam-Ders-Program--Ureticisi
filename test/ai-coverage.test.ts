@@ -417,7 +417,6 @@ describe('AI coverage — 50+ gerçek prompt', () => {
       const res = mockParseSync(c.prompt, CTX);
       const actualKind = res.kind ?? 'constraint';
       let ok = actualKind === c.kind;
-      // alternate kind tolerance for predicate-only cases handled via predicate
       if (!ok && c.predicate) {
         ok = c.predicate(res);
       }
@@ -434,11 +433,6 @@ describe('AI coverage — 50+ gerçek prompt', () => {
   });
 });
 
-/**
- * Conversational wizard senaryoları — multi-turn dialog testleri.
- * Her senaryo bağımsız: context'i boştan başlatıp adım adım doldurarak
- * AI'nın bir SONRAKİ adıma ne sorduğunu doğrularız.
- */
 describe('Conversational wizard — adım adım dialog', () => {
   const EMPTY: AIContext = {
     teachers: [],
@@ -454,9 +448,7 @@ describe('Conversational wizard — adım adım dialog', () => {
     expect(res.kind).toBe('query');
     if (res.kind === 'query') {
       expect(res.answer.toLowerCase()).toContain('hangi ders');
-      // Tek adım — liste değil
       expect(res.answer.split('\n').length).toBeLessThan(4);
-      // Örnek içermeli
       expect(res.answer.toLowerCase()).toMatch(/örnek|matematik|fizik/);
     }
   });
@@ -544,18 +536,12 @@ describe('Conversational wizard — adım adım dialog', () => {
     const res = mockParseSync('tamam', ctxNow, history);
     expect(res.kind).toBe('query');
     if (res.kind === 'query') {
-      // Ack içermeli: "süper" / "3 ders eklendi"
       expect(res.answer.toLowerCase()).toMatch(/süper|3 ders|eklendi/);
-      // Sonraki adım sınıflar
       expect(res.answer.toLowerCase()).toMatch(/sınıf/);
     }
   });
 });
 
-/**
- * Multi-subject add mutation testleri — bug fix.
- * "Matematik, Fizik, Türkçe derslerini ekle" → 3 add_subject action.
- */
 describe('Multi-subject add — bug fix', () => {
   const CTX_EMPTY_SUBJECTS: AIContext = {
     teachers: [],

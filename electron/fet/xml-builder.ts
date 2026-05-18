@@ -97,7 +97,6 @@ function buildContext(school: SchoolBundle): BuilderContext {
   }
 
   const dayByName = new Map(days.map(d => [d.name, d]));
-  // hourByOrder: 1-indexed (Plans/05 Slot.hour 1..N)
   const hourByOrder = new Map<number, typeof hours[number]>();
   hours.forEach((h, idx) => hourByOrder.set(idx + 1, h));
 
@@ -106,10 +105,6 @@ function buildContext(school: SchoolBundle): BuilderContext {
   const subjectByName = new Map(school.subjects.map(s => [s.name, s]));
   const roomByName = new Map(school.rooms.map(r => [r.name, r]));
 
-  // FET Activity Id'leri 1'den başlayarak global olarak artar.
-  // Bir DB activity → blocks adet FET Activity üretir.
-  //   blocks = ceil(weeklyHours / blockDuration); her birinin Duration = blockDuration
-  //   (son blok kalan saat kadar olabilir)
   const fetActivityIdsByActivity = new Map<number, number[]>();
   const activityGroupIdById = new Map<number, number>();
   let nextId = 1;
@@ -117,7 +112,6 @@ function buildContext(school: SchoolBundle): BuilderContext {
   for (const a of school.activities) {
     const block = Math.max(1, a.blockDuration || 1);
     const total = Math.max(1, a.weeklyHours || 1);
-    // Sayı hesabı: tamsayı bölümle blok sayısı + kalan
     const fullBlocks = Math.floor(total / block);
     const remainder = total - fullBlocks * block;
     const count = fullBlocks + (remainder > 0 ? 1 : 0);
@@ -134,19 +128,8 @@ function buildContext(school: SchoolBundle): BuilderContext {
     if (gid !== undefined) activityGroupBySubjectClass.set(key, gid);
   }
 
-  // Split-aware subgroup atama:
-  //  - "Split group" = aynı splitGroupId'yi paylaşan aktivitelerin oluşturduğu küme.
-  //    Bu küme aynı saatte koşacak (FET'te ConstraintActivitiesSameStartingTime).
-  //  - Aynı saatte koşacaklar için her birinin farklı bir Subgroup'a düşmesi şart
-  //    (yoksa FET çakışma sayar).
-  //  - Bir sınıf birden fazla split_group'a katılabilir. Her split_group içinde
-  //    iki/üç aktivite varsa "parallelism = 2/3". Sınıfın kaç subgroup'a bölündüğü
-  //    en yüksek parallelism kadar.
-  //  - Tek bir split_group içinde aktivite sırası, sınıf-subgroup eşlemesini belirler:
-  //      i. aktivite → "<class>_g{i+1}". Farklı split_grup'lar arası tutarlılık şart değil.
   const classById = new Map(school.classes.map(c => [c.id, c]));
   const splitGroupsByClass = new Map<number, Map<number, number[]>>();
-  // classId → Map(splitGroupId → ordered activity ids)
   for (const a of school.activities) {
     if (a.splitGroupId == null) continue;
     const cmap = splitGroupsByClass.get(a.classId) ?? new Map<number, number[]>();
@@ -156,7 +139,6 @@ function buildContext(school: SchoolBundle): BuilderContext {
     splitGroupsByClass.set(a.classId, cmap);
   }
 
-  // Her sınıf için kaç subgroup gerekecek?
   const subgroupCountByClass = new Map<number, number>();
   for (const [classId, cmap] of splitGroupsByClass) {
     let maxN = 0;
@@ -205,13 +187,7 @@ function buildContext(school: SchoolBundle): BuilderContext {
   };
 }
 
-/**
- * Sınıfta kaç tane subgroup gerekiyor? = herhangi bir split_group içindeki
- * en kalabalık aktivite kümesinin boyutu (paralellik derecesi).
- * Split yoksa 0 → tek default subgroup yazılır.
- */
 function splitSubgroupCountByClass(ctx: BuilderContext): Map<number, number> {
-  // classId → splitGroupId → activity sayısı
   const counts = new Map<number, Map<number, number>>();
   for (const a of ctx.activities) {
     if (a.splitGroupId == null) continue;
@@ -228,7 +204,6 @@ function splitSubgroupCountByClass(ctx: BuilderContext): Map<number, number> {
   return out;
 }
 
-// ---------- liste builder'ları ----------
 
 type XmlNode = ReturnType<ReturnType<typeof create>['ele']>;
 
@@ -278,18 +253,6 @@ function buildTeachersList(root: XmlNode, ctx: BuilderContext): void {
   }
 }
 
-/**
- * Students_List üretir. Her sınıfı kendi Year > Group > Subgroup üçlüsüne koyar.
- *
- * Neden böyle? FET 6.x'te:
- *  - Year > Group > Subgroup hiyerarşisi zorunlu (Activity'ler Subgroup'a atanır).
- *  - Sınıflar bizim modelde alt-gruplara bölünmüyor, dolayısıyla tek Subgroup yeterli.
- *  - Aynı yearId'ye sahip sınıfları tek <Year> altında toplamak FET için
- *    şart değil — ayrı Year'lar verdiğimizde de tüm constraint'ler düzgün çalışır.
- *
- * Year ismini "Y_<sınıf>" yapıyoruz çünkü FET Year/Group/Subgroup isimlerinin
- * benzersiz olmasını ister.
- */
 function buildStudentsList(root: XmlNode, ctx: BuilderContext): void {
   const list = root.ele('Students_List');
   const subgroupCount = splitSubgroupCountByClass(ctx);
@@ -299,22 +262,6 @@ function buildStudentsList(root: XmlNode, ctx: BuilderContext): void {
   list.up();
 }
 
-/**
- * Bir sınıf için Year/Group/Subgroup üçlüsünü yazar.
- *
- * FET 6.x zorunluluğu: Year, Group ve Subgroup isimleri farklı olmalı —
- * aynı isimli iki seviyeyi FET reddediyor ("subgroup X already added as another group").
- * Bu yüzden:
- *  - Year   = "Y_<class>"
- *  - Group  = "<class>"           ← non-split activity'lerdeki <Students> bu adı referans alır
- *  - Subgroup'lar:
- *      - Split yoksa: tek "<class>_s" (default — eski davranış)
- *      - Split varsa: her unique split_group_id için bir subgroup "<class>_g1", "<class>_g2", …
- *        Default "_s" YERİNE bunlar yazılır; çünkü FET'te bir Group, kendi
- *        subgroup'larının BİRLEŞİMİ değildir ve non-split aktiviteler Group adına
- *        atandığında otomatik olarak tüm subgroup'ları kapsar (aynı sınıfın
- *        diğer dersleri zaten Group seviyesinden çakışmayı engelleniyor).
- */
 function writeYearGroupSubgroupForClass(
   parent: XmlNode,
   c: ClassRoom,
@@ -333,7 +280,6 @@ function writeYearGroupSubgroupForClass(
     sub.ele('Number_of_Students').txt(String(c.studentCount ?? 0)).up();
     sub.up();
   } else {
-    // parallelCount kadar subgroup yaratılır. Her birine öğrenci sayısı yaklaşık eşit dağıtılır.
     const total = c.studentCount ?? 0;
     const base = Math.floor(total / parallelCount);
     const remainder = total - base * parallelCount;
@@ -367,7 +313,6 @@ function buildActivitiesList(root: XmlNode, ctx: BuilderContext): void {
     const studentsName =
       ctx.studentsNameByActivity.get(a.id) ?? classMap.get(a.classId) ?? '';
 
-    // Her FET Activity'nin Duration'ı: son haricinde block, kalan varsa son = remainder
     const fullBlocks = Math.floor(total / block);
     const remainder = total - fullBlocks * block;
     for (let i = 0; i < fetIds.length; i++) {
@@ -406,7 +351,6 @@ function buildRoomsList(root: XmlNode, ctx: BuilderContext): void {
   }
 }
 
-// ---------- constraint listeleri ----------
 
 function prependBasicConstraints(
   timeNodes: ConstraintNode[],
@@ -429,7 +373,7 @@ function appendMinDaysBetweenActivities(
   ctx: BuilderContext,
 ): void {
   for (const [, fetIds] of ctx.fetActivityIdsByActivity) {
-    if (fetIds.length < 2) continue; // tek aktivite için anlamsız
+    if (fetIds.length < 2) continue;
     timeNodes.push({
       section: 'time',
       tag: 'ConstraintMinDaysBetweenActivities',
@@ -446,24 +390,11 @@ function appendMinDaysBetweenActivities(
   }
 }
 
-/**
- * Per-day hours desteği: en uzun gün baz alınarak Hours_List üretilir.
- * Kısa günlerde fazla saatleri TÜM öğretmen ve sınıf için
- * "not available" olarak işaretle — böylece FET o slot'lara aktivite yerleştirmez.
- *
- * Örnek: global 8 saat, Cuma 7 → 8. saat Cuma için kapalı.
- *
- * Not: Tek bir global ConstraintBreakTimes node'u yeterli olabilirdi ama
- * FET'in bazı sürümlerinde "all subgroups" davranışı garanti değil; bu
- * yüzden hem teacher hem students set bazında kapatıyoruz (idempotent ve
- * güvenli yaklaşım).
- */
 function appendShortDayBlockedSlots(
   timeNodes: ConstraintNode[],
   ctx: BuilderContext,
 ): void {
   const totalHours = ctx.hours.length;
-  // (day, hour) çiftlerini topla — bunlar tüm okulda kapatılacak.
   const blocked: { Day: string; Hour: string }[] = [];
   for (const d of ctx.days) {
     const eff = ctx.effectiveHoursPerDay.get(d.id) ?? totalHours;
@@ -476,9 +407,6 @@ function appendShortDayBlockedSlots(
   }
   if (blocked.length === 0) return;
 
-  // FET'te ConstraintBreakTimes "okul geneli teneffüs/kapalı saat" anlamı taşır:
-  // hiçbir aktivite (öğretmen/sınıf/oda) o slot'a yerleştirilmez. Bu, hem
-  // öğretmen hem sınıf için "not available" yazmaktan daha temiz ve hızlı.
   timeNodes.push({
     section: 'time',
     tag: 'ConstraintBreakTimes',
@@ -492,22 +420,11 @@ function appendShortDayBlockedSlots(
   });
 }
 
-/**
- * Split activities: aynı split_group_id'ye sahip aktivitelerin ilk FET
- * Activity'leri aynı saatte başlamaya zorlanır
- * (ConstraintActivitiesSameStartingTime).
- *
- * Önemli detay: bir DB activity birden fazla FET Activity'ye expand
- * olabilir (örn. haftalık 4 saat). Split group'ta iki aktiviteyi sadece
- * aktivitelerin "i. tekrarı" düzeyinde eşliyoruz — yani her tekrar için
- * ayrı ConstraintActivitiesSameStartingTime. Tekrar sayıları farklıysa
- * ortak minimum kadarıyla sınırlıyoruz (geri kalan tekrarlar serbest).
- */
 function appendSplitGroupConstraints(
   timeNodes: ConstraintNode[],
   ctx: BuilderContext,
 ): void {
-  const groups = new Map<number, number[]>(); // groupId → activity DB id'leri
+  const groups = new Map<number, number[]>();
   for (const a of ctx.activities) {
     if (a.splitGroupId == null) continue;
     const arr = groups.get(a.splitGroupId) ?? [];
@@ -517,7 +434,6 @@ function appendSplitGroupConstraints(
 
   for (const [, dbIds] of groups) {
     if (dbIds.length < 2) continue;
-    // Her DB activity için FET Id listesi
     const fetIdLists = dbIds
       .map(id => ctx.fetActivityIdsByActivity.get(id) ?? [])
       .filter(list => list.length > 0);

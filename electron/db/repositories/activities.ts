@@ -51,10 +51,6 @@ export const activitiesRepo = {
     return row ? rowToActivity(row) : null;
   },
 
-  /**
-   * (class_id, subject_id, teacher_id) üçlüsünde varsa update, yoksa insert.
-   * UI tarafı tek bir "upsert" endpoint kullanıyor.
-   */
   upsert(input: ActivityInput & { id?: number }): number {
     const db = getDb();
     const schoolId = schoolsRepo.getActiveId();
@@ -125,19 +121,6 @@ export const activitiesRepo = {
     getDb().prepare('DELETE FROM activities WHERE id = ?').run(id);
   },
 
-  /**
-   * Verilen aktivite kümesini ortak bir split grubuna bağlar.
-   *
-   * Davranış:
-   *  - activityIds.length < 2 → eski split bağları temizlenir (unset).
-   *  - Aktif okulun split_group_id'leri arasında en büyük + 1 yeni grup id olarak
-   *    seçilir; verilen tüm aktiviteler bu id ile güncellenir.
-   *  - Verilen aktivitelerden birinin önceki grubu varsa, o grubun *diğer*
-   *    üyeleri yetim kalmasın diye eski gruptaki tek üye olarak kalırsa
-   *    onun split_group_id'si NULL'a çekilir (tek üyeli split anlamsız).
-   *
-   * Hepsi tek transaction içinde yapılır.
-   */
   setSplitGroup(activityIds: number[]): number | null {
     const db = getDb();
     const schoolId = schoolsRepo.getActiveId();
@@ -188,7 +171,6 @@ export const activitiesRepo = {
     return trx();
   },
 
-  /** Bir tek aktivitenin split grubunu sıfırlar (bağı koparır). */
   clearSplitGroup(activityId: number): void {
     const db = getDb();
     const schoolId = schoolsRepo.getActiveId();
@@ -209,7 +191,6 @@ export const activitiesRepo = {
   },
 };
 
-/** Bir grupta sadece tek üye kaldıysa onun da split_group_id'sini sıfırlar. */
 function cleanupOrphanGroup(
   db: ReturnType<typeof getDb>,
   schoolId: number,

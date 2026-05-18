@@ -424,7 +424,6 @@ function ClassDialog({
       setName(editing?.name ?? '');
       setYearId(editing?.yearId ?? defaultYearId ?? null);
       if (editing?.homeRoomId) {
-        // Editing: sınıf adıyla aynı isimli derslik mi?
         const room = rooms.find((r) => r.id === editing.homeRoomId);
         setHomeRoomMode(room && room.name === editing.name ? 'same' : 'custom');
         setCustomRoomId(editing.homeRoomId);
@@ -435,8 +434,6 @@ function ClassDialog({
     }
   }, [open, editing, defaultYearId, rooms]);
 
-  // Virgülle ayrılmış toplu giriş — sadece create modunda.
-  // "9A, 9B, 9C" → 3 ayrı sınıf yarat.
   const parsedNames = editing
     ? [name.trim()].filter(Boolean)
     : name
@@ -444,8 +441,6 @@ function ClassDialog({
         .map((n) => n.trim())
         .filter(Boolean);
 
-  /** "same" modunda: sınıf adıyla aynı isimli room varsa onun id'sini döner;
-   *  yoksa yeni room yaratıp id'yi döner. */
   async function ensureRoomForClass(className: string): Promise<number | null> {
     const existing = rooms.find(
       (r) => r.name.toLowerCase() === className.toLowerCase(),
@@ -475,7 +470,6 @@ function ClassDialog({
       }
       await onSubmit({ name: n, yearId, homeRoomId });
     }
-    // 'same' modunda otomatik yaratılan derslikleri rooms store'una çek
     if (homeRoomMode === 'same') await reloadRooms();
     setSubmitting(false);
   }

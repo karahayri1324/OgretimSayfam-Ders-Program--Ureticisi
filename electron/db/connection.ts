@@ -49,7 +49,7 @@ function migrateLegacyDbIfNeeded(newPath: string): void {
           }
         }
         log.info('Eski DB başarıyla taşındı. Eski dosya yedek olarak duruyor.');
-        return; // ilk başarılı kopya yeter
+        return;
       } catch (e) {
         log.warn('Legacy DB kopyalama başarısız', { from: old, error: String(e) });
       }
@@ -82,10 +82,6 @@ const DEFAULT_SETTINGS: Record<string, string> = {
 
 let db: Database.Database | null = null;
 
-/**
- * Veritabanını açar, migration'ları çalıştırır, ilk açılışsa seed yapar.
- * Idempotent: birden fazla çağrı aynı instance'ı döner.
- */
 export function initDatabase(): Database.Database {
   if (db) return db;
 
@@ -93,7 +89,6 @@ export function initDatabase(): Database.Database {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
 
-  // İlk açılışta eski (legacy) DB konumundan veriyi taşı.
   migrateLegacyDbIfNeeded(file);
 
   log.info('Veritabanı açılıyor', { path: file });
@@ -115,7 +110,6 @@ export function initDatabase(): Database.Database {
   return db;
 }
 
-/** Bağlantıyı kapatır. main.ts'in window-all-closed/before-quit içinde çağırır. */
 export function closeDatabase(): void {
   if (!db) return;
   try {
@@ -128,17 +122,11 @@ export function closeDatabase(): void {
   }
 }
 
-/**
- * Aktif DB instance'ını döner. initDatabase() çağırılmamışsa otomatik açar.
- */
 export function getDb(): Database.Database {
   if (!db) return initDatabase();
   return db;
 }
 
-/**
- * İlk açılışta tek school + 5 gün + 8 saat + default settings ekler.
- */
 function seedIfEmpty(instance: Database.Database): void {
   const schoolCount = (
     instance.prepare('SELECT COUNT(*) AS c FROM schools').get() as { c: number }
@@ -165,8 +153,6 @@ function seedIfEmpty(instance: Database.Database): void {
     seed();
   }
 
-  // Eski anahtar adlarını yenilerine taşı (idempotent backfill).
-  // aiTimeout → aiTimeoutSec, fetTimeLimit → fetTimeLimitSec
   const renameMap: Record<string, string> = {
     aiTimeout: 'aiTimeoutSec',
     fetTimeLimit: 'fetTimeLimitSec',
@@ -183,7 +169,6 @@ function seedIfEmpty(instance: Database.Database): void {
   });
   renameTrx();
 
-  // Settings seed — eksik anahtarları doldur, var olanlara dokunma.
   const upsertSetting = instance.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING',
   );

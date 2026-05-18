@@ -201,7 +201,6 @@ export function SubjectCombobox({
                 role="option"
                 aria-selected={active}
                 onMouseDown={(e) => {
-                  // Mousedown — input blur'undan önce çalışsın
                   e.preventDefault();
                   addSubject(s.id);
                 }}

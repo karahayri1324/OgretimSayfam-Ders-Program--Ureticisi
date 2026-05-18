@@ -70,7 +70,6 @@ function requireString(params: Record<string, unknown>, ...keys: string[]): stri
   return null;
 }
 
-// --- Handlers --------------------------------------------------------------
 
 function extendBreaks(params: Record<string, unknown>): ScheduleUpdateApplyResult {
   const minutes = requireNumber(params, 'minutes', 'count', 'delta');
@@ -81,7 +80,6 @@ function extendBreaks(params: Record<string, unknown>): ScheduleUpdateApplyResul
   if (cur.length === 0) {
     throw new Error('Henüz tanımlı ders saati yok — önce ders saatlerini ekleyin.');
   }
-  // mode='break': her saatin SÜRESİNİ koru, i. saati i*delta kaydır.
   const next = cur.map((h, i) => ({
     name: h.name,
     startTime: h.startTime ? shiftClock(h.startTime, minutes * i) : h.startTime,
@@ -108,7 +106,6 @@ function addHoursToDay(params: Record<string, unknown>): ScheduleUpdateApplyResu
   const target = allDays.find((d) => deburr(d.name) === deburr(dayName));
   if (!target) throw new Error(`Gün bulunamadı: '${dayName}'`);
 
-  // Mevcut day-specific hours yoksa global'den seed et
   const globalHours = hoursRepo.list();
   const existing = dayHoursRepo.listByDay(target.id);
   const baseline =
@@ -132,7 +129,6 @@ function addHoursToDay(params: Record<string, unknown>): ScheduleUpdateApplyResu
     );
   }
 
-  // Son saatin end'ini başlangıç al; yoksa null start/end ile ekle.
   const last = baseline[baseline.length - 1];
   let nextStart: string | null = last?.endTime ?? null;
   for (let i = 0; i < count; i++) {
@@ -180,7 +176,6 @@ function setHoursPerDay(params: Record<string, unknown>): ScheduleUpdateApplyRes
       });
       continue;
     }
-    // Yeni saat — önceki saatin end'inden 10dk sonra başlat (varsa)
     const prev = next[next.length - 1];
     const start = prev?.endTime ? shiftClock(prev.endTime, 10) : null;
     const end = start ? shiftClock(start, 40) : null;
@@ -191,7 +186,6 @@ function setHoursPerDay(params: Record<string, unknown>): ScheduleUpdateApplyRes
     });
   }
   hoursRepo.replaceAll(next);
-  // day_hours override'ları temizle — global'e dönüş
   dayHoursRepo.clearAll();
   return {
     ok: true,
@@ -253,10 +247,6 @@ const HANDLERS: Record<
   add_day: addDay,
 };
 
-/**
- * Schedule update response'unu uygular. UI'dan çağrılır (kullanıcı onayı sonrası).
- * Hata Türkçe throw eder; caller IPC hata zarfına çevirir.
- */
 export function applyScheduleUpdate(
   response: AIScheduleUpdateResponse,
 ): ScheduleUpdateApplyResult {

@@ -41,7 +41,6 @@ function write(level: LogLevel, msg: string, meta?: unknown): void {
   try {
     fs.appendFileSync(getLogFile(), line);
   } catch {
-    // dosya yazılamazsa sessiz geç
   }
   const isDev = !app.isPackaged || process.env['NODE_ENV'] === 'development';
   if (isDev) {

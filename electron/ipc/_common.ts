@@ -30,7 +30,6 @@ export async function safeHandler<T>(
     const message = e instanceof Error ? e.message : String(e);
     log.error(`IPC hatası: ${label}`, { error: message, stack: (e as Error)?.stack });
 
-    // SQLite unique constraint vs için CONFLICT döndür
     if (/UNIQUE constraint failed/i.test(message)) {
       return err('CONFLICT', 'Bu kayıt zaten mevcut (benzersizlik ihlali).', message);
     }
@@ -48,9 +47,6 @@ export async function safeHandler<T>(
   }
 }
 
-/**
- * Zod ile input doğrula. Hata varsa Err döner, yoksa parsed datayı.
- */
 export function validate<S extends ZodTypeAny>(
   schema: S,
   raw: unknown,

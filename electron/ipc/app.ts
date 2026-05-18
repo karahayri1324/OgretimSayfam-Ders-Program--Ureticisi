@@ -87,7 +87,6 @@ export function registerAppHandlers(): void {
     safeHandler('app:openLogs', async () => {
       const dir = logsDir();
       const result = await shell.openPath(dir);
-      // shell.openPath başarısız olursa boş string yerine hata mesajı döner
       if (result) {
         throw new Error(`Log klasörü açılamadı: ${result}`);
       }
@@ -95,11 +94,6 @@ export function registerAppHandlers(): void {
     }),
   );
 
-  /**
-   * Renderer'dan HTML alır, kullanıcıya save dialog gösterir ve PDF'e döker.
-   * Dönüş: { filePath } başarılı; { cancelled: true } iptal; safeHandler
-   * exception'ları yakalar.
-   */
   ipcMain.handle(
     'app:exportPdf',
     async (_evt, html: unknown, defaultFilename: unknown) =>

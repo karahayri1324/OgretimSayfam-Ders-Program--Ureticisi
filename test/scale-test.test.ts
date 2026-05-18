@@ -19,7 +19,6 @@ function makeLargeSchool(): SchoolBundle {
     endTime: null,
   }));
 
-  // 14 branş (gerçek lise programına yakın)
   const subjectNames = [
     'Matematik', 'Geometri', 'Fizik', 'Kimya', 'Biyoloji',
     'Türk Dili ve Edebiyatı', 'Tarih', 'Coğrafya', 'Felsefe',
@@ -30,7 +29,6 @@ function makeLargeSchool(): SchoolBundle {
     id: i + 1, name, shortCode: null, color: null, notes: null,
   }));
 
-  // Branş başına ders saati (tipik lise dağılımı)
   const subjectHours: Record<string, number> = {
     'Matematik': 6, 'Geometri': 2, 'Fizik': 3, 'Kimya': 3, 'Biyoloji': 3,
     'Türk Dili ve Edebiyatı': 5, 'Tarih': 2, 'Coğrafya': 2, 'Felsefe': 2,
@@ -38,38 +36,23 @@ function makeLargeSchool(): SchoolBundle {
     'Görsel Sanatlar': 1,
   };
 
-  // 54 öğretmen — her branştan birden fazla
   const teacherNames = [
-    // Matematik (8)
     'Ahmet Yılmaz', 'Mehmet Kaya', 'Mustafa Demir', 'Ali Şahin',
     'Hasan Öztürk', 'Hüseyin Çelik', 'Osman Özdemir', 'Yusuf Arslan',
-    // Geometri (3)
     'İbrahim Aydın', 'Murat Doğan', 'Süleyman Çetin',
-    // Fizik (4)
     'Selim Erdoğan', 'Halil Koç', 'Ramazan Kılıç', 'Kadir Kurt',
-    // Kimya (4)
     'Ayşe Demir', 'Fatma Aksoy', 'Zeynep Akın', 'Hatice Polat',
-    // Biyoloji (3)
     'Emine Tunç', 'Hülya Yalçın', 'Sevgi Ünal',
-    // Türk Dili ve Edebiyatı (6)
     'Şule Ergin', 'Esra Korkmaz', 'Nesrin Bayrak', 'Pınar Karaca',
     'Gülşen Aktaş', 'Burcu Sezer',
-    // Tarih (3)
     'Yasemin Erdem', 'Çiğdem Güneş', 'Şeyma Yavuz',
-    // Coğrafya (3)
     'Merve Kara', 'Selin Avcı', 'Damla Yıldırım',
-    // Felsefe (2)
     'Nazan Aslan', 'Sibel Çakır',
-    // İngilizce (6)
     'Ferhan Köse', 'Tuğba Acar', 'Banu Şentürk', 'Pelin Tan',
     'Gizem Aksu', 'Deniz Öz',
-    // Almanca (2)
     'Cem Toprak', 'Onur Bilgin',
-    // Din Kültürü (3)
     'Tolga Çiftçi', 'Berk Akar', 'Caner Gül',
-    // Beden Eğitimi (4)
     'Volkan Bingöl', 'Emre Polat', 'Burak Soylu', 'Furkan Tunç',
-    // Görsel Sanatlar (3)
     'Erdem Saraç', 'Gökhan Yiğit', 'Barış Aktan',
   ];
 
@@ -95,7 +78,6 @@ function makeLargeSchool(): SchoolBundle {
     subjectIds: [subjects.find((s) => s.name === teacherSubjects[name])!.id],
   }));
 
-  // 3 yıl × 6 şube = 18 sınıf
   const years = [
     { id: 1, name: '9. Sınıf', orderIndex: 0 },
     { id: 2, name: '10. Sınıf', orderIndex: 1 },
@@ -117,7 +99,6 @@ function makeLargeSchool(): SchoolBundle {
     }
   }
 
-  // 25 derslik
   const rooms: SchoolBundle['rooms'] = [];
   for (let i = 101; i <= 120; i++) {
     rooms.push({ id: rooms.length + 1, name: String(i), capacity: 30, building: null, notes: null });
@@ -126,8 +107,6 @@ function makeLargeSchool(): SchoolBundle {
     rooms.push({ id: rooms.length + 1, name: special, capacity: 30, building: null, notes: null });
   }
 
-  // Activities — her sınıf 14 branşı alır, ders saatleri subjectHours'tan
-  // Öğretmen dağılımı: round-robin (her branşın N öğretmeni varsa, sınıfları aralarında dağıt)
   const activities: SchoolBundle['activities'] = [];
   const teacherIndexBySubject: Record<string, number> = {};
   const teachersBySubject: Record<string, typeof teachers> = {};
@@ -168,7 +147,6 @@ function makeLargeSchool(): SchoolBundle {
     rooms,
     activities,
     constraints: [
-      // 3 öğretmen Cuma yok
       ...['Ahmet Yılmaz', 'Ayşe Demir', 'Cem Toprak'].map((name, i) => ({
         id: i + 1,
         type: 'TEACHER_NOT_AVAILABLE' as const,
@@ -183,7 +161,6 @@ function makeLargeSchool(): SchoolBundle {
         createdAt: new Date().toISOString(),
         notes: null,
       })),
-      // Beden eğitimi son derste
       {
         id: 10,
         type: 'SUBJECT_LAST_HOUR_OF_DAY' as const,
@@ -236,14 +213,11 @@ describe('FET büyük ölçek testi', () => {
     const slots = await parseTimetable(outDir, { bundle, fetActivityIdsByActivity });
     console.log(`Üretilen slot sayısı: ${slots.length}`);
 
-    // Toplam activity sayısı kadar slot dolu olmalı
     expect(slots.length).toBeGreaterThan(0);
 
-    // Constraint 1: Ahmet Yılmaz cuma'da olmamalı
     const ahmetFriday = slots.filter((s) => s.teacherName === 'Ahmet Yılmaz' && s.dayIndex === 4);
     expect(ahmetFriday.length).toBe(0);
 
-    // Constraint 2: Beden eğitiminden sonra o sınıfta o gün başka ders yok
     const bedenSlots = slots.filter((s) => s.subjectName === 'Beden Eğitimi');
     expect(bedenSlots.length).toBeGreaterThan(0);
     for (const b of bedenSlots) {
@@ -256,7 +230,6 @@ describe('FET büyük ölçek testi', () => {
       expect(later).toEqual([]);
     }
 
-    // Çakışma kontrolü: Aynı öğretmen aynı slot'ta iki sınıfta olmasın
     const byTeacherSlot = new Map<string, number>();
     for (const s of slots) {
       const key = `${s.teacherName}|${s.dayIndex}|${s.hourIndex}`;
@@ -266,7 +239,6 @@ describe('FET büyük ölçek testi', () => {
       if (count > 1) throw new Error(`Öğretmen çakışması: ${key} = ${count}`);
     }
 
-    // Çakışma kontrolü: Aynı sınıf aynı slot'ta iki dersi yok
     const byClassSlot = new Map<string, number>();
     for (const s of slots) {
       const key = `${s.className}|${s.dayIndex}|${s.hourIndex}`;

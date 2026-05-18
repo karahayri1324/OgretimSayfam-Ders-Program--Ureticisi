@@ -42,10 +42,6 @@ function buildSlotMap(slots: TimetableSlot[]): Map<string, TimetableSlot> {
   return m;
 }
 
-/**
- * Bir hücredeki metin temsilini üretir. View moduna göre hangi alanlar
- * gizleniyor onu da uygular (teacher view'da teacher tekrar etmesin).
- */
 function cellText(slot: TimetableSlot, view: ViewMode): string[] {
   const parts: string[] = [];
   if (slot.subjectName) parts.push(slot.subjectName);
@@ -55,10 +51,6 @@ function cellText(slot: TimetableSlot, view: ViewMode): string[] {
   return parts;
 }
 
-/**
- * HTML export — Türkçe karakter destekli, inline CSS. Yazdırılabilir.
- * Subject color "borderLeft" olarak korunur.
- */
 export function buildHtml(ctx: ExportContext): string {
   const { days, hours, viewMode, entityName, schoolName, generatedAt, filteredSlots, subjects } =
     ctx;
@@ -139,20 +131,11 @@ export function buildHtml(ctx: ExportContext): string {
 </html>`;
 }
 
-/**
- * Tarayıcı/Renderer ortamında HTML'i blob olarak indirir.
- * UTF-8 BOM eklenmez — modern uygulamalar (Chrome, MS Word) charset attr'unu
- * okuyor; metin Türkçe karakter dahil doğru görünür.
- */
 export function downloadHtml(html: string, filename: string): void {
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   triggerBlobDownload(blob, filename);
 }
 
-/**
- * Tablo verisini xlsx olarak yazar. Hücre içeriği "{Ders}\n{Öğretmen}\n{...}".
- * Sütun genişlikleri otomatik hesaplanır.
- */
 export function downloadXlsx(ctx: ExportContext, filename: string): void {
   const { days, hours, filteredSlots, viewMode } = ctx;
   const slotMap = buildSlotMap(filteredSlots);
@@ -175,8 +158,6 @@ export function downloadXlsx(ctx: ExportContext, filename: string): void {
   });
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
-  // Excel hücrelerinde satır arası newline gösterimi için wrap text gerekli;
-  // worksheet/cell-level format. Tüm hücrelere uygulayalım.
   const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1');
   for (let R = range.s.r; R <= range.e.r; R++) {
     for (let C = range.s.c; C <= range.e.c; C++) {
@@ -195,10 +176,6 @@ export function downloadXlsx(ctx: ExportContext, filename: string): void {
   XLSX.writeFile(wb, filename);
 }
 
-/**
- * "Ders Programı 2026-05-16.{ext}" formatında varsayılan dosya adı.
- * Boşluklar korunur (Türkçe dosya adlarıyla sorun değil).
- */
 export function defaultFilename(
   entityName: string,
   ext: 'pdf' | 'xlsx' | 'html',
@@ -225,7 +202,5 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  // küçük gecikme ile URL'i serbest bırak — Safari'de erken revoke download'u
-  // bozabiliyor.
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }

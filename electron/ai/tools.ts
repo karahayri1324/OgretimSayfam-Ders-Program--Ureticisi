@@ -113,13 +113,8 @@ function buildActivityViews(): ActivityView[] {
   }));
 }
 
-// --- Tools -----------------------------------------------------------------
 
 export const tools = {
-  /**
-   * Bir öğretmenin girdiği tüm dersleri ve toplam saatini döner.
-   * args: { teacher: string }
-   */
   getTeacherActivities(args: ToolArgs): ToolResult {
     const name = requireString(args, 'teacher');
     if (!name) return { error: "'teacher' parametresi gerekli." };
@@ -142,10 +137,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Bir sınıfın tüm derslerini ve toplam saatini döner.
-   * args: { class: string }
-   */
   getClassActivities(args: ToolArgs): ToolResult {
     const name = requireString(args, 'class');
     if (!name) return { error: "'class' parametresi gerekli." };
@@ -165,10 +156,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Bir branşı veren öğretmenleri (teacher_subjects + activities ile) döner.
-   * args: { subject: string }
-   */
   getSubjectTeachers(args: ToolArgs): ToolResult {
     const name = requireString(args, 'subject');
     if (!name) return { error: "'subject' parametresi gerekli." };
@@ -200,10 +187,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Belirli bir branş × sınıf aktivitesi detayını döner.
-   * args: { class: string, subject: string }
-   */
   getActivityDetails(args: ToolArgs): ToolResult {
     const className = requireString(args, 'class');
     const subjectName = requireString(args, 'subject');
@@ -230,10 +213,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Fuzzy öğretmen araması — tek bir kesin sonuç yoksa adayları listeler.
-   * args: { query: string }
-   */
   searchTeacher(args: ToolArgs): ToolResult {
     const q = requireString(args, 'query');
     if (!q) return { error: "'query' parametresi gerekli." };
@@ -252,11 +231,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Bir branşı verebilecek (teacher_subjects ilişkisinden) öğretmenleri döner.
-   * getSubjectTeachers'tan farkı: activities'ten gelmez; sadece atama.
-   * args: { subject: string }
-   */
   getTeachersBySubject(args: ToolArgs): ToolResult {
     const name = requireString(args, 'subject');
     if (!name) return { error: "'subject' parametresi gerekli." };
@@ -278,9 +252,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Aktif kısıtlamaların özetini döner: toplam sayı, tip dağılımı, kaynak dağılımı.
-   */
   countConstraints(): ToolResult {
     const all = constraintsRepo.list();
     const byType: Record<string, number> = {};
@@ -302,9 +273,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Program iskelet ayarlarını döner: gün ve saat listesi.
-   */
   getScheduleSettings(): ToolResult {
     const days = daysRepo.list().map((d) => d.name);
     const hours = hoursRepo.list().map((h) => ({
@@ -322,9 +290,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Aktif (uygulanan) kısıtlamaları liste şeklinde döner — özet bilgiyle.
-   */
   listActiveConstraints(): ToolResult {
     const all = constraintsRepo.listActive();
     const summary = all.map((c) => ({
@@ -342,18 +307,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Pre-flight validation — kullanıcı "Programı Üret" demeden önce
-   * AI'nın "şu sıkıntılar var, önce çöz" diyebilmesi için.
-   *
-   * Kontrol edilenler:
-   *   - Sınıfların haftalık ders saati gün×saat toplam slot'u aşıyor mu?
-   *   - Öğretmenlerin haftalık atanmış saat targetlerini aşıyor mu?
-   *   - Öğretmen-branş eşleştirmesi eksik aktivite var mı?
-   *   - Hiç öğretmen / sınıf / aktivite tanımlı mı?
-   *
-   * args: {} (parametresiz)
-   */
   validateSchedule(_args: ToolArgs): ToolResult {
     const teachers = teachersRepo.list();
     const classes = classesRepo.list();
@@ -392,7 +345,6 @@ export const tools = {
       });
     }
 
-    // Sınıf bazlı toplam saat ↔ haftalık slot kapasitesi
     for (const c of classes) {
       const classActs = activities.filter((a) => a.classId === c.id);
       const total = classActs.reduce((s, a) => s + a.weeklyHours, 0);
@@ -424,7 +376,6 @@ export const tools = {
       }
     }
 
-    // Öğretmen bazlı toplam saat ↔ weeklyTarget
     for (const t of teachers) {
       const teacherActs = activities.filter((a) => a.teacherId === t.id);
       const total = teacherActs.reduce((s, a) => s + a.weeklyHours, 0);
@@ -440,7 +391,6 @@ export const tools = {
       }
     }
 
-    // Öğretmen-subject eşleştirme eksikleri
     for (const a of activities) {
       if (a.teacherId == null) {
         const klass = classes.find((c) => c.id === a.classId);
@@ -466,12 +416,6 @@ export const tools = {
     return { result: { ...summary, issues } };
   },
 
-  /**
-   * Son üretilen çizelge istatistikleri. AI'nın "kaç slot oluştu, en yoğun gün" gibi
-   * sorulara cevap verebilmesi için.
-   *
-   * args: { class?: string }  → sınıf verilirse sadece o sınıf için
-   */
   getTimetableStats(args: ToolArgs): ToolResult {
     const latest = timetablesRepo.latest();
     if (!latest) {
@@ -497,7 +441,6 @@ export const tools = {
     const hoursPerDay = hoursRepo.list().length || 8;
     const totalCapacity = days.length * hoursPerDay;
 
-    // Gün bazlı yoğunluk
     const byDay = new Map<number, number>();
     for (const s of slots) {
       byDay.set(s.dayIndex, (byDay.get(s.dayIndex) ?? 0) + 1);
@@ -509,13 +452,11 @@ export const tools = {
     const busiest = [...dayStats].sort((a, b) => b.slots - a.slots)[0];
     const emptiest = [...dayStats].sort((a, b) => a.slots - b.slots)[0];
 
-    // Boş slot sayısı (sınıf × gün × saat - dolu)
     const expectedSlots = className
       ? totalCapacity
       : classesRepo.list().length * totalCapacity;
     const gaps = expectedSlots - slots.length;
 
-    // Öğretmen yoğunluğu (top 5)
     const teacherLoad = new Map<string, number>();
     for (const s of slots) {
       if (!s.teacherName) continue;
@@ -526,7 +467,6 @@ export const tools = {
       .slice(0, 5)
       .map(([name, hours]) => ({ teacher: name, hours }));
 
-    // Derslik kullanımı
     const roomUse = new Map<string, number>();
     for (const s of slots) {
       if (!s.roomName) continue;
@@ -557,14 +497,7 @@ export const tools = {
     };
   },
 
-  // ════════════════════════════════════════════════════════════════════
-  // Timetable inceleme tool'ları — AI üretilmiş çizelgeyi sorgular
-  // ════════════════════════════════════════════════════════════════════
 
-  /**
-   * Spesifik bir (class, day, hour) slot'undaki ders bilgisini döner.
-   * "9A Cuma 8. ders kim?" gibi sorulara cevap için.
-   */
   getTimetableSlot(args: ToolArgs): ToolResult {
     const className = requireString(args, 'class');
     const dayName = requireString(args, 'day');
@@ -683,7 +616,6 @@ export const tools = {
         };
       });
 
-    // Gap hesabı: gün başına ilk-son arası, dolu olmayan slot sayısı
     let gaps = 0;
     const byDay = new Map<number, number[]>();
     for (const s of mine) {
@@ -710,9 +642,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Bir dersliğin haftalık kullanım programı.
-   */
   getRoomTimetable(args: ToolArgs): ToolResult {
     const roomName = requireString(args, 'room');
     if (!roomName) return { error: "'room' gerekli." };
@@ -748,9 +677,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Bir günün tüm derslerini (opsiyonel sınıf filtresi ile) listeler.
-   */
   getDayTimetable(args: ToolArgs): ToolResult {
     const dayName = requireString(args, 'day');
     if (!dayName) return { error: "'day' gerekli." };
@@ -794,9 +720,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Belirli bir gün+saat'te kim ne yapıyor — tüm sınıflar.
-   */
   whoIsTeaching(args: ToolArgs): ToolResult {
     const dayName = requireString(args, 'day');
     if (!dayName) return { error: "'day' gerekli." };
@@ -831,10 +754,6 @@ export const tools = {
     };
   },
 
-  /**
-   * Bir sınıfın / öğretmenin / dersliğin BOŞ slot'larını listeler.
-   * Args'tan biri zorunlu: { class } veya { teacher } veya { room }
-   */
   getFreeSlots(args: ToolArgs): ToolResult {
     const className = requireString(args, 'class');
     const teacherName = requireString(args, 'teacher');
@@ -904,10 +823,6 @@ export type ToolName = keyof typeof tools;
 
 export const KNOWN_TOOLS: readonly string[] = Object.keys(tools);
 
-/**
- * Tool adı + args alır, ilgili tool'u çağırır.
- * Bilinmeyen tool için hata döner.
- */
 export function executeTool(name: string, args: ToolArgs = {}): ToolResult {
   if (!Object.prototype.hasOwnProperty.call(tools, name)) {
     return { error: `Bilinmeyen tool: '${name}'. Geçerli tool'lar: ${KNOWN_TOOLS.join(', ')}` };

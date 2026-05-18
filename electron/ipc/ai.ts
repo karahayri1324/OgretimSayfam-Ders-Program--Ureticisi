@@ -149,19 +149,6 @@ export function registerAiHandlers(): void {
     }
   });
 
-  /**
-   * AI'nın "data_mutation" yanıtındaki action listesini kullanıcı onayından
-   * sonra uygular. Tek tek action'ları sırayla işler; bazı kısımları başarısız
-   * olsa da diğerleri devam eder (kısmen başarı). Sonuç objesi UI'a döner.
-   */
-  /**
-   * AI'nın "schedule_update" yanıtını kullanıcı onayından sonra DB'ye uygular.
-   * Action'a göre ilgili schedule-executor handler'ı çağırır
-   * (extend_breaks | add_hours_to_day | set_hours_per_day | remove_day | add_day).
-   *
-   * Başarılı yanıtta { days, hours, dayHours } snapshot döner — UI tek
-   * seferde useScheduleStore.load veya state set edebilir.
-   */
   ipcMain.handle(
     'ai:applyScheduleUpdate',
     async (_evt, raw: unknown): Promise<Result<ScheduleUpdateApplyResult>> => {

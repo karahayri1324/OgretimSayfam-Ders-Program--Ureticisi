@@ -183,7 +183,6 @@ describe('fet-cl entegrasyon (sadece sistem fet-cl varsa)', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('Simulation successful');
 
-    // activities.xml bulunmalı
     let found: string | null = null;
     const walk = (dir: string) => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -197,7 +196,6 @@ describe('fet-cl entegrasyon (sadece sistem fet-cl varsa)', () => {
 
     const acts = fs.readFileSync(found!, 'utf-8');
     expect(acts).toContain('<Activities_Timetable>');
-    // 4 (9A Mat) + 2 (9B Beden) = 6 Activity
     expect(acts.match(/<Activity>/g)?.length).toBe(6);
   });
 });

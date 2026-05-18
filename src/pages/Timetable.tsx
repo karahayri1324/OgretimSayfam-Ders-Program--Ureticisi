@@ -144,11 +144,6 @@ export default function Timetable() {
     slotMap.set(`${s.dayIndex}_${s.hourIndex}`, s);
   }
 
-  /**
-   * Aktif view + seçili entity için export context'i kurar.
-   * Boş entity'de export'u devre dışı bırakıyoruz, dolayısıyla null
-   * dönmesi beklenmez ama tip güvenliği için defensive.
-   */
   function buildExportContext(): ExportContext | null {
     if (!result || selectedId == null) return null;
     const entity = entityList.find((e) => e.id === selectedId);

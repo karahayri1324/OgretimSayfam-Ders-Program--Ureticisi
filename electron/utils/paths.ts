@@ -16,9 +16,6 @@ export function tempDir(prefix = 'dpo-'): string {
   return base;
 }
 
-/**
- * Platform-spesifik FET binary yolunu döner.
- */
 export function fetBinaryPath(): string {
   const platform = process.platform;
   const binaryName = platform === 'win32' ? 'fet-cl.exe' : 'fet-cl';
@@ -39,19 +36,10 @@ export function fetBinaryPath(): string {
   return path.join(process.resourcesPath, 'bin', binaryName);
 }
 
-/** Chromium'un kendi state'i için userData (Cache, Cookies, vs.) — kullanıcı buraya bakmaz. */
 export function userDataDir(): string {
   return app.getPath('userData');
 }
 
-/**
- * Kullanıcının erişebileceği, anlaşılır bir konum.
- *  Linux/Mac : ~/Documents/ÖğretimSayfam Ders Programı/
- *  Windows   : %USERPROFILE%\Documents\ÖğretimSayfam Ders Programı\
- *
- * data.db, log dosyaları ve export'lar buraya yazılır. Chromium cache/cookies
- * userData'da kalır (kullanıcı görmez).
- */
 export function appDataDir(): string {
   const docs = app.getPath('documents');
   const dir = path.join(docs, 'ÖğretimSayfam Ders Programı');
@@ -59,14 +47,12 @@ export function appDataDir(): string {
   return dir;
 }
 
-/** Log klasörü — kullanıcı dostu konum. */
 export function logsDir(): string {
   const dir = path.join(appDataDir(), 'loglar');
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
-/** SQLite veritabanı dosya yolu. */
 export function dbPath(): string {
   return path.join(appDataDir(), 'veri.db');
 }

@@ -239,9 +239,6 @@ export default function LoginDemo() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// AI sohbet paneli
-// ─────────────────────────────────────────────────────────────
 function DemoChatPanel({ st }: { st: DerivedState }) {
   return (
     <div
@@ -558,9 +555,6 @@ function Caret({ color, visible }: { color: string; visible: boolean }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Mock pages — animasyon için ufak ve veri-bağımsız taklit ekranlar
-// ─────────────────────────────────────────────────────────────
 const NAV: { id: string; label: string; icon: typeof Home }[] = [
   { id: 'home', label: 'Başlangıç', icon: Home },
   { id: 'subjects', label: 'Dersler', icon: BookOpen },
@@ -1281,9 +1275,6 @@ function Row({
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Mini UI helpers
-// ─────────────────────────────────────────────────────────────
 function Header({
   title,
   count,

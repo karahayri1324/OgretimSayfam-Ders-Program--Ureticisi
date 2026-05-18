@@ -67,7 +67,6 @@ export async function runFet(
     const onAbort = () => {
       cancelled = true;
       try { proc.kill('SIGTERM'); } catch { /* ignore */ }
-      // Inatçı işlemleri 5sn sonra zorla kapat
       setTimeout(() => {
         try { proc.kill('SIGKILL'); } catch { /* ignore */ }
       }, 5000).unref?.();
@@ -139,8 +138,6 @@ export async function runFet(
       }
 
       if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-        // FET zaman sınırını aştıysa kendisi de SIGTERM atabilir; cancel'la
-        // çakışmasın diye yukarıdaki branch'te ele alındı.
         resolve({
           ok: false,
           errorCode: 'TIMEOUT',
@@ -153,8 +150,6 @@ export async function runFet(
       }
 
       if (code === 0) {
-        // "Could not generate" stdout'a yazılır ama exit code 0 olabilir;
-        // bunu da kontrol et.
         if (/could not (generate|find)/i.test(stdoutBuf)) {
           resolve({
             ok: false,
@@ -188,7 +183,6 @@ export async function runFet(
         return;
       }
 
-      // exit code != 0
       const errFile = await readErrorFiles(outputDir);
       const raw = [errFile, stderrBuf, stdoutBuf].filter(Boolean).join('\n');
       const cls = classifyError(raw);
@@ -204,27 +198,7 @@ export async function runFet(
   });
 }
 
-// ---------- yardımcılar ----------
 
-/**
- * fet-cl stdout/stderr'inden gelen "kozmetik" gürültü satırlarını UI'a
- * göstermemek için filtreler.
- *
- *  - "Translation for specified language not loaded ..." — fet-cl, sistem
- *    yolundaki `fet_tr.qm`'i bulamadığında uyarı basar. Production'da
- *    bundled translations/ dizini doğru yerde olduğundan görülmez; ancak
- *    geliştirme modunda `/usr/bin/fet-cl` (sistem) kullanılınca gözükür.
- *    Bu mesaj kullanıcı için anlamsız + İngilizce + her Generate'de tekrar
- *    eder → suppress.
- *  - "FET searched for the translation file ..." — yukarıdaki uyarının
- *    detay satırı.
- *  - "Opening a file generated with a newer version ..." — bundled FET
- *    6.8.5 ile yeni sürüm XML schema farkı uyarısı; bizim üretimimiz uyumlu.
- *  - "Your FET version: 6.8.5, file version: ..." — yukarıdaki bilgi
- *    detayı.
- *
- * Diğer hata/uyarı satırları aynen renderer'a iletilir.
- */
 function isCosmeticNoiseLine(line: string): boolean {
   const t = line.trim();
   if (!t) return true;
@@ -233,22 +207,13 @@ function isCosmeticNoiseLine(line: string): boolean {
     /FET searched for the translation file/i.test(t) ||
     /Opening a file generated with a newer version/i.test(t) ||
     /^Your FET version:/i.test(t) ||
-    // Türkçe karşılıkları (translation yüklendiğinde):
     /Belirtilen dil için çeviri yüklenmedi/i.test(t) ||
     /Daha yeni bir sürümle oluşturulmuş/i.test(t) ||
     /^Ders programı versiyonu/i.test(t) ||
-    // Başlık satırları ("Title: FET warning", "Başlık: Bilgi" vb.) bu uyarıları çevreler
     /^(Title|Başlık):\s*(FET\s+)?(warning|information|Uyarı|Bilgi)/i.test(t)
   );
 }
 
-/**
- * stdout satırından progress event'i parse eder. FET şu tip satırlar yazar:
- *  - "Starting timetable generation..."
- *  - "Activity X / Y placed"
- *  - "Simulation successful"
- *  - "Could not generate ..."
- */
 function parseProgressLine(line: string): FetProgressEvent | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
@@ -256,7 +221,6 @@ function parseProgressLine(line: string): FetProgressEvent | null {
   if (/starting timetable generation/i.test(trimmed)) {
     return { kind: 'progress', value: 0, message: 'Üretim başladı' };
   }
-  // "X out of Y activities placed" benzeri
   const m = trimmed.match(/(\d+)\s*(?:out of|\/|of)\s*(\d+)/i);
   if (m) {
     const placed = parseInt(m[1], 10);
@@ -275,9 +239,6 @@ function parseProgressLine(line: string): FetProgressEvent | null {
   return null;
 }
 
-/**
- * outputDir/logs altında *.txt veya hata dosyaları varsa içeriğini topla.
- */
 async function readErrorFiles(outputDir: string): Promise<string> {
   const logsDir = path.join(outputDir, 'logs');
   try {

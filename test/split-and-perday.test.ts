@@ -55,11 +55,8 @@ function baseBundle(): SchoolBundle {
       { id: 3, name: 'Müzik Odası', capacity: 30, building: null, notes: null },
     ],
     activities: [
-      // 9A Matematik: 5 saat
       { id: 1, classId: 1, subjectId: 1, teacherId: 1, weeklyHours: 5, blockDuration: 1, notes: null, splitGroupId: null },
-      // 9A Görsel Sanatlar: 1 saat — split (eş)
       { id: 2, classId: 1, subjectId: 2, teacherId: 2, weeklyHours: 1, blockDuration: 1, notes: null, splitGroupId: 1 },
-      // 9A Müzik: 1 saat — split (eş)
       { id: 3, classId: 1, subjectId: 3, teacherId: 3, weeklyHours: 1, blockDuration: 1, notes: null, splitGroupId: 1 },
     ],
     constraints: [],
@@ -71,7 +68,6 @@ describe('buildFetXml — split activities', () => {
   it('aynı split_group_id\'li aktiviteler için ConstraintActivitiesSameStartingTime üretir', () => {
     const out = buildFetXml(baseBundle());
     expect(out.xml).toContain('ConstraintActivitiesSameStartingTime');
-    // Görsel sanatlar (DB id=2) ve müzik (DB id=3) FET id'leri:
     const visualIds = out.fetActivityIdsByActivity.get(2) ?? [];
     const musicIds = out.fetActivityIdsByActivity.get(3) ?? [];
     expect(visualIds.length).toBeGreaterThan(0);
@@ -90,7 +86,6 @@ describe('buildFetXml — split activities', () => {
 describe('buildFetXml — per-day hours (kısa günler)', () => {
   it('kısa günler için ConstraintBreakTimes üretir', () => {
     const b = baseBundle();
-    // Cuma 5 saat, diğerleri 6 (global). Cuma için day_hours: 5 satır.
     b.dayHours = Array.from({ length: 5 }, (_, i) => ({
       id: i + 1,
       dayId: 5, // Cuma
@@ -101,19 +96,16 @@ describe('buildFetXml — per-day hours (kısa günler)', () => {
     }));
     const out = buildFetXml(b);
     expect(out.xml).toContain('ConstraintBreakTimes');
-    // 6. saatin Cuma için bloklandığını gör (Hour adı 6. Ders)
     expect(out.xml).toMatch(/<Day>Cuma<\/Day>\s*<Hour>6\. Ders<\/Hour>/);
   });
 
   it('global ile tüm günler aynı saat sayısı → break time eklenmez', () => {
     const out = buildFetXml(baseBundle());
-    // dayHours boş → break time auto eklenmemeli
     expect(out.xml).not.toContain('Per-day kısa gün boş saatleri');
   });
 
   it('daha uzun bir gün global\'i aşıyorsa Hours_List o uzunluğa yetişir', () => {
     const b = baseBundle();
-    // Pazartesi 8 saat (global 6 saat) — Hours_List 8 olmalı
     b.dayHours = Array.from({ length: 8 }, (_, i) => ({
       id: i + 1,
       dayId: 1, // Pazartesi
@@ -124,7 +116,6 @@ describe('buildFetXml — per-day hours (kısa günler)', () => {
     }));
     const out = buildFetXml(b);
     expect(out.xml).toMatch(/<Number_of_Hours>8<\/Number_of_Hours>/);
-    // Salı/Çarşamba/Perşembe/Cuma için 7,8. saatler kapalı olmalı
     expect(out.xml).toMatch(/<Day>Salı<\/Day>\s*<Hour>7\. Ders<\/Hour>/);
     expect(out.xml).toMatch(/<Day>Cuma<\/Day>\s*<Hour>8\. Ders<\/Hour>/);
   });
@@ -164,7 +155,6 @@ describe.skipIf(!haveFet)('FET entegrasyon — split + per-day', () => {
 
   it('per-day kısa gün: o saatte hiç aktivite olmaz', async () => {
     const bundle = baseBundle();
-    // Cuma 5 saat (global 6) — Cuma 6. saat kapalı olmalı.
     bundle.dayHours = Array.from({ length: 5 }, (_, i) => ({
       id: i + 1,
       dayId: 5,
@@ -193,7 +183,6 @@ describe.skipIf(!haveFet)('FET entegrasyon — split + per-day', () => {
       bundle,
       fetActivityIdsByActivity: out.fetActivityIdsByActivity,
     });
-    // Cuma (dayIndex=4) 6. saat (hourIndex=5) hiç dolmamalı.
     const fridayLast = slots.filter(s => s.dayIndex === 4 && s.hourIndex === 5);
     expect(fridayLast.length).toBe(0);
   }, 90_000);

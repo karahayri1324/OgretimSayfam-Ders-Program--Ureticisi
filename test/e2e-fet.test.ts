@@ -125,14 +125,11 @@ describe('FET end-to-end pipeline', () => {
     const slots = await parseTimetable(outDir, { bundle, fetActivityIdsByActivity });
     expect(slots.length).toBeGreaterThan(0);
 
-    // Constraint 1: Ahmet Yılmaz should NOT teach on Friday (dayIndex 4)
     const ahmetFriday = slots.filter(
       (s) => s.teacherName === 'Ahmet Yılmaz' && s.dayIndex === 4,
     );
     expect(ahmetFriday.length).toBe(0);
 
-    // Constraint 2: Beden Eğitimi must be the last activity of that class on its scheduled day
-    // (FET's "EndsStudentsDay" → no other activity for the same class on that day at a later hour)
     const bedenSlots = slots.filter((s) => s.subjectName === 'Beden Eğitimi');
     expect(bedenSlots.length).toBeGreaterThan(0);
     for (const b of bedenSlots) {

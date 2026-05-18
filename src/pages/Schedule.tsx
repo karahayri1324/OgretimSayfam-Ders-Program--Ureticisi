@@ -96,7 +96,6 @@ export default function Schedule() {
     [selectedDays],
   );
 
-  // Hangi günlerde özel saat tanımlı?
   const customizedDayIds = useMemo(() => {
     const s = new Set<number>();
     for (const dh of dayHours) s.add(dh.dayId);
@@ -380,7 +379,6 @@ function PerDayEditor({
   onRevert: (dayId: number) => Promise<void>;
   onApplyBulkToDay: (dayId: number) => void;
 }) {
-  // Yerel state: gün → satırlar (custom modunda)
   const [editing, setEditing] = useState<Map<number, HourRow[]>>(new Map());
 
   const orderedDays = useMemo(
@@ -608,7 +606,6 @@ function PerDayEditor({
   );
 }
 
-/** "mon"/"fri" → "Pazartesi"/"Cuma" (saveDays storage formatına bakar). */
 function prettyDayName(raw: string): string {
   const found = DAY_DEFS.find((d) => d.id === raw);
   return found ? found.name : raw;

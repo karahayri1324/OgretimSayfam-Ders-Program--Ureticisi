@@ -118,23 +118,10 @@ async function singleRoundtrip(
 }
 
 export const aiClient = {
-  /**
-   * Tek round — backward compat. Tool çağrılarını otomatik çözmez.
-   * Yeni kodda parseWithTools tercih edilmeli.
-   */
   async parse({ text, context, history = [] }: ParseRequest): Promise<AIResponse> {
     return singleRoundtrip(text, context, [], history);
   },
 
-  /**
-   * Agentic round — AI tool_call dönerse tool'u çalıştırıp tool history'i
-   * büyüterek tekrar AI'ya gönderir. Max 3 iterasyon.
-   *
-   * Mock server tool sonucunu kendi içinde kullanıp tek seferde
-   * query response döndürebileceği için pratikte 1-2 round yeter.
-   *
-   * `history`: önceki kullanıcı/asistan mesajları (multi-turn context).
-   */
   async parseWithTools({
     text,
     context,
@@ -149,7 +136,6 @@ export const aiClient = {
         return { response, toolCalls: toolHistory };
       }
 
-      // Tool çağır
       const toolName = response.tool;
       const args = response.args ?? {};
       const result = executeTool(toolName, args);
@@ -162,8 +148,6 @@ export const aiClient = {
       toolHistory.push({ role: 'tool', tool: toolName, args, result });
     }
 
-    // 3 iterasyon dolmuş ve hâlâ tool_call istiyor — son çareyle "anlayamadım"
-    // benzeri bir response döndür.
     log.warn('AI tool iterasyon limiti aşıldı', { max: MAX_TOOL_ITERATIONS });
     const fallback: AIResponse = {
       kind: 'query',

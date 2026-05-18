@@ -104,7 +104,6 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
         });
       }
 
-      // 3) Tempdir hazırla
       tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dpo-'));
       const inputFile = path.join(tmpDir, 'input.fet');
       const outDir = path.join(tmpDir, 'out');
@@ -113,14 +112,12 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
 
       emit({ kind: 'progress', value: 0.05, message: 'FET motoru başlatılıyor' });
 
-      // 4) FET'i çalıştır + progress relay
       const onFetProgress = (ev: FetProgressEvent) => {
         switch (ev.kind) {
           case 'log':
             emit({ kind: 'log', line: ev.line });
             break;
           case 'progress':
-            // 0.05-0.95 aralığına yerleştir
             emit({
               kind: 'progress',
               value: 0.05 + Math.min(1, Math.max(0, ev.value)) * 0.9,
@@ -139,7 +136,6 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
         }
       };
 
-      // opts.timeLimit verilmemişse settings'ten oku, o da yoksa 120s.
       const effectiveTimeLimit =
         opts.timeLimit ?? readFetTimeLimitFromSettings();
 
@@ -164,7 +160,6 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
         });
       }
 
-      // 5) DB'ye kaydet
       const savedId = timetablesRepo.save({
         fetInputXml: built.xml,
         status: 'success',
@@ -172,9 +167,6 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
         durationMs: fetResult.durationMs,
         slots: fetResult.timetable.map((s) => ({
           activityId: s.activityId,
-          // FET Activity Id ↔ DB activity id: parser teacherName/subjectName'ı
-          // dolduruyor, source DB activity'yi bulmak için fetActivityIdsByActivity'i
-          // tersine çevirip kaydediyoruz.
           sourceActivityId: lookupDbActivityId(built.fetActivityIdsByActivity, s.activityId),
           dayIndex: s.dayIndex,
           hourIndex: s.hourIndex,
@@ -205,8 +197,6 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
       return err('UNKNOWN', `Beklenmeyen hata: ${message}`, message);
     } finally {
       activeController = null;
-      // tmpDir'i geride bırakıyoruz; kullanıcı/destek ekibi loglara bakabilsin.
-      // İleride: settings'ten "auto-cleanup temp dirs" seçeneği.
       void tmpDir;
     }
   });
@@ -224,7 +214,6 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
   );
 }
 
-/** FET Activity Id'yi DB activity id'ye çevirir. */
 function lookupDbActivityId(
   map: Map<number, number[]>,
   fetId: number,
@@ -235,24 +224,6 @@ function lookupDbActivityId(
   return null;
 }
 
-/**
- * "Bu atlama doğal/zararsız mı?" testi. AI veya preset'in oluşturduğu
- * constraint'in bağlamı henüz yokken atlanması (örn. henüz activity yok →
- * "En az 2 aktivite gerekli") kullanıcı için bilgi değeri taşımaz.
- *
- * Kullanıcıya gösterilmesi gereken atlamalar:
- *  - "Bilinmeyen öğretmen/sınıf/ders/derslik/gün" → veride yazım hatası
- *    veya silinmiş referans (gerçek sorun).
- *  - "Geçerli slot bulunamadı" → AI çıkarımı yanlış (gerçek sorun).
- *
- * Gizlenenler:
- *  - "En az N aktivite gerekli", "activityIds boş", "subject alanı boş" vb.
- *    → constraint'in kendi ön koşulu sağlanmamış.
- *  - "Eşleşen aktivite yok" → constraint targetı henüz okul verisinde yok.
- *  - "Ardışıklık için en az 2 aktivite gerekli" → split olmayan ders.
- *  - "Çiftleştirilebilir aktivite yok" → yine doğal sınır.
- *  - "İlk/son ders saati tanımsız" → konfigürasyon eksik (settings sayfası).
- */
 function isBenignSkipReason(reason: string): boolean {
   return (
     /^En az \d+ aktivite gerekli/i.test(reason) ||

@@ -130,7 +130,6 @@ async function findActivitiesXml(outputDir: string): Promise<string | null> {
     if (!e.isDirectory()) continue;
     const candidate = path.join(ttDir, e.name, `${e.name}_activities.xml`);
     if (await exists(candidate)) return candidate;
-    // FET bazen farklı naming kullanabilir — dizindeki *_activities.xml'i ara
     const sub = await fs.promises.readdir(path.join(ttDir, e.name));
     const match = sub.find(f => f.endsWith('_activities.xml'));
     if (match) return path.join(ttDir, e.name, match);

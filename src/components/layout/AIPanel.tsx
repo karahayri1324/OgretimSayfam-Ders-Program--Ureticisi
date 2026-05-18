@@ -217,7 +217,6 @@ export default function AIPanel() {
     }
   }
 
-  /** İlgili stores'ları uygulanan işlem türlerine göre yeniden yükler. */
   async function reloadAffectedStores(actions: DataMutationAction[]): Promise<void> {
     const ops = new Set(actions.map((a) => a.op));
     const promises: Array<Promise<unknown>> = [];
@@ -232,10 +231,6 @@ export default function AIPanel() {
     await Promise.all(promises);
   }
 
-  /**
-   * Verilen metni AI'a gönderir. handleSend (input'tan) ve pendingPrompt
-   * (mode='send') gibi otomatik gönderim path'lerinin ortak yardımcısı.
-   */
   async function doSend(raw: string): Promise<void> {
     const text = raw.trim();
     if (!text || loading) return;
@@ -276,10 +271,6 @@ export default function AIPanel() {
     void doSend(input);
   }
 
-  /**
-   * Mesaj geçmişini hem UI'dan hem de DB (ai_messages) tarafından temizler.
-   * Onay diyaloğu standart browser confirm — toast ile sonucu duyurur.
-   */
   async function handleClearChat(): Promise<void> {
     if (messages.length === 0) return;
     if (!window.confirm(tr.ai.clearChatConfirm)) return;
@@ -292,7 +283,6 @@ export default function AIPanel() {
     }
   }
 
-  /** Quick-start hücresinin tıklanması → mevcut input'u doldur ve textarea'ya odaklan. */
   function handleQuickStart(prompt: string): void {
     setInput(prompt);
     setTimeout(() => {
@@ -324,7 +314,6 @@ export default function AIPanel() {
           updateMessage(msg.id, { status: 'rejected' });
           return;
         }
-        // Snapshot UI'a yansısın — schedule store yeniden yüklenir.
         await loadSchedule();
         const data = res.data as { message?: string };
         toastSuccess('Program ayarı uygulandı', data?.message ?? r.explanation);
@@ -339,10 +328,6 @@ export default function AIPanel() {
         explanation: string;
       };
 
-      // 3 farklı action grubu:
-      //  - export_timetable: renderer-side, pendingExport sinyaliyle Timetable'a yönlendir
-      //  - navigate_to: AIPanel'de intercept, navigate() çağrısı
-      //  - Diğerleri: normal applyMutations IPC
       const exportActions = r.actions.filter((a) => a.op === 'export_timetable');
       const navActions = r.actions.filter((a) => a.op === 'navigate_to');
       const otherActions = r.actions.filter(
@@ -375,16 +360,12 @@ export default function AIPanel() {
             );
           }
 
-          // Auto-navigate: data değişikliği yapıldıysa ilgili sayfaya geç ki
-          // kullanıcı AI'nın yaptığı şeyi manuel UI'da görebilsin.
-          // Explicit navigate_to varsa öncelik onda — auto-nav atlanır.
           if (navActions.length === 0 && exportActions.length === 0) {
             const target = pickNavigationTarget(otherActions);
             if (target) navigate(target);
           }
         }
 
-        // Export action'ları
         for (const ea of exportActions) {
           const format = String(
             (ea.params as { format?: string }).format ?? 'pdf',
@@ -403,7 +384,6 @@ export default function AIPanel() {
           );
         }
 
-        // Explicit navigate_to action'ları
         for (const na of navActions) {
           const raw = String((na.params as { page?: string }).page ?? '').toLowerCase();
           const page = raw.startsWith('/') ? raw : `/${raw}`;
@@ -416,14 +396,10 @@ export default function AIPanel() {
         return;
       }
     } else if (kind === 'run_solver') {
-      // AI'nın "programı üret" komutu — useGenerateStore.run kullanıcı
-      // butonu basmış gibi tetikler. Onayı sonra Generate sayfasına yönlendir
-      // ki progress bar ve log akarken görünsün.
       const r = msg.response as AIRunSolverResponse;
       const tl = r.timeLimitSec ?? 120;
       try {
         navigate('/generate');
-        // Generate sayfası mount olsun + store'u init etsin
         setTimeout(() => {
           runSolver(tl).catch((e) => {
             toastError('Üretim başlatılamadı', String(e));
@@ -476,7 +452,6 @@ export default function AIPanel() {
           const startX = e.clientX;
           const startW = panelWidth;
           const onMove = (mv: MouseEvent) => {
-            // Sürükledikçe sol → panel genişler (delta negatif olur, çevir)
             const next = Math.max(
               PANEL_WIDTH_MIN,
               Math.min(PANEL_WIDTH_MAX, startW + (startX - mv.clientX)),
@@ -487,7 +462,6 @@ export default function AIPanel() {
             setResizing(false);
             window.removeEventListener('mousemove', onMove);
             window.removeEventListener('mouseup', onUp);
-            // panelWidth değişikliği zaten useEffect ile localStorage'a yazılıyor
           };
           window.addEventListener('mousemove', onMove);
           window.addEventListener('mouseup', onUp);
@@ -583,10 +557,6 @@ export default function AIPanel() {
   );
 }
 
-/**
- * Sohbet boşken görünen 4-buton'lu hızlı başlangıç bölmesi.
- * Tıklayınca ilgili prompt input'a yazılır (otomatik göndermez).
- */
 function QuickStartGrid({ onPick }: { onPick: (prompt: string) => void }) {
   const items: Array<{
     key: keyof typeof tr.ai.quickStarts;
@@ -623,15 +593,6 @@ function QuickStartGrid({ onPick }: { onPick: (prompt: string) => void }) {
   );
 }
 
-/**
- * Constraint type prefix'inden kategori türetir. UI'da rozeti renklendirir.
- *   TEACHER_*  → mor
- *   CLASS_* / STUDENTS_*  → mavi
- *   SUBJECT_*  → emerald
- *   ROOM_*  → amber
- *   ACTIVITY_* / ACTIVITIES_*  → indigo
- *   diğer  → slate
- */
 function constraintCategoryStyle(type: string): {
   badgeClass: string;
   label: string;
@@ -654,10 +615,6 @@ function constraintCategoryStyle(type: string): {
   return { badgeClass: 'bg-slate-100 text-slate-700', label: 'Genel' };
 }
 
-/**
- * Asistan baloncuklarının sağ üstüne "panoya kopyala" düğmesi yerleştirir.
- * Mesaj metnini (response.text — explanation/answer) clipboard'a yazar.
- */
 function CopyButton({ text }: { text: string }) {
   const toastInfo = useToastStore((s) => s.info);
   const toastError = useToastStore((s) => s.error);
@@ -707,7 +664,6 @@ function MessageBubble({
   const res = msg.response;
   const kind = res?.kind ?? 'constraint';
 
-  // Query — info card (mavi border)
   if (res && kind === 'query') {
     const q = res as { answer: string; data?: unknown[]; confidence?: number };
     return (
@@ -738,8 +694,6 @@ function MessageBubble({
     );
   }
 
-  // Tool call — son kullanıcı bunu görmemeli (server-side iterative çağrı).
-  // UI'a düşerse sade "bilgi çekiyor…" satırı, hiçbir teknik detay yok.
   if (res && kind === 'tool_call') {
     return (
       <div className="flex justify-start">
@@ -751,7 +705,6 @@ function MessageBubble({
     );
   }
 
-  // Schedule update — onay diyaloğu
   if (res && kind === 'schedule_update') {
     const su = res as { action: string; params: Record<string, unknown>; explanation: string };
     return (
@@ -796,7 +749,6 @@ function MessageBubble({
     );
   }
 
-  // Data mutation — CRUD önerileri, çoklu action onay kartı
   if (res && kind === 'data_mutation') {
     const dm = res as {
       actions: DataMutationAction[];
@@ -886,7 +838,6 @@ function MessageBubble({
     );
   }
 
-  // Run solver — "Programı Üret" onay kartı
   if (res && kind === 'run_solver') {
     const rs = res as {
       timeLimitSec?: number;
@@ -941,7 +892,6 @@ function MessageBubble({
     );
   }
 
-  // Constraint (default)
   const cr = res as
     | {
         constraints: AIConstraint[];
@@ -1055,16 +1005,11 @@ function ConstraintCard({ c }: { c: AIConstraint }) {
   );
 }
 
-/**
- * Query response.data içindeki öğeleri sade tek satır gösterimi.
- * Object ise {name, count} gibi tipik alanları okur, yoksa kısa JSON özeti.
- */
 function formatQueryDataItem(item: unknown): string {
   if (item == null) return '';
   if (typeof item === 'string' || typeof item === 'number') return String(item);
   if (typeof item === 'object') {
     const o = item as Record<string, unknown>;
-    // Tipik alanlar
     const name =
       (typeof o.name === 'string' && o.name) ||
       (typeof o.label === 'string' && o.label) ||
@@ -1076,7 +1021,6 @@ function formatQueryDataItem(item: unknown): string {
       if (typeof o.value !== 'undefined') extras.push(String(o.value));
       return extras.length > 0 ? `${name} — ${extras.join(', ')}` : String(name);
     }
-    // Fallback: ilk 3 alan adı=değer
     const pairs = Object.entries(o)
       .filter(([_, v]) => v != null && (typeof v === 'string' || typeof v === 'number'))
       .slice(0, 3)

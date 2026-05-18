@@ -354,7 +354,6 @@ function BulkAddDialog({
     else setClassIds(new Set(classes.map((c) => c.id)));
   };
 
-  // Seçili dersi verebilecek öğretmenler (varsa)
   const eligibleTeachers = useMemo(() => {
     if (!subjectId) return teachers;
     return teachers.filter((t) =>
@@ -571,19 +570,16 @@ function ActivityEditorDialog({
     () => new Map(subjects.map((s) => [s.id, s])),
     [subjects],
   );
-  // Aynı sınıftaki, kendisi olmayan aktiviteler (eşleşme adayları)
   const pairCandidates = useMemo(
     () =>
       siblingActivities.filter(
         (a) =>
-          // aynı sınıf garanti, sadece zaten farklı bir gruba bağlı olmasın
           activity == null || a.splitGroupId == null ||
           a.splitGroupId === activity.splitGroupId,
       ),
     [siblingActivities, activity],
   );
 
-  // Mevcut eşli partner aktiviteler (görüntü için)
   const currentPartners = useMemo(() => {
     if (!activity?.splitGroupId) return [] as Activity[];
     return siblingActivities.filter(

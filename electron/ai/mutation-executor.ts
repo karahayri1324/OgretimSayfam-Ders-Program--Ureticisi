@@ -74,10 +74,6 @@ function optInt(params: Record<string, unknown>, key: string): number | undefine
   return undefined;
 }
 
-/**
- * Verilen branş adını DB'de bulur; yoksa idempotent şekilde yaratır.
- * link_teacher_subject ve add_activity için yardımcı.
- */
 function ensureSubject(name: string): number {
   const existing = findByName(name, subjectsRepo.list());
   if (existing) return existing.id;
@@ -101,7 +97,6 @@ function ensureClass(name: string, yearName?: string | null): number {
   return classesRepo.create({ name, yearId });
 }
 
-// --- Per-op handlers ------------------------------------------------------
 
 type Handler = (params: Record<string, unknown>) => string;
 
@@ -114,7 +109,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     if (existing) {
       return `Öğretmen zaten var: ${existing.name} (id=${existing.id}). Atlandı.`;
     }
-    // Branş ataması: subjects: string[]  (isim listesi) → idempotent
     const subjectNames = Array.isArray(params['subjects'])
       ? (params['subjects'] as unknown[]).filter((s): s is string => typeof s === 'string')
       : [];
@@ -287,7 +281,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     let teacherId: number | null = null;
     if (teacherName) {
       teacherId = ensureTeacher(teacherName);
-      // Öğretmenin yeterli branşlarına bu subject yoksa idempotent ekle
       const t = teachersRepo.get(teacherId);
       if (t && !t.subjectIds.includes(subjectId)) {
         teachersRepo.update(teacherId, { subjectIds: [...t.subjectIds, subjectId] });
@@ -313,7 +306,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     const subject = findByName(subjectName, subjectsRepo.list());
     if (!subject) throw new Error(`Branş bulunamadı: '${subjectName}'`);
 
-    // Mevcut aktiviteyi bul
     const all = activitiesRepo.list();
     const existing = all.find(
       (a) => a.classId === klass.id && a.subjectId === subject.id,
@@ -447,10 +439,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     return `${teacher.name} → '${subject.name}' yeterliliği kaldırıldı.`;
   },
 
-  /**
-   * AI'nın "şu kısıtlamayı 100→70 yapalım mı" önerisini uygular.
-   * params: { constraintId: number, weight: number }
-   */
   set_constraint_weight(params) {
     const id = Number(params.constraintId ?? params.id);
     if (!Number.isFinite(id) || id <= 0) {
@@ -468,10 +456,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     return `Kısıtlama #${id} ağırlığı ${oldW} → ${weight} yapıldı.`;
   },
 
-  /**
-   * Kısıtlamayı pasif/aktif et — gevşetmenin daha sert versiyonu.
-   * params: { constraintId: number, active: boolean }
-   */
   set_constraint_active(params) {
     const id = Number(params.constraintId ?? params.id);
     if (!Number.isFinite(id) || id <= 0) {
@@ -485,10 +469,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     return `Kısıtlama #${id} ${active ? 'aktif' : 'pasif'} hale getirildi.`;
   },
 
-  /**
-   * Generic constraint ekleme — AI 60 FET kısıtlama türünden herhangi birini
-   * ekleyebilsin diye. params: { type, weight?, params, notes? }
-   */
   add_constraint(params) {
     const type = requireString(params, 'type') as ConstraintType;
     const weight = Number(params.weight ?? 100);
@@ -511,9 +491,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     return `Kısıtlama eklendi (id=${id}, type=${type}, weight=${weight}).`;
   },
 
-  /**
-   * Kısıtlama silme — id ile. params: { constraintId }
-   */
   delete_constraint(params) {
     const id = Number(params.constraintId ?? params.id);
     if (!Number.isFinite(id) || id <= 0) {
@@ -526,26 +503,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     return `Kısıtlama #${id} silindi.`;
   },
 
-  /**
-   * Per-activity constraint — "9. sınıfların müzik derslerini Bilgisayar
-   * salonunda yap" gibi class+subject filtreleri için tek tek aktivite
-   * bulup her birine ayrı kısıtlama ekler.
-   *
-   * params: {
-   *   type: 'ACTIVITY_PREFERRED_ROOM' | 'ACTIVITY_PREFERRED_ROOMS' | ...
-   *   filter: {                       // hangi aktiviteler hedeflenecek
-   *     classYear?: string,            // '9' → tüm 9. sınıflar
-   *     class?: string,                // '9A' tek sınıf
-   *     subject?: string,              // 'Müzik'
-   *     teacher?: string,              // opsiyonel
-   *   },
-   *   params: { ... },                 // kısıtlamanın iç params'ı (room, vb.)
-   *   weight?: number,                 // default 100
-   * }
-   *
-   * Eşleşen her aktivite için ayrı bir constraint kaydı eklenir, her birinin
-   * params'ına activityId ilave edilir.
-   */
   add_activity_constraint(params) {
     const type = requireString(params, 'type') as ConstraintType;
     const filter =
@@ -566,26 +523,21 @@ const handlers: Record<DataMutationOp, Handler> = {
     const subjects = subjectsRepo.list();
     const teachers = teachersRepo.list();
 
-    // Filter zinciri
     const targets = activities.filter((a) => {
-      // class adı eşleşmesi
       if (typeof filter.class === 'string' && filter.class.trim()) {
         const cls = classes.find((c) => c.id === a.classId);
         if (!cls || !nameMatches(cls.name, filter.class)) return false;
       }
-      // classYear (örn '9' → '9A', '9B', '9C')
       if (typeof filter.classYear === 'string' && filter.classYear.trim()) {
         const cls = classes.find((c) => c.id === a.classId);
         if (!cls) return false;
         const yearPrefix = String(filter.classYear).trim();
         if (!cls.name.startsWith(yearPrefix)) return false;
       }
-      // subject
       if (typeof filter.subject === 'string' && filter.subject.trim()) {
         const subj = subjects.find((s) => s.id === a.subjectId);
         if (!subj || !nameMatches(subj.name, filter.subject)) return false;
       }
-      // teacher
       if (typeof filter.teacher === 'string' && filter.teacher.trim()) {
         if (a.teacherId == null) return false;
         const t = teachers.find((tt) => tt.id === a.teacherId);
@@ -616,10 +568,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     return `${added} aktiviteye '${type}' kısıtlaması eklendi.`;
   },
 
-  /**
-   * Ayar değiştir. params: { key: string, value: string|number|boolean }
-   * Örnek: fetTimeLimitSec, aiEndpoint, aiTimeoutSec
-   */
   set_setting(params) {
     const key = requireString(params, 'key');
     const rawValue = params.value;
@@ -631,30 +579,7 @@ const handlers: Record<DataMutationOp, Handler> = {
     return `Ayar '${key}' = '${value}' olarak kaydedildi.`;
   },
 
-  // ════════════════════════════════════════════════════════════════════
-  // Paket 1 — Split Activities + Slot Editing + Lock/Unlock
-  // ════════════════════════════════════════════════════════════════════
 
-  /**
-   * Split activity — sınıf 2+ gruba bölünür, her grup farklı ders alır,
-   * tüm gruplar AYNI ANDA başlar (FET ConstraintActivitiesSameStartingTime).
-   *
-   * params: {
-   *   class: '9A',
-   *   weeklyHours: 2,                  // her grup için aynı sayıda saat
-   *   blockDuration?: 1,
-   *   groups: [
-   *     { subject: 'Görsel Sanatlar', teacher?: 'Ayşe', room?: 'Resim Atölyesi' },
-   *     { subject: 'Müzik',           teacher?: 'Ali',  room?: 'Müzik Sınıfı'  }
-   *   ]
-   * }
-   *
-   * Davranış:
-   *  - Her grup için ensureSubject + (opsiyonel) ensureTeacher
-   *  - N aktivite yaratılır (aynı class, farklı subject)
-   *  - activitiesRepo.setSplitGroup([...ids]) ile gruplanır
-   *  - room verilmişse her grup için ACTIVITY_PREFERRED_ROOM constraint eklenir
-   */
   add_split_activity(params) {
     const className = requireString(params, 'class');
     const weeklyHours = optInt(params, 'weeklyHours') ?? 1;
@@ -700,7 +625,6 @@ const handlers: Record<DataMutationOp, Handler> = {
       createdIds.push(actId);
 
       if (roomName) {
-        // Oda yoksa yarat (idempotent)
         let room = findByName(roomName, roomsRepo.list());
         if (!room) {
           const newId = roomsRepo.create({ name: roomName });
@@ -731,15 +655,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     );
   },
 
-  /**
-   * Belirli bir slot'a (gün × saat) aktivite kilitler.
-   * Re-generate sırasında FET bu aktiviteyi bu slot'tan başka yere koymaz.
-   *
-   * params: { class, day, hour, subject, teacher?, room? }
-   *
-   * Mevcut bir ACTIVITY_FIXED_TIME aynı (class+subject) için varsa
-   * önce silinir (idempotent), sonra yenisi eklenir.
-   */
   set_timetable_slot(params) {
     const className = requireString(params, 'class');
     const subjectName = requireString(params, 'subject');
@@ -752,7 +667,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     const subject = findByName(subjectName, subjectsRepo.list());
     if (!subject) throw new Error(`Branş bulunamadı: '${subjectName}'`);
 
-    // Hedef aktiviteyi bul. teacher verilmişse onunla daralt.
     const teacherName = optString(params, 'teacher');
     let teacherId: number | null | undefined = undefined;
     if (teacherName) {
@@ -770,7 +684,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     }
     const act = matches[0]!;
 
-    // Aynı aktivite + aynı (day,hour) için var olan FIXED_TIME varsa atla
     const existing = constraintsRepo.list().find(
       (c) =>
         c.type === 'ACTIVITY_FIXED_TIME' &&
@@ -782,7 +695,6 @@ const handlers: Record<DataMutationOp, Handler> = {
       return `Zaten kilitli: ${className} × ${subjectName} → ${day} ${hour}. ders.`;
     }
 
-    // Aynı aktivitenin başka FIXED_TIME constraint'leri varsa sil (tek slot mantığı)
     for (const c of constraintsRepo.list()) {
       if (
         c.type === 'ACTIVITY_FIXED_TIME' &&
@@ -801,7 +713,6 @@ const handlers: Record<DataMutationOp, Handler> = {
       notes: `Slot kilidi: ${className} × ${subjectName}`,
     });
 
-    // Opsiyonel: room tercihi de eklenebilir
     const roomName = optString(params, 'room');
     if (roomName) {
       const r = findByName(roomName, roomsRepo.list());
@@ -882,10 +793,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     );
   },
 
-  /**
-   * Slot kilidini kaldırır.
-   * params: { class, day, hour } veya { activityId, day, hour }
-   */
   unlock_timetable_slot(params) {
     const day = requireString(params, 'day');
     const hour = optInt(params, 'hour');
@@ -925,18 +832,7 @@ const handlers: Record<DataMutationOp, Handler> = {
     return `${removed} slot kilidi kaldırıldı (${day} ${hour}. ders).`;
   },
 
-  // ════════════════════════════════════════════════════════════════════
-  // Paket 2 — Substitute + Multi-class Merge
-  // ════════════════════════════════════════════════════════════════════
 
-  /**
-   * Bir aktivitenin öğretmenini değiştir. params:
-   *   { class, subject, newTeacher }
-   *   veya { activityId, newTeacher }
-   *
-   * Eğer aktivite split grubuysa, sadece ilgili aktivitenin öğretmeni değişir.
-   * Yeni öğretmen subject yeterliliğine sahip değilse otomatik linklenir.
-   */
   substitute_teacher(params) {
     const newTeacherName = requireString(params, 'newTeacher');
     const newTeacherId = ensureTeacher(newTeacherName);
@@ -963,7 +859,6 @@ const handlers: Record<DataMutationOp, Handler> = {
         );
       }
       if (matches.length > 1) {
-        // teacher param verildiyse daralt
         const fromName = optString(params, 'fromTeacher');
         if (fromName) {
           const ft = findByName(fromName, teachersRepo.list());
@@ -977,7 +872,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     }
     if (!act) throw new Error('Aktivite eşleşmedi.');
 
-    // Yeni öğretmenin subject yeterliliğini garantile
     const t = teachersRepo.get(newTeacherId);
     if (t && !t.subjectIds.includes(act.subjectId)) {
       teachersRepo.update(newTeacherId, {
@@ -1005,24 +899,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     );
   },
 
-  /**
-   * Birden fazla sınıfı aynı anda + aynı öğretmen + (opsiyonel) aynı oda ile
-   * birleşik aktivite olarak gruplar.
-   *
-   * params: {
-   *   classes: ['9A', '9B'],
-   *   subject: 'Müzik Dinleme',
-   *   teacher?: 'Ahmet',
-   *   room?: 'Konferans Salonu',
-   *   weeklyHours: 1,
-   *   blockDuration?: 1
-   * }
-   *
-   * Davranış:
-   *  - Her sınıf için aktivite yaratılır (aynı subject, aynı teacher, aynı saat)
-   *  - setSplitGroup() ile gruplanır → FET aynı saatte başlatır
-   *  - room verilmişse her aktiviteye ACTIVITY_PREFERRED_ROOM
-   */
   merge_activities(params) {
     const classesRaw = params.classes;
     if (!Array.isArray(classesRaw) || classesRaw.length < 2) {
@@ -1089,19 +965,7 @@ const handlers: Record<DataMutationOp, Handler> = {
     );
   },
 
-  // ════════════════════════════════════════════════════════════════════
-  // Paket 3 — Export
-  // ════════════════════════════════════════════════════════════════════
 
-  /**
-   * Çizelge export tetikleyicisi. Sadece DB'ye not düşer; gerçek export
-   * frontend'te (AIPanel) yapılır çünkü PDF render renderer'a bağlı.
-   *
-   * params: { format: 'pdf' | 'excel' | 'html', class?: string }
-   *
-   * AIPanel handleConfirm bu op'u görünce window.api.app.exportPdf veya
-   * timetableExport.ts utility'lerini çağırır. Burada sadece doğrulama yapıyoruz.
-   */
   export_timetable(params) {
     const format = requireString(params, 'format').toLowerCase();
     if (!['pdf', 'excel', 'html', 'xlsx'].includes(format)) {
@@ -1112,27 +976,11 @@ const handlers: Record<DataMutationOp, Handler> = {
       const klass = findByName(className, classesRepo.list());
       if (!klass) throw new Error(`Sınıf bulunamadı: '${className}'`);
     }
-    // Gerçek export AIPanel'de — burada sadece validate edip mesaj döner
     const scope = className ? `${className} sınıfı için` : 'tüm sınıflar için';
     return `${format.toUpperCase()} export hazırlanıyor (${scope}).`;
   },
 
-  // ════════════════════════════════════════════════════════════════════
-  // Paket 4 — Slot manipulation + Navigation
-  // ════════════════════════════════════════════════════════════════════
 
-  /**
-   * İki slot'u yer değiştir. Mevcut çizelgeden iki (class, day, hour) alır,
-   * her birine karşılığında ACTIVITY_FIXED_TIME kısıtlaması ekler ki
-   * yeniden üretildiğinde swap kalıcı olsun.
-   *
-   * params: {
-   *   slot1: { class, day, hour },
-   *   slot2: { class, day, hour }
-   * }
-   *
-   * Bir slot'un mevcut FIXED_TIME constraint'i varsa silinir (idempotent).
-   */
   swap_timetable_slots(params) {
     const s1 = params.slot1 as Record<string, unknown> | undefined;
     const s2 = params.slot2 as Record<string, unknown> | undefined;
@@ -1188,7 +1036,6 @@ const handlers: Record<DataMutationOp, Handler> = {
       );
     }
 
-    // Önce her iki aktivite için eski FIXED_TIME constraint'lerini sil
     for (const c of constraintsRepo.list()) {
       if (c.type !== 'ACTIVITY_FIXED_TIME') continue;
       const aid = (c.params as { activityId?: number }).activityId;
@@ -1197,7 +1044,6 @@ const handlers: Record<DataMutationOp, Handler> = {
       }
     }
 
-    // Yeni FIXED_TIME constraint'leri: A → slot2, B → slot1
     constraintsRepo.add({
       type: 'ACTIVITY_FIXED_TIME',
       weight: 100,
@@ -1223,16 +1069,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     );
   },
 
-  /**
-   * İki dersi peş peşe yap (aynı sınıfta). "Fizik ve Matematik peş peşe
-   * olsun (lab-teorik entegrasyon)" tarzı. FET'te
-   * ConstraintTwoActivitiesConsecutive kullanılır.
-   *
-   * params: { class, subject1, subject2 }
-   *
-   * İki sınıf × subject aktivitesi bulunur, aralarına
-   * TWO_ACTIVITIES_CONSECUTIVE constraint eklenir.
-   */
   pair_subjects_consecutive(params) {
     const className = requireString(params, 'class');
     const subject1 = requireString(params, 'subject1');
@@ -1263,7 +1099,6 @@ const handlers: Record<DataMutationOp, Handler> = {
       );
     }
 
-    // Aynı çifte zaten constraint varsa atla
     const existing = constraintsRepo.list().find(
       (c) =>
         c.type === 'TWO_ACTIVITIES_CONSECUTIVE' &&
@@ -1292,15 +1127,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     );
   },
 
-  /**
-   * UI navigation tetikleyicisi. Backend tarafında side-effect yok —
-   * AIPanel handleConfirm bu op'u görünce navigate() çağırır.
-   *
-   * params: { page: string }  → '/teachers', '/classes', vs (veya 'teachers')
-   *
-   * Geçerli sayfalar: welcome, subjects, classes, rooms, teachers, activities,
-   *                   schedule, constraints, generate, timetable, advanced, settings
-   */
   navigate_to(params) {
     const raw = requireString(params, 'page').toLowerCase();
     const page = raw.startsWith('/') ? raw.slice(1) : raw;
@@ -1317,7 +1143,6 @@ const handlers: Record<DataMutationOp, Handler> = {
   },
 };
 
-/** İki ismi karşılaştırır — Türkçe deburred + case-insensitive substring. */
 function nameMatches(name: string, target: string): boolean {
   const a = deburr(name.trim());
   const b = deburr(target.trim());
@@ -1326,10 +1151,6 @@ function nameMatches(name: string, target: string): boolean {
   return false;
 }
 
-/**
- * Action listesini sırayla uygular. Tek bir action'da hata olsa diğerleri
- * devam eder (kısmen başarı). Caller (IPC) sonucu döndürür.
- */
 export function applyMutations(actions: DataMutationAction[]): DataMutationApplyResult {
   const result: DataMutationApplyResult = {
     applied: 0,
