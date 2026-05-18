@@ -1,13 +1,3 @@
-/**
- * fet-cl runner — child_process.spawn wrapper.
- *
- * Sorumluluk:
- *  - Binary'yi spawn et, stdout/stderr stream et
- *  - stdout'tan progress event'leri parse et (onProgress callback'i)
- *  - exit code'a göre başarı/hata sonucu döndür
- *  - AbortSignal ile cancel desteği (SIGTERM)
- *  - Hata mesajlarını Türkçe FET hata tablosuna eşleştir
- */
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -22,15 +12,6 @@ import type {
 } from './types.js';
 import type { TimetableSlot } from '../../src/lib/types.js';
 
-/**
- * runFet — XML dosyasını alır, fet-cl çalıştırır, sonuç döner.
- *
- * @param fetFilePath — input .fet dosyasının tam yolu
- * @param outputDir   — fet-cl'in çıktıları yazacağı dizin (üst katman mktempdir verir)
- * @param bundle      — parser için orijinal veri (Activity Id eşleştirmesi gerekli)
- * @param fetActivityIdsByActivity — DB activity id → FET id'leri (xml-builder'dan)
- * @param opts        — timeLimit, signal, onProgress
- */
 export async function runFet(
   fetFilePath: string,
   outputDir: string,
@@ -43,7 +24,6 @@ export async function runFet(
   const timeLimit = opts.timeLimit ?? 120;
   const language = opts.language ?? 'tr';
 
-  // Çıktı dizinini hazırla
   await fs.promises.mkdir(outputDir, { recursive: true });
 
   const args = [

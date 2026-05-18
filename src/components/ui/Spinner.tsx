@@ -10,11 +10,6 @@ const sizeMap: Record<Size, number> = {
   lg: 28,
 };
 
-/**
- * Basit Tailwind tabanlı yükleme göstergesi.
- * Inline kullanım: <Spinner size="sm" /> — sayfa içi bağlamda
- * Tam yer kaplayan: <Spinner block /> — sayfa ortasında merkezlenmiş kutu
- */
 export function Spinner({
   size = 'md',
   className,

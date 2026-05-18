@@ -6,13 +6,6 @@ import { settingsRepo } from '../db/repositories/settings.js';
 import { executeTool, type ToolResult } from './tools.js';
 import { log } from '../utils/logger.js';
 
-/**
- * Sohbet geçmişi — multi-turn context. AI'a yollanan son N mesajdır,
- * en azından son 10 mesaj geri gider (IPC layer'da slicing yapılır).
- *
- * `role: 'tool'` özel: aynı turdaki tool çağrılarını AI'ya geri gönderir
- * (mock için ekstra context, gerçek LLM bunu function_call output'u olarak görür).
- */
 export type ConversationHistoryEntry =
   | { role: 'user'; text: string }
   | { role: 'assistant'; text: string }
@@ -21,7 +14,6 @@ export type ConversationHistoryEntry =
 export type ParseRequest = {
   text: string;
   context: AIContext;
-  /** Multi-turn: önceki kullanıcı/asistan mesajları. */
   history?: ConversationHistoryEntry[];
 };
 
@@ -37,23 +29,6 @@ export type ParseWithToolsResult = {
   toolCalls: ToolHistoryEntry[];
 };
 
-/**
- * AI istemcisi — settings.aiEndpoint'e bakar:
- *   - boş veya "mock://local" → mockParse()
- *   - aksi takdirde axios.post(endpoint)
- *
- * Hata kodları (caller bunları yakalayıp IPC error.code'una çevirir):
- *   - AI_TIMEOUT       — axios timeout
- *   - AI_INVALID_RESPONSE — zod doğrulamasından geçemedi
- *   - AI_ERROR         — diğer ağ/servis hataları
- *
- * Agentic mode (parseWithTools):
- *   - AI "tool_call" döndürürse uygun tool çalıştırılıp sonuç history'e
- *     eklenerek tekrar AI'ya gönderilir.
- *   - Max iterasyon `MAX_TOOL_ITERATIONS` (3) — sonsuz döngü engeli.
- *   - Mock için: mock-server kendi içinde tool sonucu kullanarak tek
- *     seferde query response döndürebilir (deterministik kısayol).
- */
 export class AIError extends Error {
   readonly code: 'AI_ERROR' | 'AI_TIMEOUT' | 'AI_INVALID_RESPONSE';
   readonly cause?: unknown;
@@ -69,13 +44,11 @@ export const MAX_TOOL_ITERATIONS = 3;
 
 function readTimeoutMs(): number {
   try {
-    // Yeni anahtar tercih edilir; eski `aiTimeout` yedek (backward compat).
     const raw =
       settingsRepo.get('aiTimeoutSec') ?? settingsRepo.get('aiTimeout');
     const n = parseInt(String(raw ?? ''), 10);
     if (Number.isFinite(n) && n > 0) return n * 1000;
   } catch {
-    // settings okunamadıysa default
   }
   return 30_000;
 }
@@ -89,7 +62,6 @@ function readEndpoint(): string {
   }
 }
 
-/** Tek bir AI istek-cevap turu — endpoint'e POST ya da mock. */
 async function singleRoundtrip(
   text: string,
   context: AIContext,
@@ -101,7 +73,6 @@ async function singleRoundtrip(
 
   let raw: unknown;
   if (useMock) {
-    // Mock için geçmişi tek bir array olarak yolla (history her iki tür de içerebilir).
     raw = await mockParse(text, context, [
       ...conversationHistory,
       ...toolHistory.map(

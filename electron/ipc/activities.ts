@@ -27,8 +27,6 @@ export function registerActivitiesHandlers(): void {
     });
   });
 
-  // Split activities: aynı saatte iki/daha fazla aktivitenin başlamasını zorla.
-  // activityIds.length === 1 → o aktivitenin split bağı çözülür.
   ipcMain.handle('activities:setSplit', async (_e, raw) => {
     const v = validate(SetSplitSchema, raw);
     if (!v.ok) return v.error;

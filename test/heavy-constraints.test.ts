@@ -7,7 +7,6 @@ import { buildFetXml } from '../electron/fet/xml-builder';
 import { parseTimetable } from '../electron/fet/xml-parser';
 import type { SchoolBundle, Constraint } from '../electron/fet/types';
 
-// 54 öğretmen / 18 sınıf okul + 20 kısıtlama
 function makeHeavySchool(): SchoolBundle {
   const days = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'].map(
     (name, i) => ({ id: i + 1, name, orderIndex: i }),

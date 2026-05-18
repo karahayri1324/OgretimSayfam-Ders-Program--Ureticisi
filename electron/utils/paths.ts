@@ -7,10 +7,6 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/**
- * .fet dosyaları ve FET output'u için geçici klasör.
- * Uygulama her açıldığında yeni bir alt klasör döner.
- */
 export function tempDir(prefix = 'dpo-'): string {
   const base = path.join(
     os.tmpdir(),

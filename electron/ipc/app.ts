@@ -7,13 +7,6 @@ import { log } from '../utils/logger.js';
 
 const FET_SOURCE_URL = 'https://lalescu.ro/liviu/fet/';
 
-/**
- * HTML içeriğini gizli bir BrowserWindow'a yükler, printToPDF ile PDF üretir
- * ve kullanıcıdan kayıt yeri ister.
- *
- * Sandbox güvenliği için node entegrasyonu kapalı bırakıldı; data: URL ile
- * sadece statik HTML render edilir. Dialog iptal edilirse {cancelled:true} döner.
- */
 async function exportHtmlAsPdf(
   html: string,
   defaultFilename: string,
@@ -21,7 +14,6 @@ async function exportHtmlAsPdf(
   | { cancelled: true; filePath: null }
   | { cancelled: false; filePath: string }
 > {
-  // Save dialog'u önce göster — kullanıcı iptal ederse boşa hidden window açmayalım
   const focused = BrowserWindow.getFocusedWindow();
   const dialogOpts: Electron.SaveDialogOptions = {
     title: 'PDF olarak kaydet',
@@ -49,7 +41,6 @@ async function exportHtmlAsPdf(
   });
 
   try {
-    // data: URL — context'in dışında, herhangi bir cookie/lokal-storage paylaşımı yok
     const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
     await hiddenWin.loadURL(dataUrl);
 

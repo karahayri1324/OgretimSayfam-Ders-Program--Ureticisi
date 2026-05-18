@@ -7,11 +7,6 @@ import { daysRepo } from '../db/repositories/days.js';
 import { hoursRepo } from '../db/repositories/hours.js';
 import { constraintsRepo } from '../db/repositories/constraints.js';
 
-/**
- * AI'ya gönderilecek context'i DB'den toplar. Tek seferlik bir snapshot;
- * her ai:parse çağrısında yeniden hesaplanır (kullanıcı bu arada öğretmen
- * eklemiş olabilir).
- */
 export function buildAIContext(): AIContext {
   const teachers = teachersRepo.list().map((t) => t.name);
   const classes = classesRepo.list().map((c) => c.name);
@@ -21,7 +16,6 @@ export function buildAIContext(): AIContext {
   const hours = hoursRepo.list();
   const hoursPerDay = hours.length || 8;
 
-  // Kısıtlama listesi — aktif olanlar, AI'nın gevşetme önerisi için.
   const constraints = constraintsRepo.list().map((c) => ({
     id: c.id,
     type: c.type,
@@ -33,11 +27,6 @@ export function buildAIContext(): AIContext {
   return { teachers, classes, subjects, rooms, days, hoursPerDay, constraints };
 }
 
-/**
- * Kısıtlamanın param'larından sade bir TR özet üretir.
- * Tam i18n için src/lib/formatConstraint.ts kullanılır ama o frontend tarafında;
- * mock'un context'i için bu kaba özet yeterli.
- */
 function describeConstraint(c: {
   type: string;
   params: Record<string, unknown>;

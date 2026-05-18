@@ -10,11 +10,6 @@ import { daysRepo } from './repositories/days.js';
 import { hoursRepo } from './repositories/hours.js';
 import { dayHoursRepo } from './repositories/day_hours.js';
 
-/**
- * SchoolBundle: aktif okulun tüm verilerini tek bir nesnede toplar.
- * FET xml-builder bunu girdi olarak alır; alan isimleri electron/fet/types.ts
- * içindeki SchoolBundle ile eşleşmek zorunda.
- */
 export type SchoolBundle = {
   institutionName: string;
   days: ReturnType<typeof daysRepo.list>;
@@ -29,10 +24,6 @@ export type SchoolBundle = {
   constraints: ReturnType<typeof constraintsRepo.list>;
 };
 
-/**
- * Aktif okulun tüm verilerini tek bir nesnede toplar.
- * Sadece `active = 1` kısıtlamalar dahil edilir.
- */
 export function gatherSchoolData(): SchoolBundle {
   const school = schoolsRepo.getActive();
   return {
@@ -59,11 +50,6 @@ export type AIContext = {
   hoursPerDay: number;
 };
 
-/**
- * AI agent için kompakt context — sadece isimler + sayılar.
- * Not: AI agent'in kendi context-builder'ı (electron/ai/context-builder.ts) bunun
- * yerini alır; bu fonksiyon yedek/test amaçlı duruyor.
- */
 export function buildAIContext(): AIContext {
   return {
     teachers: teachersRepo.list().map((t) => t.name),

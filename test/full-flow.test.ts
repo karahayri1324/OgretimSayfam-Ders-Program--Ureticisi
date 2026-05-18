@@ -1,14 +1,3 @@
-/**
- * Full-flow E2E:
- *  1) Boş bir veri yapısı kur (3 ders, 3 sınıf, 2 derslik, 2 öğretmen)
- *  2) 5 aktivite ekle (haftalık ders dağılımı)
- *  3) 2 constraint ekle (TEACHER_NOT_AVAILABLE + SUBJECT_LAST_HOUR_OF_DAY)
- *  4) buildFetXml + runFet ile çalıştır
- *  5) Sonuçların constraint'lere uyduğunu doğrula
- *
- * Bu test gerçek FET binary'sini /usr/bin/fet-cl'den çalıştırır;
- * CI/headless ortamda fet-cl yoksa skip edilir.
- */
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -29,27 +18,11 @@ function fetBinaryAvailable(): string | null {
       fs.accessSync(c, fs.constants.F_OK | fs.constants.X_OK);
       return c;
     } catch {
-      /* ignore */
     }
   }
   return null;
 }
 
-/**
- * Boş DB simülasyonu yerine doğrudan repository tipindeki SchoolBundle'ı
- * elimizle kuruyoruz. Asıl pipeline (build → run → parse) bundle üzerinde
- * çalıştığı için bu, gerçek kullanıcı yolundaki uçtan uca davranışı temsil eder.
- *
- * Senaryo:
- *  - 3 ders: Matematik, Türkçe, Beden Eğitimi
- *  - 3 sınıf: 9A, 9B, 10A
- *  - 2 derslik: 101, 102
- *  - 2 öğretmen: Ahmet (Mat), Ayşe (Türkçe+Beden)
- *  - 5 activity: 9A-Mat-Ahmet 4h, 9A-Türkçe-Ayşe 3h, 9B-Mat-Ahmet 4h,
- *               9B-Türkçe-Ayşe 3h, 10A-Beden-Ayşe 2h
- *  - 2 constraint: TEACHER_NOT_AVAILABLE (Ahmet Cuma yok)
- *                  SUBJECT_LAST_HOUR_OF_DAY (Beden son derste)
- */
 function buildSchoolForFullFlow(): SchoolBundle {
   return {
     institutionName: 'Full-Flow Test Lisesi',
@@ -135,14 +108,12 @@ function buildSchoolForFullFlow(): SchoolBundle {
 describe('Full-flow E2E: boş veri → XML → FET → doğrulama', () => {
   const fetBin = fetBinaryAvailable();
 
-  // FET yoksa testi açıkça skip et — CI'da headless container'larda olabilir.
   (fetBin ? it : it.skip)(
     '3 ders + 3 sınıf + 2 derslik + 2 öğretmen + 5 activity + 2 constraint pipeline',
     async () => {
       expect(fetBin).toBeTruthy();
       const bundle = buildSchoolForFullFlow();
 
-      // Smoke: bundle bütünlüğü
       expect(bundle.subjects.length).toBe(3);
       expect(bundle.classes.length).toBe(3);
       expect(bundle.rooms.length).toBe(2);
@@ -152,14 +123,11 @@ describe('Full-flow E2E: boş veri → XML → FET → doğrulama', () => {
 
       const { xml, fetActivityIdsByActivity, skipped } = buildFetXml(bundle);
       expect(skipped.length).toBe(0);
-      // XML constraint'leri içermeli
       expect(xml).toContain('ConstraintTeacherNotAvailableTimes');
       expect(xml).toContain('ConstraintActivityEndsStudentsDay');
-      // Türkçe karakter korunmuş olmalı
       expect(xml).toContain('Ayşe Demir');
       expect(xml).toContain('Beden Eğitimi');
 
-      // Geçici dizin + FET çalıştır
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dpo-full-flow-'));
       const inputPath = path.join(tmp, 'input.fet');
       fs.writeFileSync(inputPath, xml, 'utf-8');

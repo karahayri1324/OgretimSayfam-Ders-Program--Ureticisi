@@ -30,7 +30,6 @@ export type DayHourInput = {
 };
 
 export const dayHoursRepo = {
-  /** Tüm okulun (aktif) günlere özel saat satırlarını döner. */
   list(): DayHour[] {
     const rows = getDb()
       .prepare(
@@ -42,7 +41,6 @@ export const dayHoursRepo = {
     return rows.map(rowToDayHour);
   },
 
-  /** Sadece belirli bir gün için saatler. */
   listByDay(dayId: number): DayHour[] {
     const rows = getDb()
       .prepare(
@@ -54,10 +52,6 @@ export const dayHoursRepo = {
     return rows.map(rowToDayHour);
   },
 
-  /**
-   * Bir günün tüm saatlerini ver(ilen) liste ile değiştirir.
-   * Boş liste → o günün day_hours kayıtları silinir (global hours fallback).
-   */
   replaceForDay(dayId: number, entries: DayHourInput[]): DayHour[] {
     const db = getDb();
     const schoolId = schoolsRepo.getActiveId();
@@ -85,7 +79,6 @@ export const dayHoursRepo = {
     return this.listByDay(dayId);
   },
 
-  /** Tüm günler için tek seferde değiştirir (boş günler reset). */
   replaceAll(map: { dayId: number; entries: DayHourInput[] }[]): DayHour[] {
     const db = getDb();
     const schoolId = schoolsRepo.getActiveId();
@@ -113,7 +106,6 @@ export const dayHoursRepo = {
     return this.list();
   },
 
-  /** Aktif okulun tüm günlere ait day_hours kayıtlarını siler. */
   clearAll(): void {
     getDb()
       .prepare('DELETE FROM day_hours WHERE school_id = ?')

@@ -15,6 +15,7 @@ import {
 import { tr } from '../../lib/i18n';
 import { cn } from '../../lib/cn';
 import { useAuthStore } from '../../store/auth';
+import { Logo } from '../Logo';
 
 const primaryItems = [
   { to: '/welcome', label: tr.nav.welcome, icon: Home },
@@ -55,14 +56,9 @@ export default function Sidebar() {
   return (
     <nav className="flex items-center gap-1 border-b border-line bg-paper px-4 py-2 shadow-soft overflow-x-auto">
       <div className="mr-3 flex items-center gap-2 pr-2">
-        <div
-          className="grid size-7 place-items-center rounded-lg bg-primary text-white"
-          style={{ paddingTop: 2 }}
-        >
-          <span className="serif-italic text-base leading-none">ö</span>
-        </div>
+        <Logo size={26} />
         <span className="serif-italic hidden text-base text-ink md:inline">
-          öğretimsayfam
+          ÖğretimSayfam
         </span>
       </div>
 

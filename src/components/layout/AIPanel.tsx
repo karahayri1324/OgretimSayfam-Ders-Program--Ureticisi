@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Send,
-  Sparkles,
   Check,
   X,
   AlertTriangle,
@@ -18,6 +17,8 @@ import {
 } from 'lucide-react';
 import { tr } from '../../lib/i18n';
 import { cn } from '../../lib/cn';
+import { formatConstraint, constraintTypeLabel } from '../../lib/formatConstraint';
+import { Logo } from '../Logo';
 import { useAIChatStore } from '../../store/ai-chat';
 import { useConstraintsStore } from '../../store/constraints';
 import { useTeachersStore } from '../../store/teachers';
@@ -46,10 +47,106 @@ type Message = {
   status?: 'pending' | 'confirmed' | 'rejected';
 };
 
+const OP_TO_PAGE: Record<string, string> = {
+  add_teacher: '/teachers',
+  update_teacher: '/teachers',
+  delete_teacher: '/teachers',
+  link_teacher_subject: '/teachers',
+  unlink_teacher_subject: '/teachers',
+  substitute_teacher: '/teachers',
+
+  add_class: '/classes',
+  update_class: '/classes',
+  delete_class: '/classes',
+  add_class_year: '/classes',
+  delete_class_year: '/classes',
+
+  add_room: '/rooms',
+  update_room: '/rooms',
+  delete_room: '/rooms',
+
+  add_subject: '/subjects',
+  update_subject: '/subjects',
+  delete_subject: '/subjects',
+
+  add_activity: '/activities',
+  update_activity: '/activities',
+  delete_activity: '/activities',
+  add_split_activity: '/activities',
+  merge_activities: '/activities',
+
+  add_constraint: '/constraints',
+  delete_constraint: '/constraints',
+  add_activity_constraint: '/constraints',
+  set_constraint_weight: '/constraints',
+  set_constraint_active: '/constraints',
+
+  set_timetable_slot: '/timetable',
+  lock_timetable_slot: '/timetable',
+  unlock_timetable_slot: '/timetable',
+  swap_timetable_slots: '/timetable',
+  pair_subjects_consecutive: '/constraints',
+
+  add_day: '/schedule',
+  delete_day: '/schedule',
+  add_hour: '/schedule',
+  delete_hour: '/schedule',
+
+  set_setting: '/settings',
+};
+
+function pickNavigationTarget(
+  actions: { op: string }[],
+): string | null {
+  const counts = new Map<string, number>();
+  for (const a of actions) {
+    const page = OP_TO_PAGE[a.op];
+    if (!page) continue;
+    counts.set(page, (counts.get(page) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [page, count] of counts) {
+    if (count > bestCount) {
+      best = page;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+const PANEL_WIDTH_KEY = 'osf-ai-panel-width-v1';
+const PANEL_WIDTH_DEFAULT = 420;
+const PANEL_WIDTH_MIN = 320;
+const PANEL_WIDTH_MAX = 900;
+
+function readStoredWidth(): number {
+  if (typeof window === 'undefined') return PANEL_WIDTH_DEFAULT;
+  try {
+    const raw = window.localStorage.getItem(PANEL_WIDTH_KEY);
+    if (!raw) return PANEL_WIDTH_DEFAULT;
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n)) return PANEL_WIDTH_DEFAULT;
+    return Math.max(PANEL_WIDTH_MIN, Math.min(PANEL_WIDTH_MAX, n));
+  } catch {
+    return PANEL_WIDTH_DEFAULT;
+  }
+}
+
 export default function AIPanel() {
   const [collapsed, setCollapsed] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [panelWidth, setPanelWidth] = useState<number>(() => readStoredWidth());
+  const [resizing, setResizing] = useState(false);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(panelWidth)));
+    } catch {
+    }
+  }, [panelWidth]);
   const navigate = useNavigate();
   const runSolver = useGenerateStore((s) => s.run);
   const messages = useAIChatStore((s) => s.messages);
@@ -80,30 +177,18 @@ export default function AIPanel() {
     });
   }, [messages]);
 
-  /**
-   * Panel açma sinyali — Welcome/Quick-action gibi panel-dışı kaynaklar
-   * çağırdığında collapsed=false yap. Sinyal sayısı arttığında tetiklenir.
-   */
   useEffect(() => {
     if (panelOpenSignal > 0) setCollapsed(false);
   }, [panelOpenSignal]);
 
-  /**
-   * pendingPrompt store'a bir prompt geldiğinde:
-   *   - mode='fill' → input'a yaz + focus
-   *   - mode='send' → otomatik gönder
-   * Tükettikten sonra store'u temizle (consumePendingPrompt nullable döner).
-   */
   useEffect(() => {
     if (!pendingPrompt) return;
     const pending = consumePendingPrompt();
     if (!pending) return;
     if (pending.mode === 'send') {
-      // doğrudan handleSend ile gönder
       void doSend(pending.text);
     } else {
       setInput(pending.text);
-      // textarea'yı kullanıcıya görünür kılalım
       setTimeout(() => {
         textareaRef.current?.focus();
         textareaRef.current?.setSelectionRange(
@@ -115,7 +200,6 @@ export default function AIPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingPrompt]);
 
-  /** Discriminated union helper — kind eksikse "constraint" sayar. */
   function responseText(res: AIResponse): string {
     const kind = res.kind ?? 'constraint';
     switch (kind) {
@@ -255,11 +339,15 @@ export default function AIPanel() {
         explanation: string;
       };
 
-      // export_timetable özel: renderer-side export gerekiyor (timetableExport.ts),
-      // window.api.ai.applyMutations'a göndermek yerine /timetable sayfasına
-      // yönlendir + pendingExport sinyaliyle orada otomatik tetikle.
+      // 3 farklı action grubu:
+      //  - export_timetable: renderer-side, pendingExport sinyaliyle Timetable'a yönlendir
+      //  - navigate_to: AIPanel'de intercept, navigate() çağrısı
+      //  - Diğerleri: normal applyMutations IPC
       const exportActions = r.actions.filter((a) => a.op === 'export_timetable');
-      const otherActions = r.actions.filter((a) => a.op !== 'export_timetable');
+      const navActions = r.actions.filter((a) => a.op === 'navigate_to');
+      const otherActions = r.actions.filter(
+        (a) => a.op !== 'export_timetable' && a.op !== 'navigate_to',
+      );
 
       try {
         if (otherActions.length > 0) {
@@ -271,7 +359,11 @@ export default function AIPanel() {
           }
           const data = res.data as DataMutationApplyResult;
           await reloadAffectedStores(otherActions);
-          if (data.errors.length === 0 && exportActions.length === 0) {
+          if (
+            data.errors.length === 0 &&
+            exportActions.length === 0 &&
+            navActions.length === 0
+          ) {
             toastSuccess(
               `${data.applied} işlem uygulandı`,
               otherActions.map((a) => a.description).join('; '),
@@ -281,6 +373,14 @@ export default function AIPanel() {
               `${data.applied}/${otherActions.length} işlem uygulandı`,
               data.errors.map((e) => e.message).join('; '),
             );
+          }
+
+          // Auto-navigate: data değişikliği yapıldıysa ilgili sayfaya geç ki
+          // kullanıcı AI'nın yaptığı şeyi manuel UI'da görebilsin.
+          // Explicit navigate_to varsa öncelik onda — auto-nav atlanır.
+          if (navActions.length === 0 && exportActions.length === 0) {
+            const target = pickNavigationTarget(otherActions);
+            if (target) navigate(target);
           }
         }
 
@@ -301,6 +401,14 @@ export default function AIPanel() {
             `${format.toUpperCase()} export hazırlanıyor`,
             cls ? `${cls} sınıfı için` : 'tüm sınıflar',
           );
+        }
+
+        // Explicit navigate_to action'ları
+        for (const na of navActions) {
+          const raw = String((na.params as { page?: string }).page ?? '').toLowerCase();
+          const page = raw.startsWith('/') ? raw : `/${raw}`;
+          navigate(page);
+          toastInfo('Sayfaya yönlendiriliyor', page);
         }
       } catch (e) {
         toastError('Bağlantı hatası', String(e));
@@ -341,7 +449,7 @@ export default function AIPanel() {
         onClick={() => setCollapsed(false)}
         className="flex h-full w-12 flex-col items-center justify-start gap-2 border-l border-surface-200 bg-white py-4 text-ink-600 hover:bg-surface-100"
       >
-        <Sparkles size={20} className="text-primary-500" />
+        <Logo size={24} />
         <span
           className="text-xs"
           style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
@@ -353,10 +461,44 @@ export default function AIPanel() {
   }
 
   return (
-    <aside className="flex h-full w-[420px] flex-col border-l border-surface-200 bg-white shadow-lg">
+    <aside
+      className="relative flex h-full flex-col border-l border-surface-200 bg-white shadow-lg"
+      style={{ width: panelWidth }}
+    >
+      {/* Sol kenar — drag handle ile resize */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="AI panel genişliğini ayarla"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          setResizing(true);
+          const startX = e.clientX;
+          const startW = panelWidth;
+          const onMove = (mv: MouseEvent) => {
+            // Sürükledikçe sol → panel genişler (delta negatif olur, çevir)
+            const next = Math.max(
+              PANEL_WIDTH_MIN,
+              Math.min(PANEL_WIDTH_MAX, startW + (startX - mv.clientX)),
+            );
+            setPanelWidth(next);
+          };
+          const onUp = () => {
+            setResizing(false);
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            // panelWidth değişikliği zaten useEffect ile localStorage'a yazılıyor
+          };
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        }}
+        className={cn(
+          'absolute left-0 top-0 z-10 h-full w-1.5 -translate-x-1/2 cursor-col-resize select-none transition-colors hover:bg-primary-500/30',
+          resizing && 'bg-primary-500/40',
+        )}
+      />
       <header className="flex items-center justify-between border-b border-surface-200 px-4 py-3">
         <div className="flex items-center gap-2">
-          <Sparkles size={18} className="text-primary-500" />
           <h2 className="text-sm font-semibold text-ink-900">{tr.ai.title}</h2>
         </div>
         <div className="flex items-center gap-1">
@@ -577,48 +719,33 @@ function MessageBubble({
             <CopyButton text={q.answer} />
           </div>
           {q.data && q.data.length > 0 && (
-            <pre className="mt-1 max-h-40 overflow-y-auto rounded-md bg-white p-2 text-[10px] text-ink-600">
-              {JSON.stringify(q.data, null, 2)}
-            </pre>
+            <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto rounded-md bg-white p-2 text-[11px] text-ink-700">
+              {q.data.slice(0, 20).map((item, i) => (
+                <li key={i} className="flex items-start gap-1.5">
+                  <span className="mt-0.5 size-1 shrink-0 rounded-full bg-primary-500" />
+                  <span className="flex-1">{formatQueryDataItem(item)}</span>
+                </li>
+              ))}
+              {q.data.length > 20 && (
+                <li className="pt-1 text-[10px] italic text-ink-400">
+                  …ve {q.data.length - 20} daha
+                </li>
+              )}
+            </ul>
           )}
         </div>
       </div>
     );
   }
 
-  // Tool call — gizli; "düşünüyor" zaten loading spinner ile gösteriliyor.
-  // (Normalde IPC bunu UI'a yansıtmaz çünkü server-side çözülür; yine de
-  // bir şekilde UI'a düşerse sade gri bir info satırı gösterilir.)
+  // Tool call — son kullanıcı bunu görmemeli (server-side iterative çağrı).
+  // UI'a düşerse sade "bilgi çekiyor…" satırı, hiçbir teknik detay yok.
   if (res && kind === 'tool_call') {
-    const tc = res as { tool: string; args?: Record<string, unknown>; reasoning?: string };
-    // args'ın özet bir gösterimini hazırlayalım (sadece anahtarlar veya kısa val)
-    const argStr =
-      tc.args && Object.keys(tc.args).length > 0
-        ? Object.entries(tc.args)
-            .map(([k, v]) => {
-              const val =
-                typeof v === 'string' || typeof v === 'number'
-                  ? String(v)
-                  : Array.isArray(v)
-                    ? `[${v.length}]`
-                    : '…';
-              return `${k}=${val}`;
-            })
-            .join(', ')
-        : '';
     return (
       <div className="flex justify-start">
-        <div className="max-w-[90%] rounded-md border border-surface-200 bg-surface-50 px-3 py-2 text-xs text-ink-500">
-          <div className="flex items-center gap-2">
-            <Wrench size={12} className="shrink-0" />
-            <span>
-              {tr.ai.fetchingInfo}:{' '}
-              <code className="text-ink-700">{tc.tool}({argStr})</code>
-            </span>
-          </div>
-          {tc.reasoning && (
-            <p className="mt-1 pl-5 italic text-ink-400">{tc.reasoning}</p>
-          )}
+        <div className="flex max-w-[90%] items-center gap-2 rounded-md border border-surface-200 bg-surface-50 px-3 py-2 text-xs text-ink-500">
+          <Wrench size={12} className="shrink-0 animate-pulse" />
+          <span className="italic">{tr.ai.fetchingInfo}…</span>
         </div>
       </div>
     );
@@ -635,9 +762,6 @@ function MessageBubble({
             <div className="flex-1">
               <p className="font-medium text-amber-900">Program ayar önerisi</p>
               <p className="mt-0.5 text-ink-700">{su.explanation}</p>
-              <pre className="mt-1 rounded-md bg-white p-2 text-[10px] text-ink-600">
-                {su.action}({JSON.stringify(su.params)})
-              </pre>
             </div>
             <CopyButton text={su.explanation} />
           </div>
@@ -722,7 +846,6 @@ function MessageBubble({
                 )}
                 <div className="flex-1">
                   <p className="text-ink-700">{a.description}</p>
-                  <p className="text-[10px] text-ink-400">{a.op}</p>
                 </div>
               </li>
             ))}
@@ -919,15 +1042,46 @@ function ConstraintCard({ c }: { c: AIConstraint }) {
           >
             {cat.label}
           </span>
-          <span className="truncate font-mono text-[10px] text-ink-600">
-            {c.type}
+          <span className="truncate text-[11px] text-ink-700">
+            {constraintTypeLabel(c.type)}
           </span>
         </div>
         <span className="shrink-0 text-ink-400">Önem: {c.weight}</span>
       </div>
-      <pre className="mt-1 whitespace-pre-wrap text-[10px] text-ink-600">
-        {JSON.stringify(c.params, null, 2)}
-      </pre>
+      <p className="mt-1 text-[11.5px] leading-snug text-ink-700">
+        {formatConstraint({ ...c, id: 0, active: true, source: 'ai', aiMessageId: null, createdAt: '', notes: null })}
+      </p>
     </div>
   );
+}
+
+/**
+ * Query response.data içindeki öğeleri sade tek satır gösterimi.
+ * Object ise {name, count} gibi tipik alanları okur, yoksa kısa JSON özeti.
+ */
+function formatQueryDataItem(item: unknown): string {
+  if (item == null) return '';
+  if (typeof item === 'string' || typeof item === 'number') return String(item);
+  if (typeof item === 'object') {
+    const o = item as Record<string, unknown>;
+    // Tipik alanlar
+    const name =
+      (typeof o.name === 'string' && o.name) ||
+      (typeof o.label === 'string' && o.label) ||
+      (typeof o.title === 'string' && o.title);
+    if (name) {
+      const extras: string[] = [];
+      if (typeof o.count === 'number') extras.push(`${o.count} adet`);
+      if (typeof o.hours === 'number') extras.push(`${o.hours} saat`);
+      if (typeof o.value !== 'undefined') extras.push(String(o.value));
+      return extras.length > 0 ? `${name} — ${extras.join(', ')}` : String(name);
+    }
+    // Fallback: ilk 3 alan adı=değer
+    const pairs = Object.entries(o)
+      .filter(([_, v]) => v != null && (typeof v === 'string' || typeof v === 'number'))
+      .slice(0, 3)
+      .map(([k, v]) => `${k}: ${v}`);
+    if (pairs.length > 0) return pairs.join(' · ');
+  }
+  return '';
 }

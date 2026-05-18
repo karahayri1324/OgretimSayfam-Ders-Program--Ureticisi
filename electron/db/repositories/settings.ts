@@ -3,7 +3,6 @@ import { getDb } from '../connection.js';
 export type SettingsMap = Record<string, string>;
 
 export const settingsRepo = {
-  /** Tüm key/value çiftlerini map olarak döner. */
   getAll(): SettingsMap {
     const rows = getDb()
       .prepare('SELECT key, value FROM settings')
@@ -20,7 +19,6 @@ export const settingsRepo = {
     return row?.value ?? null;
   },
 
-  /** Patch ile birden fazla anahtarı bir kerede günceller (upsert). */
   setMany(patch: SettingsMap): SettingsMap {
     const db = getDb();
     const stmt = db.prepare(

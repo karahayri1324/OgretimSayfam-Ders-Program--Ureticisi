@@ -9,7 +9,6 @@ type State = {
   years: ClassYear[];
   classes: ClassRoom[];
   loading: boolean;
-  /** Son IPC hatası — UI'da kullanıcı dostu toast için tutuluyor. */
   lastError: string | null;
   load: () => Promise<void>;
   createClass: (input: ClassInput) => Promise<boolean>;
@@ -26,8 +25,6 @@ function ipcErrMessage(res: unknown): string | null {
   if (r.ok) return null;
   const err = (r as IpcErr).error;
   if (!err) return null;
-  // CONFLICT için zaten Türkçe mesaj geliyor; diğer kodlar da
-  // safeHandler tarafından çevrilmiş.
   return err.message ?? null;
 }
 

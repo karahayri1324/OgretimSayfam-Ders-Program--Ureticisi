@@ -16,13 +16,6 @@ import {
 } from '../lib/formatConstraint';
 import type { Constraint } from '../lib/types';
 
-/**
- * Kısıtlama sayfası — sadece görüntüleme + ağırlık/aktiflik düzenleme + silme.
- *
- * Manuel ekleme ve preset card kaldırıldı (kullanıcı isteği): "manuel
- * kısıtlama eklenmesin hiçbir şekilde sadece görülsün eklenen kısıtlamalar".
- * Tüm yeni kısıtlamalar AI panelinden eklenir.
- */
 export default function Constraints() {
   const {
     constraints,

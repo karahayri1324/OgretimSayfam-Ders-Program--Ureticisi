@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Calendar, ShieldAlert, Sliders } from 'lucide-react';
 
-// Dersler ekranı header'da olduğu için buradan kaldırıldı.
 const items = [
   {
     to: '/schedule',

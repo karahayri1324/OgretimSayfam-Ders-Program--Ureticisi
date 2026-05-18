@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Sparkles,
   ArrowRight,
   BookOpen,
   GraduationCap,
@@ -9,6 +8,7 @@ import {
   Users,
   type LucideIcon,
 } from 'lucide-react';
+import { Logo } from '../components/Logo';
 import { useSubjectsStore } from '../store/subjects';
 import { useClassesStore } from '../store/classes';
 import { useRoomsStore } from '../store/rooms';
@@ -24,10 +24,6 @@ type CardStat = {
   icon: LucideIcon;
 };
 
-/**
- * Defter — Hoş geldin ekranı.
- * Hero AI kartı (sticky tape ile) + 4 progress card + ilerleme barı.
- */
 export default function Welcome() {
   const navigate = useNavigate();
   const subjects = useSubjectsStore((s) => s.subjects);
@@ -89,7 +85,7 @@ export default function Welcome() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-10 py-4">
-      {/* Date strip + okul */}
+      {}
       <div className="flex items-center justify-between text-xs text-muted">
         <span>
           <span className="serif-italic mr-2 text-ink">Pazartesi</span>
@@ -103,7 +99,7 @@ export default function Welcome() {
         </span>
       </div>
 
-      {/* Headline */}
+      {}
       <header>
         <h1 className="serif text-[44px] leading-[1.02] tracking-tight">
           Hoş geldin,
@@ -116,15 +112,15 @@ export default function Welcome() {
         </p>
       </header>
 
-      {/* Hero AI card with tape */}
+      {}
       <section
         className="card-defter relative p-7"
         aria-labelledby="welcome-hero-title"
       >
         <span className="tape" />
         <div className="flex items-start gap-5">
-          <div className="grid size-14 shrink-0 place-items-center rounded-2xl bg-primary text-white shadow-primary">
-            <Sparkles size={26} />
+          <div className="grid size-14 shrink-0 place-items-center rounded-2xl bg-white shadow-primary ring-1 ring-line">
+            <Logo size={44} />
           </div>
           <div className="flex-1">
             <h2

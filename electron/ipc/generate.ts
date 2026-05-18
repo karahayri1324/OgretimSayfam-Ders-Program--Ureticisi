@@ -1,14 +1,3 @@
-/**
- * generate:* IPC handler'ları — gerçek FET üretim akışı.
- *
- * Akış:
- *   1) gatherSchoolData() ile DB'den tüm bağımlı tabloları topla
- *   2) buildFetXml ile XML üret (block expansion + auto constraint'ler)
- *   3) Tempdir altında input.fet yazıp fet-cl'i çalıştır
- *   4) Progress event'lerini renderer'a yolla (generate:progress kanalı)
- *   5) Başarı → timetables tablosuna kaydet, sonuç döndür
- *   6) Cancel desteği AbortController üzerinden
- */
 
 import { ipcMain, type BrowserWindow } from 'electron';
 import fs from 'node:fs';
@@ -27,10 +16,6 @@ import { log } from '../utils/logger.js';
 import type { FetProgressEvent } from '../fet/types.js';
 import type { GenerateProgress, TimetableResult } from '../../src/lib/types.js';
 
-/**
- * Settings'ten saniye cinsinden FET zaman sınırını okur. Default 120s.
- * Hem yeni anahtar (`fetTimeLimitSec`) hem eski (`fetTimeLimit`) destekli.
- */
 function readFetTimeLimitFromSettings(): number {
   try {
     const raw =
@@ -38,7 +23,6 @@ function readFetTimeLimitFromSettings(): number {
     const n = parseInt(String(raw ?? ''), 10);
     if (Number.isFinite(n) && n >= 5) return n;
   } catch {
-    /* ignore */
   }
   return 120;
 }
@@ -76,7 +60,6 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
 
     let tmpDir: string | null = null;
     try {
-      // 1) DB'den veri topla
       const bundle = gatherSchoolData();
       if (bundle.teachers.length === 0) {
         return err(
@@ -105,13 +88,8 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
 
       emit({ kind: 'progress', value: 0, message: 'Veriler hazırlanıyor' });
 
-      // 2) XML üret
       const built = buildFetXml(bundle);
       if (built.skipped.length > 0) {
-        // Detayları main-process log'una yaz (debug için), ama UI'a sadece
-        // özet ve "ciddi" atlamaları (eşleşmeyen isim referansları) bildir.
-        // "En az 2 aktivite gerekli" / "boş slots" gibi presetin/AI'nın
-        // doğal sınırlamaları kullanıcıya gürültü oluşturuyor.
         log.warn('Bazı constraint\'ler atlandı', { skipped: built.skipped });
         const meaningful = built.skipped.filter((s) => !isBenignSkipReason(s.reason));
         if (meaningful.length > 0) {

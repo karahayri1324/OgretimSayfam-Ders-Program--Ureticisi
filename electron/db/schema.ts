@@ -1,9 +1,6 @@
 import type Database from 'better-sqlite3';
 import { log } from '../utils/logger.js';
 
-/**
- * Migration kayıt tablosu. Hangi versiyonların uygulandığını saklar.
- */
 const CREATE_MIGRATIONS_TABLE = `
 CREATE TABLE IF NOT EXISTS _migrations (
   version INTEGER PRIMARY KEY,
@@ -11,10 +8,6 @@ CREATE TABLE IF NOT EXISTS _migrations (
 );
 `;
 
-/**
- * v1 — Tüm temel tablolar. Plans/08_DATABASE_SCHEMA.md ile bire bir uyumlu.
- * Forward reference (classes.home_room_id → rooms) yüzünden rooms önce yaratılıyor.
- */
 const V1_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schools (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -169,19 +162,6 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 `;
 
-/**
- * v2 — Split activities + per-day hours.
- *
- * - activities.split_group_id: NULL = bağımsız aktivite. Aynı split_group_id
- *   değerine sahip iki aktivite FET'te ConstraintActivitiesSameStartingTime ile
- *   bağlanır. XML builder bu durumda ilgili sınıfı paralellik kadar
- *   <Subgroup>'a böler (örn. 9A_g1, 9A_g2) ve her split-üye aktivite kendi
- *   subgroup'una atanır; FET çakışma saymadan paralel yerleştirir.
- * - day_hours: günlere özel ders saati sayısı/ad/aralık. Boş bırakılırsa
- *   global `hours` tablosu fallback olur. XML builder en uzun günü baz alarak
- *   tek bir Hours_List üretir; kısa günlerin eksik slot'ları için
- *   ConstraintBreakTimes eklenir (bu slot'a hiç aktivite yerleşmez).
- */
 const V2_SCHEMA = `
 ALTER TABLE activities ADD COLUMN split_group_id INTEGER;
 
@@ -203,17 +183,11 @@ CREATE INDEX IF NOT EXISTS idx_day_hours_school_day
   ON day_hours (school_id, day_id, hour_order_index);
 `;
 
-/**
- * version → SQL bloğu. Yeni şema değişikliği eklemek için artan indis ekleyin.
- */
 export const migrations: Record<number, string> = {
   1: V1_SCHEMA,
   2: V2_SCHEMA,
 };
 
-/**
- * Uygulanmamış migration'ları sıralı şekilde uygular. İdempotent.
- */
 export function runMigrations(db: Database.Database): void {
   db.exec(CREATE_MIGRATIONS_TABLE);
 

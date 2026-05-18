@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-/* Helpers */
 const nullableString = z
   .union([z.string(), z.null()])
   .optional()
@@ -8,7 +7,6 @@ const nullableString = z
 
 const intId = z.number().int().positive();
 
-/* Teachers */
 export const TeacherInputSchema = z.object({
   name: z.string().trim().min(1, 'Öğretmen adı boş olamaz'),
   weeklyTargetHours: z.number().int().min(0).max(60).default(0),
@@ -17,7 +15,6 @@ export const TeacherInputSchema = z.object({
 });
 export const TeacherPatchSchema = TeacherInputSchema.partial();
 
-/* Subjects */
 export const SubjectInputSchema = z.object({
   name: z.string().trim().min(1, 'Ders adı boş olamaz'),
   shortCode: nullableString,
@@ -26,7 +23,6 @@ export const SubjectInputSchema = z.object({
 });
 export const SubjectPatchSchema = SubjectInputSchema.partial();
 
-/* Rooms */
 export const RoomInputSchema = z.object({
   name: z.string().trim().min(1, 'Derslik adı boş olamaz'),
   capacity: z.number().int().min(0).max(1000).default(30),
@@ -35,7 +31,6 @@ export const RoomInputSchema = z.object({
 });
 export const RoomPatchSchema = RoomInputSchema.partial();
 
-/* Classes */
 export const ClassInputSchema = z.object({
   yearId: z.union([intId, z.null()]).optional(),
   name: z.string().trim().min(1, 'Sınıf adı boş olamaz'),
@@ -44,7 +39,6 @@ export const ClassInputSchema = z.object({
 });
 export const ClassPatchSchema = ClassInputSchema.partial();
 
-/* Activities */
 export const ActivityInputSchema = z.object({
   id: intId.optional(),
   classId: intId,
@@ -55,7 +49,6 @@ export const ActivityInputSchema = z.object({
   notes: nullableString,
 });
 
-/* Constraints */
 export const ConstraintTypeEnum = z.enum([
   'TEACHER_NOT_AVAILABLE',
   'TEACHER_MAX_DAYS_PER_WEEK',
@@ -129,10 +122,6 @@ export const ConstraintInputSchema = z.object({
   notes: nullableString,
 });
 
-/* Schedule */
-// Frontend `{ name, orderIndex }[]` formatında gönderir; orderIndex repo
-// tarafında sıralı insert ile zaten korunuyor — biz sadece name'leri alıyoruz.
-// Backward compat: plain `string[]` de kabul ediyoruz (eski AI mutation çağrıları).
 const DayEntrySchema = z.union([
   z.string().trim().min(1, 'Gün adı boş olamaz'),
   z
@@ -155,7 +144,6 @@ export const HoursSchema = z
   .array(HourEntrySchema)
   .min(1, 'En az bir ders saati gerekli');
 
-/* Day-specific hours (per-day hours feature) */
 export const DayHourEntrySchema = z.object({
   orderIndex: z.number().int().min(0).max(40),
   name: nullableString,
@@ -167,38 +155,24 @@ export const SetDayHoursSchema = z.object({
   entries: z.array(DayHourEntrySchema),
 });
 
-/** Tüm saatlerin teneffüs aralığını/uzunluğunu topluca kaydır. */
 export const BulkAdjustBreaksSchema = z.object({
-  /** Dakika cinsinden ekle/çıkar (negatif olabilir). */
   deltaMinutes: z.number().int().min(-180).max(180),
-  /**
-   * Hangi alanı kaydıracak: 'start' sadece başlangıç saatleri, 'end' sadece
-   * bitişler, 'break' = her saatin bitişini sabit tutup bir sonraki saatin
-   * başlangıcını + delta dakika kaydırır (teneffüs uzatma davranışı).
-   */
   mode: z.enum(['start', 'end', 'break']).default('break'),
-  /** Sadece bu day_id'ler için uygula (boşsa global hours). */
   dayIds: z.array(intId).optional(),
 });
 
-/* Activity split */
 export const SetSplitSchema = z.object({
   activityIds: z.array(intId).min(1).max(8),
 });
 
-/* AI */
 export const AIParseSchema = z.string().trim().min(1, 'Mesaj boş olamaz');
 
-/* Settings */
-// Store gönderdiği değerler number/string/boolean karışık olabilir; DB hep
-// string saklar. Bu yüzden değerleri string'e coerce edip kabul ediyoruz.
 export const SettingsPatchSchema = z.record(
   z
     .union([z.string(), z.number(), z.boolean(), z.null()])
     .transform((v) => (v == null ? '' : String(v))),
 );
 
-/* Generate */
 export const GenerateRunOptsSchema = z
   .object({
     timeLimit: z.number().int().min(5).max(3600).optional(),

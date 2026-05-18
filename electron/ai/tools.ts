@@ -6,26 +6,13 @@ import { constraintsRepo } from '../db/repositories/constraints.js';
 import { daysRepo } from '../db/repositories/days.js';
 import { hoursRepo } from '../db/repositories/hours.js';
 import { timetablesRepo } from '../db/repositories/timetables.js';
+import { roomsRepo } from '../db/repositories/rooms.js';
+import type { Day, TimetableSlot } from '../../src/lib/types.js';
 
-/**
- * AI Tool registry — agentic mode'da AI'nın iteratif olarak çağıracağı
- * salt-okunur DB tool'ları.
- *
- * Her tool:
- *   - input: kısmen kontrollü args (string/number)
- *   - output: { result } veya { error: string }
- *
- * Tool'lar **read-only**'dir; yan etki yapmazlar. AI'nın "soru sor" akışını
- * desteklemek için DB'den özet bilgi toplar.
- *
- * Bilinen tool adı listesi `KNOWN_TOOLS`. Bilinmeyen tool çağrılırsa
- * executeTool error döner.
- */
 
 export type ToolArgs = Record<string, unknown>;
 export type ToolResult = { result: unknown } | { error: string };
 
-// --- Helpers ---------------------------------------------------------------
 
 function deburr(s: string): string {
   return s
@@ -39,7 +26,6 @@ function deburr(s: string): string {
     .replace(/ö/g, 'o');
 }
 
-/** Fuzzy isim eşleştirme — list içinde "needle" geçen ilk öğeyi döner. */
 function findByName<T extends { id: number; name: string }>(
   needle: string,
   list: T[],
@@ -47,19 +33,15 @@ function findByName<T extends { id: number; name: string }>(
   const target = deburr(needle.trim());
   if (!target) return null;
 
-  // 1) tam eşleşme
   for (const item of list) {
     if (deburr(item.name) === target) return item;
   }
-  // 2) substring eşleşme (deburred)
   for (const item of list) {
     if (deburr(item.name).includes(target)) return item;
   }
-  // 3) ters yön — kullanıcı "Ahmet Yılmaz hoca" yazmış, listede "Ahmet Yılmaz" var
   for (const item of list) {
     if (target.includes(deburr(item.name))) return item;
   }
-  // 4) kelime bazlı parça eşleşme — "Ahmet" → "Ahmet Yılmaz"
   const parts = target.split(/\s+/).filter((p) => p.length >= 3);
   for (const item of list) {
     const lowName = deburr(item.name);
@@ -72,6 +54,16 @@ function findByName<T extends { id: number; name: string }>(
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findDayByName(name: string, days: Day[]): Day | null {
+  const target = deburr(name.trim());
+  if (!target) return null;
+  for (const d of days) if (deburr(d.name) === target) return d;
+  for (const d of days) if (deburr(d.name).startsWith(target)) return d;
+  for (const d of days) if (deburr(d.name).includes(target)) return d;
+  for (const d of days) if (target.startsWith(deburr(d.name))) return d;
+  return null;
 }
 
 function findAllByName<T extends { id: number; name: string }>(
@@ -97,7 +89,6 @@ function requireString(args: ToolArgs, key: string): string | null {
   return v.trim();
 }
 
-// --- Domain look-ups -------------------------------------------------------
 
 type ActivityView = {
   class: string;
@@ -562,6 +553,348 @@ export const tools = {
         emptiestDay: emptiest?.day ?? null,
         topTeachers,
         topRooms,
+      },
+    };
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  // Timetable inceleme tool'ları — AI üretilmiş çizelgeyi sorgular
+  // ════════════════════════════════════════════════════════════════════
+
+  /**
+   * Spesifik bir (class, day, hour) slot'undaki ders bilgisini döner.
+   * "9A Cuma 8. ders kim?" gibi sorulara cevap için.
+   */
+  getTimetableSlot(args: ToolArgs): ToolResult {
+    const className = requireString(args, 'class');
+    const dayName = requireString(args, 'day');
+    if (!className || !dayName) return { error: "'class' ve 'day' gerekli." };
+    const hourRaw = args.hour;
+    const hour = typeof hourRaw === 'number' ? hourRaw : parseInt(String(hourRaw), 10);
+    if (!Number.isFinite(hour) || hour < 1) return { error: "'hour' 1+ olmalı." };
+
+    const latest = timetablesRepo.latest();
+    if (!latest) {
+      return { result: { generated: false, message: 'Henüz program üretilmedi.' } };
+    }
+    const klass = findByName(className, classesRepo.list());
+    if (!klass) return { error: `Sınıf bulunamadı: '${className}'` };
+    const day = findDayByName(dayName, daysRepo.list());
+    if (!day) return { error: `Gün bulunamadı: '${dayName}'` };
+
+    const slot = latest.slots.find(
+      (s) => s.classId === klass.id && s.dayIndex === day.orderIndex && s.hourIndex === hour,
+    );
+    if (!slot) {
+      return {
+        result: {
+          generated: true,
+          found: false,
+          class: klass.name,
+          day: day.name,
+          hour,
+          message: `${klass.name} ${day.name} ${hour}. ders'te boşluk var.`,
+        },
+      };
+    }
+    return {
+      result: {
+        generated: true,
+        found: true,
+        class: klass.name,
+        day: day.name,
+        hour,
+        subject: slot.subjectName,
+        teacher: slot.teacherName,
+        room: slot.roomName,
+        activityId: slot.activityId,
+      },
+    };
+  },
+
+  getClassTimetable(args: ToolArgs): ToolResult {
+    const className = requireString(args, 'class');
+    if (!className) return { error: "'class' gerekli." };
+
+    const latest = timetablesRepo.latest();
+    if (!latest) {
+      return { result: { generated: false, message: 'Henüz program üretilmedi.' } };
+    }
+    const klass = findByName(className, classesRepo.list());
+    if (!klass) return { error: `Sınıf bulunamadı: '${className}'` };
+
+    const days = daysRepo.list();
+    const hoursPerDay = hoursRepo.list().length || 8;
+
+    const grid: Array<Array<{ subject: string; teacher: string; room: string | null } | null>> = [];
+    for (let d = 0; d < days.length; d++) {
+      const row: typeof grid[number] = [];
+      for (let h = 1; h <= hoursPerDay; h++) row.push(null);
+      grid.push(row);
+    }
+    for (const s of latest.slots) {
+      if (s.classId !== klass.id) continue;
+      const dayIdx = days.findIndex((d) => d.orderIndex === s.dayIndex);
+      if (dayIdx < 0) continue;
+      const hourSlot = s.hourIndex - 1;
+      if (hourSlot < 0 || hourSlot >= hoursPerDay) continue;
+      grid[dayIdx]![hourSlot] = {
+        subject: s.subjectName,
+        teacher: s.teacherName,
+        room: s.roomName,
+      };
+    }
+
+    return {
+      result: {
+        generated: true,
+        class: klass.name,
+        days: days.map((d) => d.name),
+        hoursPerDay,
+        grid,
+        totalSlots: latest.slots.filter((s) => s.classId === klass.id).length,
+      },
+    };
+  },
+
+  getTeacherTimetable(args: ToolArgs): ToolResult {
+    const teacherName = requireString(args, 'teacher');
+    if (!teacherName) return { error: "'teacher' gerekli." };
+
+    const latest = timetablesRepo.latest();
+    if (!latest) {
+      return { result: { generated: false, message: 'Henüz program üretilmedi.' } };
+    }
+    const teacher = findByName(teacherName, teachersRepo.list());
+    if (!teacher) return { error: `Öğretmen bulunamadı: '${teacherName}'` };
+
+    const days = daysRepo.list();
+    const mine = latest.slots.filter((s) => s.teacherId === teacher.id);
+    const slots = mine
+      .sort((a, b) => a.dayIndex - b.dayIndex || a.hourIndex - b.hourIndex)
+      .map((s) => {
+        const dayObj = days.find((d) => d.orderIndex === s.dayIndex);
+        return {
+          day: dayObj?.name ?? `gün${s.dayIndex}`,
+          hour: s.hourIndex,
+          class: s.className,
+          subject: s.subjectName,
+          room: s.roomName,
+        };
+      });
+
+    // Gap hesabı: gün başına ilk-son arası, dolu olmayan slot sayısı
+    let gaps = 0;
+    const byDay = new Map<number, number[]>();
+    for (const s of mine) {
+      const arr = byDay.get(s.dayIndex) ?? [];
+      arr.push(s.hourIndex);
+      byDay.set(s.dayIndex, arr);
+    }
+    for (const hours of byDay.values()) {
+      hours.sort((a, b) => a - b);
+      if (hours.length < 2) continue;
+      const min = hours[0]!;
+      const max = hours[hours.length - 1]!;
+      gaps += max - min + 1 - hours.length;
+    }
+
+    return {
+      result: {
+        generated: true,
+        teacher: teacher.name,
+        totalSlots: slots.length,
+        gaps,
+        slots,
+      },
+    };
+  },
+
+  /**
+   * Bir dersliğin haftalık kullanım programı.
+   */
+  getRoomTimetable(args: ToolArgs): ToolResult {
+    const roomName = requireString(args, 'room');
+    if (!roomName) return { error: "'room' gerekli." };
+
+    const latest = timetablesRepo.latest();
+    if (!latest) {
+      return { result: { generated: false, message: 'Henüz program üretilmedi.' } };
+    }
+    const room = findByName(roomName, roomsRepo.list());
+    if (!room) return { error: `Derslik bulunamadı: '${roomName}'` };
+
+    const days = daysRepo.list();
+    const slots = latest.slots
+      .filter((s) => s.roomId === room.id)
+      .sort((a, b) => a.dayIndex - b.dayIndex || a.hourIndex - b.hourIndex)
+      .map((s) => {
+        const dayObj = days.find((d) => d.orderIndex === s.dayIndex);
+        return {
+          day: dayObj?.name ?? `gün${s.dayIndex}`,
+          hour: s.hourIndex,
+          class: s.className,
+          subject: s.subjectName,
+          teacher: s.teacherName,
+        };
+      });
+    return {
+      result: {
+        generated: true,
+        room: room.name,
+        totalSlots: slots.length,
+        slots,
+      },
+    };
+  },
+
+  /**
+   * Bir günün tüm derslerini (opsiyonel sınıf filtresi ile) listeler.
+   */
+  getDayTimetable(args: ToolArgs): ToolResult {
+    const dayName = requireString(args, 'day');
+    if (!dayName) return { error: "'day' gerekli." };
+    const classFilter = requireString(args, 'class');
+
+    const latest = timetablesRepo.latest();
+    if (!latest) {
+      return { result: { generated: false, message: 'Henüz program üretilmedi.' } };
+    }
+    const day = findDayByName(dayName, daysRepo.list());
+    if (!day) return { error: `Gün bulunamadı: '${dayName}'` };
+
+    let classId: number | null = null;
+    if (classFilter) {
+      const klass = findByName(classFilter, classesRepo.list());
+      if (!klass) return { error: `Sınıf bulunamadı: '${classFilter}'` };
+      classId = klass.id;
+    }
+
+    const slots = latest.slots
+      .filter(
+        (s) => s.dayIndex === day.orderIndex && (classId == null || s.classId === classId),
+      )
+      .sort((a, b) => a.hourIndex - b.hourIndex)
+      .map((s) => ({
+        hour: s.hourIndex,
+        class: s.className,
+        subject: s.subjectName,
+        teacher: s.teacherName,
+        room: s.roomName,
+      }));
+
+    return {
+      result: {
+        generated: true,
+        day: day.name,
+        ...(classFilter && { class: classFilter }),
+        totalSlots: slots.length,
+        slots,
+      },
+    };
+  },
+
+  /**
+   * Belirli bir gün+saat'te kim ne yapıyor — tüm sınıflar.
+   */
+  whoIsTeaching(args: ToolArgs): ToolResult {
+    const dayName = requireString(args, 'day');
+    if (!dayName) return { error: "'day' gerekli." };
+    const hourRaw = args.hour;
+    const hour = typeof hourRaw === 'number' ? hourRaw : parseInt(String(hourRaw), 10);
+    if (!Number.isFinite(hour) || hour < 1) return { error: "'hour' 1+ olmalı." };
+
+    const latest = timetablesRepo.latest();
+    if (!latest) {
+      return { result: { generated: false, message: 'Henüz program üretilmedi.' } };
+    }
+    const day = findDayByName(dayName, daysRepo.list());
+    if (!day) return { error: `Gün bulunamadı: '${dayName}'` };
+
+    const assignments = latest.slots
+      .filter((s) => s.dayIndex === day.orderIndex && s.hourIndex === hour)
+      .map((s) => ({
+        class: s.className,
+        subject: s.subjectName,
+        teacher: s.teacherName,
+        room: s.roomName,
+      }));
+
+    return {
+      result: {
+        generated: true,
+        day: day.name,
+        hour,
+        totalAssignments: assignments.length,
+        assignments,
+      },
+    };
+  },
+
+  /**
+   * Bir sınıfın / öğretmenin / dersliğin BOŞ slot'larını listeler.
+   * Args'tan biri zorunlu: { class } veya { teacher } veya { room }
+   */
+  getFreeSlots(args: ToolArgs): ToolResult {
+    const className = requireString(args, 'class');
+    const teacherName = requireString(args, 'teacher');
+    const roomName = requireString(args, 'room');
+    if (!className && !teacherName && !roomName) {
+      return { error: "'class', 'teacher' veya 'room'dan en az biri gerekli." };
+    }
+
+    const latest = timetablesRepo.latest();
+    if (!latest) {
+      return { result: { generated: false, message: 'Henüz program üretilmedi.' } };
+    }
+    const days = daysRepo.list();
+    const hoursPerDay = hoursRepo.list().length || 8;
+
+    let entity: string;
+    let entityType: 'class' | 'teacher' | 'room';
+    let occupiedKey: (s: TimetableSlot) => boolean;
+
+    if (className) {
+      const klass = findByName(className, classesRepo.list());
+      if (!klass) return { error: `Sınıf bulunamadı: '${className}'` };
+      entity = klass.name;
+      entityType = 'class';
+      occupiedKey = (s) => s.classId === klass.id;
+    } else if (teacherName) {
+      const teacher = findByName(teacherName, teachersRepo.list());
+      if (!teacher) return { error: `Öğretmen bulunamadı: '${teacherName}'` };
+      entity = teacher.name;
+      entityType = 'teacher';
+      occupiedKey = (s) => s.teacherId === teacher.id;
+    } else {
+      const room = findByName(roomName!, roomsRepo.list());
+      if (!room) return { error: `Derslik bulunamadı: '${roomName}'` };
+      entity = room.name;
+      entityType = 'room';
+      occupiedKey = (s) => s.roomId === room.id;
+    }
+
+    const occupied = new Set<string>();
+    for (const s of latest.slots) {
+      if (occupiedKey(s)) occupied.add(`${s.dayIndex}:${s.hourIndex}`);
+    }
+
+    const freeSlots: Array<{ day: string; hour: number }> = [];
+    for (const d of days) {
+      for (let h = 1; h <= hoursPerDay; h++) {
+        if (!occupied.has(`${d.orderIndex}:${h}`)) {
+          freeSlots.push({ day: d.name, hour: h });
+        }
+      }
+    }
+
+    return {
+      result: {
+        generated: true,
+        entity,
+        entityType,
+        totalFree: freeSlots.length,
+        freeSlots,
       },
     };
   },

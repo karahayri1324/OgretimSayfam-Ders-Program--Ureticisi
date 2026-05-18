@@ -49,15 +49,12 @@ export function registerScheduleHandlers(): void {
     );
   });
 
-  // Tüm saatlerin teneffüs aralığını topluca kaydır.
   ipcMain.handle('schedule:bulkAdjustBreaks', async (_e, raw) => {
     const v = validate(BulkAdjustBreaksSchema, raw);
     if (!v.ok) return v.error;
     return safeHandler('schedule:bulkAdjustBreaks', () => {
       const { deltaMinutes, mode, dayIds } = v.data;
 
-      // dayIds verilmezse global hours; verilmişse o günlerin day_hours'larını
-      // kaydır (override yoksa önce global'den seed et).
       if (!dayIds || dayIds.length === 0) {
         const cur = hoursRepo.list();
         const next = adjustHours(cur, deltaMinutes, mode);
@@ -102,18 +99,6 @@ export function registerScheduleHandlers(): void {
 
 type HourLike = Pick<Hour, 'name' | 'orderIndex' | 'startTime' | 'endTime'>;
 
-/**
- * Saat dizisini delta dakika kadar kaydır.
- *
- * mode='break' → her saatin SÜRESİNİ koruyarak teneffüsleri uzat:
- *   yeni_start[i] = eski_start[i] + (i * delta)
- *   yeni_end[i]   = eski_end[i]   + (i * delta)
- *   (i=0 sabit kalır; her sonraki saat delta dakika daha geç başlar)
- * mode='start' → tüm saatlerin start'ını delta dakika kaydır (end aynı)
- * mode='end' → tüm saatlerin end'ini delta dakika kaydır (start aynı)
- *
- * start/end değeri yoksa o saat değişmeden döner.
- */
 function adjustHours(
   hours: HourLike[],
   delta: number,
@@ -131,7 +116,6 @@ function adjustHours(
   });
 }
 
-/** "HH:MM" formatındaki saati delta dakika kaydırır. Geçersizse aynı döner. */
 function shiftClock(time: string, deltaMinutes: number): string {
   const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
   if (!match) return time;

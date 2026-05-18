@@ -1,18 +1,3 @@
-/**
- * SchoolBundle (DB'den toplanmış veri) → tam FET XML metni.
- *
- * Önemli noktalar:
- *  - xmlbuilder2 kullanılır (deprecated xmlbuilder yerine).
- *  - UTF-8 encoding'i declaration'da belirtilir; xmlbuilder2 Türkçe karakterleri
- *    olduğu gibi UTF-8 olarak yazar (HTML entity escape yapmaz).
- *  - Bir DB activity satırı (weeklyHours=N, blockDuration=B) → ceil(N/B) ayrı
- *    <Activity> elementi (her birinin Duration=B, hepsi aynı Activity_Group_Id).
- *  - Students_List: Year > Group > Subgroup; Group ve Subgroup adı = Class adı
- *    (FET 6.x'te subgroup zorunlu; sınıf bölünmediği için tek subgroup).
- *  - ConstraintBasicCompulsoryTime, ConstraintBasicCompulsorySpace ve her
- *    Activity_Group_Id için ConstraintMinDaysBetweenActivities (MinDays=1, weight=95)
- *    otomatik eklenir.
- */
 
 import { create } from 'xmlbuilder2';
 import type { ClassRoom, Hour } from '../../src/lib/types.js';
@@ -22,33 +7,26 @@ import type { BuilderContext, SchoolBundle, SkippedConstraint } from './types.js
 
 const FET_VERSION = '6.8.5';
 const MIN_DAYS_WEIGHT = 95;
-/** Per-day eksik saatleri kapatan not-available constraint'leri sert (compulsory). */
 const PER_DAY_BLOCKED_WEIGHT = 100;
-/** Split group "aynı saatte başlasın" kısıtlaması — sert. */
 const SPLIT_GROUP_WEIGHT = 100;
 
 export type BuildResult = {
   xml: string;
   skipped: SkippedConstraint[];
-  /** DB activity id → expand edilmiş FET Activity Id listesi (parser için kritik). */
   fetActivityIdsByActivity: Map<number, number[]>;
-  /** DB activity id → Activity_Group_Id */
   activityGroupIdById: Map<number, number>;
 };
 
 export function buildFetXml(school: SchoolBundle): BuildResult {
   const ctx = buildContext(school);
 
-  // Constraint node'larını handler'lar üzerinden topla
   const { time: timeNodes, space: spaceNodes } = buildAllConstraints(school.constraints, ctx);
 
-  // Otomatik (FET'in beklediği) constraint'leri ekle
   prependBasicConstraints(timeNodes, spaceNodes);
   appendMinDaysBetweenActivities(timeNodes, ctx);
   appendShortDayBlockedSlots(timeNodes, ctx);
   appendSplitGroupConstraints(timeNodes, ctx);
 
-  // XML üret
   const doc = create({ version: '1.0', encoding: 'UTF-8' });
   const root = doc.ele('fet', { version: FET_VERSION });
 
@@ -76,14 +54,11 @@ export function buildFetXml(school: SchoolBundle): BuildResult {
   };
 }
 
-// ---------- bağlam (lookup map'leri ve expand edilmiş FET Activity Id'leri) ----------
 
 function buildContext(school: SchoolBundle): BuilderContext {
   const days = [...school.days].sort((a, b) => a.orderIndex - b.orderIndex);
   const globalHours = [...school.hours].sort((a, b) => a.orderIndex - b.orderIndex);
 
-  // Per-day saat override'larını gün başına grupla.
-  // Bir gün için liste boşsa global saatler kullanılır.
   const dayHoursByDay = new Map<number, NonNullable<SchoolBundle['dayHours']>>();
   for (const dh of school.dayHours ?? []) {
     const arr = dayHoursByDay.get(dh.dayId) ?? [];
@@ -95,7 +70,6 @@ function buildContext(school: SchoolBundle): BuilderContext {
     dayHoursByDay.set(k, arr);
   }
 
-  // Her gün için efektif saat sayısı = override varsa onun uzunluğu, yoksa global.
   const effectiveHoursPerDay = new Map<number, number>();
   for (const d of days) {
     const override = dayHoursByDay.get(d.id);
@@ -103,9 +77,6 @@ function buildContext(school: SchoolBundle): BuilderContext {
     effectiveHoursPerDay.set(d.id, count);
   }
 
-  // FET Hours_List = en uzun günün saat sayısı (global ≥ herhangi bir override).
-  // Global hours zaten >= 1 ise onu kullan; ama bir gün override'ı global'den
-  // daha uzun olabilirse o günün isimlerini fallback olarak doldur.
   const maxHours = Math.max(globalHours.length, ...effectiveHoursPerDay.values(), 1);
   const hours: Hour[] = [];
   for (let i = 0; i < maxHours; i++) {
@@ -114,7 +85,6 @@ function buildContext(school: SchoolBundle): BuilderContext {
       hours.push(g);
       continue;
     }
-    // Global'de eksik → herhangi bir günün override'ından isim al, yoksa generic
     let label = `${i + 1}. Ders`;
     for (const arr of dayHoursByDay.values()) {
       const h = arr[i];

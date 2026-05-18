@@ -103,6 +103,19 @@ export default function Schedule() {
     return s;
   }, [dayHours]);
 
+  const dayHoursByDay = useMemo(() => {
+    const m = new Map<number, typeof dayHours>();
+    for (const dh of dayHours) {
+      const arr = m.get(dh.dayId) ?? [];
+      arr.push(dh);
+      m.set(dh.dayId, arr);
+    }
+    for (const arr of m.values()) {
+      arr.sort((a, b) => a.orderIndex - b.orderIndex);
+    }
+    return m;
+  }, [dayHours]);
+
   function toggleDay(id: string) {
     setSelectedDays((cur) => {
       const next = new Set(cur);
@@ -323,18 +336,7 @@ export default function Schedule() {
           days={days}
           customizedDayIds={customizedDayIds}
           globalRows={hourRows}
-          dayHoursByDay={useMemo(() => {
-            const m = new Map<number, typeof dayHours>();
-            for (const dh of dayHours) {
-              const arr = m.get(dh.dayId) ?? [];
-              arr.push(dh);
-              m.set(dh.dayId, arr);
-            }
-            for (const arr of m.values()) {
-              arr.sort((a, b) => a.orderIndex - b.orderIndex);
-            }
-            return m;
-          }, [dayHours])}
+          dayHoursByDay={dayHoursByDay}
           bulkDelta={bulkDelta}
           onBulkDeltaChange={setBulkDelta}
           onSaveDay={async (dayId, entries) => {

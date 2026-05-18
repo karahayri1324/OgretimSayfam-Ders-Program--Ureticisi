@@ -204,20 +204,12 @@ function TeacherDialog({
     }
   }, [open, teacher]);
 
-  /**
-   * Combobox'tan "yeni ders yarat" çağırılır. Subjects store'da `create`
-   * boolean döndüğü için yeni Subject id'sini almak adına, başarı sonrası
-   * store'un güncel listesinde aynı isimle eşleşeni buluyoruz.
-   * (Store load() çağırıyor zaten — `useSubjectsStore.getState().subjects`
-   * yeni hali içerir.)
-   */
   async function handleCreateSubject(rawName: string): Promise<Subject | null> {
     const trimmed = rawName.trim();
     if (!trimmed) return null;
     const ok = await createSubject({ name: trimmed });
     if (!ok) return null;
     const all = useSubjectsStore.getState().subjects;
-    // Yeni eklenen genelde son sırada olur; öncelikle isme göre eşleştir.
     const found =
       all.find((s) => s.name.trim() === trimmed) ??
       all.find((s) => s.name.toLocaleLowerCase('tr-TR') === trimmed.toLocaleLowerCase('tr-TR')) ??

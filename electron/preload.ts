@@ -86,11 +86,6 @@ const api = {
     checkFet: () => invoke('app:checkFet'),
     openFETSource: () => invoke('app:openFETSource'),
     openLogs: () => invoke('app:openLogs'),
-    /**
-     * HTML string'i alır, kullanıcıdan save dialog ile PDF kayıt yolu sorar,
-     * Electron'un printToPDF ile dosyayı yazar. Iptal edilirse
-     * data.cancelled = true döner.
-     */
     exportPdf: (html: string, defaultFilename: string) =>
       invoke('app:exportPdf', html, defaultFilename),
   },

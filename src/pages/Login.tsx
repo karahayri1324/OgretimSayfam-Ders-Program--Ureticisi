@@ -1,27 +1,43 @@
-import { useState } from 'react';
+
+import { useState, type InputHTMLAttributes, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowRight,
-  Sparkles,
   Mail,
   Lock,
   User,
   GraduationCap,
   Eye,
   EyeOff,
+  ArrowRight,
+  Sparkles,
+  type LucideIcon,
 } from 'lucide-react';
 import { useAuthStore } from '../store/auth';
-import { cn } from '../lib/cn';
+import { Logo } from '../components/Logo';
 import LoginDemo from '../components/LoginDemo';
+
+const defter = {
+  bg: '#FAF6EC',
+  paper: '#FFFDF8',
+  paper2: '#F4EFE2',
+  ink: '#1A1A1A',
+  mutedDeep: '#3F3A33',
+  muted: '#6B6258',
+  line: '#E6DFCE',
+  line2: '#D9D1BC',
+  primary: '#1E3FAE',
+  primaryInk: '#FFFFFF',
+  primarySoft: '#E7ECFA',
+  leaf: '#5C7A4A',
+  amber: '#D89B2A',
+  red: '#C0392B',
+} as const;
+
+const fontSerif = '"Instrument Serif", "Newsreader", ui-serif, Georgia, serif';
+const fontSans = '"Instrument Sans", "Geist", ui-sans-serif, system-ui, sans-serif';
 
 type Mode = 'login' | 'register';
 
-/**
- * Defter — Giriş & Kayıt ekranı.
- * Sol: marketing/pitch alanı (canlı demo şimdilik statik mock kart).
- * Sağ: form + Misafir Devam Et CTA.
- * Misafir butonu authed=false guest=true setler ve direkt /welcome'a atar.
- */
 export default function Login() {
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
@@ -29,26 +45,30 @@ export default function Login() {
   const continueAsGuest = useAuthStore((s) => s.continueAsGuest);
 
   const [mode, setMode] = useState<Mode>('login');
-  const [name, setName] = useState('');
-  const [school, setSchool] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPass, setShowPass] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (busy) return;
-    setBusy(true);
+    if (submitting) return;
+    const fd = new FormData(e.currentTarget);
+    setSubmitting(true);
     try {
-      if (mode === 'register') {
-        await register(name || 'Kullanıcı', email, password);
+      if (mode === 'login') {
+        await login(
+          String(fd.get('email') ?? 'demo@okulum.k12.tr'),
+          String(fd.get('password') ?? ''),
+        );
       } else {
-        await login(email || 'demo@okulum.k12.tr', password);
+        await register(
+          String(fd.get('name') ?? 'Kullanıcı'),
+          String(fd.get('email') ?? ''),
+          String(fd.get('password') ?? ''),
+        );
       }
       navigate('/welcome', { replace: true });
     } finally {
-      setBusy(false);
+      setSubmitting(false);
     }
   }
 
@@ -58,229 +78,438 @@ export default function Login() {
   }
 
   return (
-    <div className="paper-bg flex h-screen w-screen text-ink">
-      {/* SOL — pitch + demo */}
+    <div
+      style={{
+        minHeight: '100vh',
+        height: '100vh',
+        background: defter.bg,
+        color: defter.ink,
+        fontFamily: fontSans,
+        fontSize: 14,
+        display: 'flex',
+        overflow: 'hidden',
+        backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent 31px, ${defter.line} 31px, ${defter.line}88 32px)`,
+      }}
+    >
+      {/* ─── LEFT — Animated demo + pitch ───────────────────── */}
       <div
-        className="relative hidden flex-1 flex-col overflow-hidden px-12 py-8 lg:flex"
         style={{
-          background:
-            'linear-gradient(135deg, rgba(30,63,174,0.04) 0%, transparent 60%)',
+          flex: 1,
+          padding: '32px 28px 32px 44px',
+          background: `linear-gradient(135deg, ${defter.primary}06 0%, transparent 60%)`,
+          minWidth: 0,
+          minHeight: 0,
+          position: 'relative',
+          overflow: 'hidden',
         }}
       >
         {/* Logo */}
-        <div className="mb-6 flex items-center gap-3">
-          <div
-            className="grid size-9 place-items-center rounded-xl bg-primary text-white"
-            style={{ paddingTop: 2 }}
-          >
-            <span className="serif-italic text-[22px] leading-none">ö</span>
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+          <Logo size={40} />
           <div>
-            <div className="serif-italic text-[22px] leading-none">
-              öğretimsayfam
+            <div
+              style={{
+                fontFamily: fontSerif,
+                fontSize: 22,
+                lineHeight: 1,
+                fontStyle: 'italic',
+                letterSpacing: 0.2,
+              }}
+            >
+              ÖğretimSayfam
             </div>
-            <div className="mt-1 text-[11px] font-semibold uppercase tracking-[0.15em] text-muted">
-              Ders Programı Oluşturucu · v0.1.0
+            <div
+              style={{
+                fontSize: 11,
+                color: defter.muted,
+                letterSpacing: 1.5,
+                fontWeight: 600,
+                marginTop: 4,
+              }}
+            >
+              DERS PROGRAMI OLUŞTURUCU · v0.1.0
             </div>
           </div>
         </div>
 
         {/* Headline */}
-        <div className="mb-3 max-w-xl">
-          <div className="serif text-[42px] leading-[1.02] tracking-tight">
-            Bir cümleyle anlat,
-            <br />
-            <span className="serif-italic text-primary">
-              program kendiliğinden kurulsun.
-            </span>
-          </div>
-        </div>
-        <div className="mb-6 max-w-md text-sm text-muted">
-          AI asistanına ne istediğini Türkçe yaz — sınıfları, öğretmenleri,
-          kuralları kendisi çıkartır ve haftalık programı saniyeler içinde
-          üretir.
-        </div>
-
-        {/* Canlı demo — 3 sahneli birebir port (Teachers → Generate → Timetable) */}
-        <LoginDemo />
-
-
-        {/* Tagline */}
-        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="size-1.5 rounded-full bg-accent-leaf" />
-            FET tabanlı optimize edici
+        <div
+          style={{
+            fontFamily: fontSerif,
+            fontSize: 38,
+            lineHeight: 1.02,
+            letterSpacing: -0.8,
+            fontWeight: 400,
+            marginBottom: 6,
+            maxWidth: 580,
+          }}
+        >
+          Bir cümleyle anlat,
+          <br />
+          <span style={{ fontStyle: 'italic', color: defter.primary }}>
+            program kendiliğinden kurulsun.
           </span>
-          <span>·</span>
-          <span className="inline-flex items-center gap-1.5">
-            <Sparkles size={12} className="text-primary" />
-            Yerel AI · gizlilik dostu
-          </span>
+        </div>
+        <div style={{ fontSize: 13.5, color: defter.muted, marginBottom: 16, maxWidth: 520 }}>
+          AI asistanına ne istediğini Türkçe yaz, sınıfları, öğretmenleri, kuralları kendisi
+          çıkartır ve haftalık programı saniyeler içinde üretir.
+        </div>
+
+        {/* Demo — büyük ekranda gerçek viewport center'a oturur,
+             küçük ekranda headline'ın altına itelenir (overlap önlenir). */}
+        <div
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: 'max(50%, calc(290px + min(820px, calc(100vh - 320px)) / 2))',
+            transform: 'translate(-50%, -50%)',
+            width: 'min(92%, 1500px)',
+            height: 'min(820px, calc(100vh - 320px))',
+            background: defter.paper,
+            border: `1px solid ${defter.line}`,
+            borderRadius: 14,
+            overflow: 'hidden',
+            boxShadow:
+              '0 24px 60px -20px rgba(30,63,174,0.25), 0 1px 0 rgba(0,0,0,0.02)',
+            display: 'flex',
+          }}
+        >
+          <LoginDemo />
         </div>
       </div>
 
-      {/* SAĞ — form */}
-      <div className="flex w-full flex-shrink-0 flex-col border-l border-line bg-paper px-8 py-10 sm:px-12 lg:w-[460px]">
-        <div className="mb-8 flex items-center justify-end gap-2 text-xs text-muted">
-          <span className="text-ink-700">TR</span>
-          <span className="opacity-40">/</span>
-          <span className="opacity-50">EN</span>
+      {/* ─── RIGHT — Auth form ──────────────────────────────── */}
+      <div
+        style={{
+          width: 460,
+          flexShrink: 0,
+          background: defter.bg,
+          borderLeft: `1px solid ${defter.line}`,
+          padding: '48px 44px',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {/* Lang switcher */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 12.5,
+            color: defter.muted,
+            marginBottom: 36,
+          }}
+        >
+          <span>TR</span>
+          <span style={{ opacity: 0.4 }}>/</span>
+          <span style={{ opacity: 0.5 }}>EN</span>
         </div>
 
-        {/* Tab toggle */}
-        <div className="mb-6 flex rounded-xl border border-line bg-paper2 p-1">
-          {(['login', 'register'] as Mode[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setMode(t)}
-              className={cn(
-                'flex-1 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                mode === t
-                  ? 'bg-card text-ink shadow-soft'
-                  : 'text-muted hover:text-ink',
-              )}
-            >
-              {t === 'login' ? 'Giriş Yap' : 'Kayıt Ol'}
-            </button>
-          ))}
+        {/* Tab switcher */}
+        <div
+          role="tablist"
+          aria-label="Giriş veya Kayıt"
+          style={{
+            display: 'flex',
+            background: defter.paper2,
+            borderRadius: 12,
+            padding: 4,
+            marginBottom: 28,
+            border: `1px solid ${defter.line}`,
+          }}
+        >
+          {(['login', 'register'] as const).map((m) => {
+            const active = mode === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setMode(m)}
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  borderRadius: 9,
+                  border: 'none',
+                  background: active ? defter.paper : 'transparent',
+                  color: active ? defter.ink : defter.muted,
+                  fontWeight: active ? 600 : 500,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  fontFamily: fontSans,
+                  boxShadow: active
+                    ? '0 1px 0 rgba(0,0,0,0.02), 0 2px 6px -2px rgba(30,63,174,0.15)'
+                    : 'none',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {m === 'login' ? 'Giriş Yap' : 'Kayıt Ol'}
+              </button>
+            );
+          })}
         </div>
 
         {/* Heading */}
-        <div className="serif mb-1 text-[32px] leading-[1.08] tracking-tight">
+        <h1
+          style={{
+            fontFamily: fontSerif,
+            fontSize: 36,
+            lineHeight: 1.05,
+            letterSpacing: -0.6,
+            margin: 0,
+            marginBottom: 6,
+            fontWeight: 400,
+          }}
+        >
           {mode === 'login' ? (
             <>
               Tekrar hoş geldin,
               <br />
-              <span className="serif-italic text-primary">Müdür Bey.</span>
+              <span style={{ fontStyle: 'italic', color: defter.primary }}>Müdür Bey.</span>
             </>
           ) : (
             <>
-              Hesabını <span className="serif-italic text-primary">aç,</span>
+              Hesabını <span style={{ fontStyle: 'italic', color: defter.primary }}>aç,</span>
               <br />
               programını kuralım.
             </>
           )}
-        </div>
-        <div className="mb-5 text-sm text-muted">
+        </h1>
+        <p style={{ color: defter.muted, fontSize: 14, marginBottom: 24, marginTop: 6 }}>
           {mode === 'login'
-            ? 'Devam etmek için e-posta ve şifrenle giriş yap.'
-            : 'Birkaç bilgi yeter — hesabın hemen kullanıma hazır.'}
-        </div>
+            ? 'Devam etmek için e-posta ve şifrenizle giriş yapın.'
+            : 'Birkaç bilgi yeter — hesabınız hemen kullanıma hazır olur.'}
+        </p>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+        {/* Form */}
+        <form
+          onSubmit={handleSubmit}
+          style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
+        >
           {mode === 'register' && (
             <>
-              <AuthField
-                icon={<User size={15} />}
-                label="Ad Soyad"
-                placeholder="Mehmet Karahan"
-                value={name}
-                onChange={setName}
-              />
-              <AuthField
-                icon={<GraduationCap size={15} />}
+              <Field name="name" label="Ad Soyad" placeholder="Mehmet Karahan" icon={User} required />
+              <Field
+                name="school"
                 label="Okul"
                 placeholder="Atatürk Anadolu Lisesi"
-                value={school}
-                onChange={setSchool}
+                icon={GraduationCap}
+                required
               />
             </>
           )}
-          <AuthField
-            icon={<Mail size={15} />}
+          <Field
+            name="email"
             label="E-posta"
-            placeholder="mehmet@okulum.k12.tr"
             type="email"
-            value={email}
-            onChange={setEmail}
+            placeholder="mehmet@okulum.k12.tr"
+            icon={Mail}
+            required
+            autoComplete="email"
           />
-          <AuthField
-            icon={<Lock size={15} />}
+          <Field
+            name="password"
             label="Şifre"
-            placeholder={mode === 'register' ? 'En az 8 karakter' : '••••••••'}
-            type={showPass ? 'text' : 'password'}
-            value={password}
-            onChange={setPassword}
-            trailing={
+            type={showPassword ? 'text' : 'password'}
+            placeholder={mode === 'register' ? 'En az 8 karakter' : '••••••••••'}
+            icon={Lock}
+            required
+            minLength={mode === 'register' ? 8 : undefined}
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            trailingHint={
+              mode === 'login' ? (
+                <button
+                  type="button"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    color: defter.primary,
+                    fontWeight: 600,
+                    fontSize: 11.5,
+                    cursor: 'pointer',
+                    fontFamily: fontSans,
+                  }}
+                >
+                  Unuttum
+                </button>
+              ) : null
+            }
+            rightAdornment={
               <button
                 type="button"
-                onClick={() => setShowPass((p) => !p)}
-                className="text-muted hover:text-ink"
-                aria-label="Şifreyi göster/gizle"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  color: defter.muted,
+                  display: 'grid',
+                  placeItems: 'center',
+                }}
               >
-                {showPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             }
-            trailingHint={mode === 'login' ? 'Unuttum' : null}
           />
 
           {mode === 'login' && (
-            <label className="mt-1 flex items-center gap-2 text-[13px] text-mutedDeep">
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginTop: 2,
+                cursor: 'pointer',
+              }}
+            >
               <input
                 type="checkbox"
+                name="remember"
                 defaultChecked
-                className="size-4 accent-primary"
+                style={{
+                  width: 16,
+                  height: 16,
+                  accentColor: defter.primary,
+                  cursor: 'pointer',
+                }}
               />
-              Bu cihazda oturumumu açık tut
+              <span style={{ fontSize: 13, color: defter.mutedDeep }}>
+                Bu cihazda oturumumu açık tut
+              </span>
             </label>
           )}
 
           <button
             type="submit"
-            disabled={busy}
-            className="mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-[15px] font-semibold text-white shadow-primary transition-colors hover:bg-primary-600 disabled:opacity-60"
+            disabled={submitting}
+            style={{
+              marginTop: 12,
+              padding: '13px 18px',
+              borderRadius: 12,
+              border: 'none',
+              background: defter.primary,
+              color: defter.primaryInk,
+              fontWeight: 600,
+              fontSize: 15,
+              fontFamily: fontSans,
+              cursor: submitting ? 'wait' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              boxShadow: `0 8px 20px -10px ${defter.primary}99`,
+              opacity: submitting ? 0.8 : 1,
+              transition: 'opacity 0.15s',
+            }}
           >
-            {busy
-              ? 'Bekleyiniz…'
+            {submitting
+              ? 'Bekleyin…'
               : mode === 'login'
                 ? 'Giriş Yap'
                 : 'Hesabı Oluştur'}
-            {!busy && <ArrowRight size={15} />}
+            {!submitting && <ArrowRight size={14} />}
           </button>
 
-          {/* MİSAFİR DEVAM ET */}
-          <div className="my-3 flex items-center gap-3 text-[11px] uppercase tracking-[0.15em] text-muted">
-            <span className="h-px flex-1 bg-line" />
-            veya
-            <span className="h-px flex-1 bg-line" />
+          {/* Misafir Devam Et */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              margin: '14px 0 4px',
+              fontSize: 11,
+              letterSpacing: 1.5,
+              color: defter.muted,
+              textTransform: 'uppercase',
+            }}
+          >
+            <span style={{ flex: 1, height: 1, background: defter.line }} />
+            <span>veya</span>
+            <span style={{ flex: 1, height: 1, background: defter.line }} />
           </div>
           <button
             type="button"
             onClick={handleGuest}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-cardBorder bg-card px-4 py-3 text-[14px] font-medium text-ink-700 hover:bg-paper2"
+            style={{
+              padding: '12px 18px',
+              borderRadius: 12,
+              border: `1px solid ${defter.line2}`,
+              background: defter.paper,
+              color: defter.ink,
+              fontWeight: 500,
+              fontSize: 14,
+              fontFamily: fontSans,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+            }}
           >
-            <Sparkles size={14} className="text-accent-amber" />
+            <Sparkles size={13} color={defter.amber} />
             Misafir Devam Et
-            <span className="text-muted">·</span>
-            <span className="text-xs text-muted">test için</span>
+            <span style={{ color: defter.muted }}>·</span>
+            <span style={{ fontSize: 12, color: defter.muted }}>test için</span>
           </button>
 
           {mode === 'register' && (
-            <p className="mt-2 text-center text-[11px] leading-relaxed text-muted">
+            <p
+              style={{
+                fontSize: 11.5,
+                color: defter.muted,
+                textAlign: 'center',
+                marginTop: 4,
+                lineHeight: 1.5,
+              }}
+            >
               Kayıt olarak{' '}
-              <span className="border-b border-muted text-ink">
+              <span style={{ color: defter.ink, borderBottom: `1px solid ${defter.muted}` }}>
                 Kullanım Koşulları
               </span>{' '}
               ve{' '}
-              <span className="border-b border-muted text-ink">
+              <span style={{ color: defter.ink, borderBottom: `1px solid ${defter.muted}` }}>
                 Gizlilik Politikası
               </span>
-              'nı kabul edersin.
+              'nı kabul edersiniz.
             </p>
           )}
         </form>
 
-        <div className="flex-1" />
+        <div style={{ flex: 1 }} />
 
-        <div className="mt-6 flex items-center justify-center gap-1.5 text-[13px] text-muted">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 12.5,
+            color: defter.muted,
+            gap: 6,
+            marginTop: 24,
+          }}
+        >
           {mode === 'login' ? (
             <>
               Hesabın yok mu?{' '}
               <button
                 type="button"
                 onClick={() => setMode('register')}
-                className="font-semibold text-primary hover:underline"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  color: defter.primary,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: fontSans,
+                  fontSize: 12.5,
+                }}
               >
                 Kayıt ol
               </button>
@@ -291,64 +520,93 @@ export default function Login() {
               <button
                 type="button"
                 onClick={() => setMode('login')}
-                className="font-semibold text-primary hover:underline"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  color: defter.primary,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: fontSans,
+                  fontSize: 12.5,
+                }}
               >
                 Giriş yap
               </button>
             </>
           )}
         </div>
-        <div className="mt-4 text-center text-[11px] text-muted">
-          <span className="serif-italic">ÖğretimSayfam · est. 2025</span>
+        <div
+          style={{
+            textAlign: 'center',
+            marginTop: 22,
+            fontSize: 11,
+            color: defter.muted,
+            fontFamily: fontSerif,
+            fontStyle: 'italic',
+          }}
+        >
+          ÖğretimSayfam · est. 2025
         </div>
       </div>
     </div>
   );
 }
 
-function AuthField({
-  icon,
-  label,
-  placeholder,
-  type = 'text',
-  value,
-  onChange,
-  trailing,
-  trailingHint,
-}: {
-  icon: React.ReactNode;
+interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'children'> {
   label: string;
-  placeholder?: string;
-  type?: string;
-  value: string;
-  onChange: (v: string) => void;
-  trailing?: React.ReactNode;
-  trailingHint?: string | null;
-}) {
+  icon: LucideIcon;
+  trailingHint?: ReactNode;
+  rightAdornment?: ReactNode;
+}
+
+function Field({ label, icon: Icon, trailingHint, rightAdornment, ...inputProps }: FieldProps) {
   return (
     <div>
-      <div className="mb-1.5 flex items-center justify-between">
-        <label className="text-[12.5px] font-semibold text-mutedDeep">
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 6,
+        }}
+      >
+        <label
+          htmlFor={inputProps.id ?? inputProps.name}
+          style={{ fontSize: 12.5, fontWeight: 600, color: defter.mutedDeep }}
+        >
           {label}
         </label>
-        {trailingHint && (
-          <span className="cursor-pointer text-[11.5px] font-semibold text-primary">
-            {trailingHint}
-          </span>
-        )}
+        {trailingHint}
       </div>
-      <div className="flex items-center gap-2.5 rounded-xl border border-line bg-card px-3 py-2.5 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary-50">
-        <span className="text-muted">{icon}</span>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          background: defter.paper,
+          border: `1px solid ${defter.line2}`,
+          borderRadius: 10,
+          padding: '11px 13px',
+        }}
+      >
+        <Icon size={15} color={defter.muted} />
         <input
-          type={type}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="flex-1 border-0 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+          id={inputProps.id ?? inputProps.name}
+          {...inputProps}
+          style={{
+            flex: 1,
+            border: 'none',
+            outline: 'none',
+            background: 'transparent',
+            fontSize: 14,
+            color: defter.ink,
+            fontFamily: fontSans,
+            minWidth: 0,
+          }}
         />
-        {trailing}
+        {rightAdornment}
       </div>
     </div>
   );
 }
-

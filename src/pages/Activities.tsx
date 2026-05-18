@@ -75,8 +75,6 @@ export default function Activities() {
     return orderedClasses.filter((c) => usedClassIds.has(c.id));
   }, [orderedClasses, activities, filterFilled]);
 
-  // Sınıflar ya da dersler henüz yüklenmediyse (ilk açılış) inline spinner
-  // göstermek, "Henüz sınıf yok" placeholder'ı flaşlatmaktan daha doğru.
   if (
     (classesLoading && classes.length === 0) ||
     (subjectsLoading && subjects.length === 0) ||

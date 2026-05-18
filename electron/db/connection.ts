@@ -7,36 +7,23 @@ import { dbPath } from '../utils/paths.js';
 import { log } from '../utils/logger.js';
 import { runMigrations } from './schema.js';
 
-/**
- * Eski kullanıcı verilerinin bulunabileceği konumlar.
- * Electron `app.getPath('userData')` üzerinden gelmiyor çünkü test/build
- * ortamlarında `ders-program-olusturucu` slug'ı sabit kalır.
- */
 function legacyDbCandidates(): string[] {
   const home = os.homedir();
   const candidates: string[] = [];
-  // Linux/Mac: ~/.config/ders-program-olusturucu/data.db
   candidates.push(
     path.join(home, '.config', 'ders-program-olusturucu', 'data.db'),
   );
-  // userData'dan da bir aday — packaged app farklı bir slug kullanıyorsa.
   try {
     if (app?.getPath) {
       const ud = app.getPath('userData');
       candidates.push(path.join(ud, 'data.db'));
-      // userData'ın bir üstünde ders-program-olusturucu klasörü
       candidates.push(path.join(path.dirname(ud), 'ders-program-olusturucu', 'data.db'));
     }
   } catch {
-    // app henüz hazır değilse atla
   }
   return candidates;
 }
 
-/**
- * Eski (legacy) DB konumundan yeniye kopyala (silmeden — yedek bırak).
- * Idempotent: yeni dosya zaten varsa hiçbir şey yapılmaz.
- */
 function migrateLegacyDbIfNeeded(newPath: string): void {
   try {
     if (fs.existsSync(newPath)) return;
@@ -51,7 +38,6 @@ function migrateLegacyDbIfNeeded(newPath: string): void {
           to: newPath,
         });
         fs.copyFileSync(old, newPath);
-        // WAL/SHM eşlikçi dosyaları da kopyala (varsa).
         for (const suffix of ['-wal', '-shm']) {
           const oldSide = `${old}${suffix}`;
           if (fs.existsSync(oldSide)) {

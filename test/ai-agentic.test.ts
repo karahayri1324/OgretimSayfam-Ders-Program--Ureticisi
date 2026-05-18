@@ -28,7 +28,6 @@ describe('AI schema discriminated union', () => {
       unresolved: [],
     };
     const parsed = validateAIResponse(raw);
-    // kind belirtilmemiş → constraint sayılır
     expect(parsed.kind ?? 'constraint').toBe('constraint');
     if ((parsed.kind ?? 'constraint') === 'constraint') {
       const cr = parsed as { constraints: unknown[] };
@@ -237,8 +236,6 @@ describe('Mock data_mutation detection', () => {
     );
     expect(res.kind).toBe('query');
     if (res.kind === 'query') {
-      // Conversational: context dolu, son adıma yöneltir (ders dağıtımı/kısıtlama)
-      // Kısa + tek soru içerir.
       expect(res.answer.toLowerCase()).toMatch(/(dağıtım|hangi|programı üret|kısıtlama|sınıf)/);
     }
   });

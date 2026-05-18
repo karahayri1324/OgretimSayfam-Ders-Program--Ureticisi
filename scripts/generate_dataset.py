@@ -16,15 +16,13 @@ import re
 import os
 from pathlib import Path
 
-random.seed(42)  # deterministik
+random.seed(42)  
 
 ROOT = Path(__file__).resolve().parent.parent
 DS = ROOT / "Plans" / "dataset_samples"
 
-
 def read_lines(name: str) -> list[str]:
     return [line.strip() for line in (DS / name).read_text(encoding="utf-8").splitlines() if line.strip()]
-
 
 TEACHERS = read_lines("names_teachers.txt")
 SUBJECTS = read_lines("names_subjects.txt")
@@ -38,7 +36,8 @@ DAYS_VARIANTS = {
     "Salı": ["Salı", "salı", "Sal", "sal"],
     "Çarşamba": ["Çarşamba", "çarşamba", "Çar", "çar"],
     "Perşembe": ["Perşembe", "perşembe", "Per", "per"],
-    "Cuma": ["Cuma", "cuma", "Cum", "cum", "haftanın son günü"],
+    "Cuma": ["Cuma", "cuma", "Cum", "cum"],
+    "Cumartesi": ["Cumartesi", "cumartesi", "Cmt", "cmt", "haftanın son günü"],
 }
 
 ORDINAL_HOUR = {
@@ -49,16 +48,33 @@ ORDINAL_HOUR = {
     5: ["5.", "beşinci"],
     6: ["6.", "altıncı"],
     7: ["7.", "yedinci"],
-    8: ["8.", "sekizinci", "son"],
+    8: ["8.", "sekizinci"],
+    9: ["9.", "dokuzuncu"],
+    10: ["10.", "onuncu", "son"],
 }
 
 TEACHER_TITLES = ["hoca", "öğretmen", "Bey", "Hanım", "öğretmen", "hocam"]
 HOURS_PER_DAY = 8
 
+def random_days() -> list[str]:
+    """4-6 gün arası varyasyon: 5 gün %70, 6 gün %15 (+Cumartesi), 4 gün %15 (Pzt-Per)."""
+    r = random.random()
+    if r < 0.70:
+        return ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
+    elif r < 0.85:
+        return ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"]
+    else:
+        return ["Pazartesi", "Salı", "Çarşamba", "Perşembe"]
+
+def random_hours_per_day() -> int:
+    """4-10 saat arası varyasyon, ağırlıklı dağılım."""
+
+    choices = [6, 7, 8, 9, 10, 5, 4]
+    weights = [0.20, 0.25, 0.35, 0.10, 0.05, 0.03, 0.02]
+    return random.choices(choices, weights=weights, k=1)[0]
 
 def first_name(full: str) -> str:
     return full.split()[0]
-
 
 def teacher_phrase(t: str) -> str:
     """Çeşitli öğretmen referansı varyantları."""
@@ -70,18 +86,18 @@ def teacher_phrase(t: str) -> str:
     ]
     return random.choice(forms)
 
-
 def day_phrase(d: str) -> str:
     return random.choice(DAYS_VARIANTS[d])
 
-
-def hour_phrase(h: int) -> str:
-    return random.choice(ORDINAL_HOUR[h]) + " ders"
-
+def hour_phrase(h: int, max_h: int | None = None) -> str:
+    """Belirli bir saat için Türkçe ifade. max_h verilirse ve h == max_h ise 'son' da kullanılabilir."""
+    variants = list(ORDINAL_HOUR[h])
+    if max_h is not None and h == max_h and "son" not in variants:
+        variants = variants + ["son"]
+    return random.choice(variants) + " ders"
 
 def class_phrase(c: str) -> str:
     return c
-
 
 def make_context(extra_teachers=None, extra_classes=None) -> dict:
     """Her örnek için context block (okul verisi)."""
@@ -100,10 +116,9 @@ def make_context(extra_teachers=None, extra_classes=None) -> dict:
         "classes": class_pool,
         "subjects": random.sample(SUBJECTS, random.randint(6, 10)),
         "rooms": random.sample(ROOMS, random.randint(5, 8)),
-        "days": DAYS_FULL,
-        "hoursPerDay": HOURS_PER_DAY,
+        "days": random_days(),
+        "hoursPerDay": random_hours_per_day(),
     }
-
 
 def format_context(ctx: dict) -> str:
     return (
@@ -117,14 +132,11 @@ def format_context(ctx: dict) -> str:
         f"[/CONTEXT]"
     )
 
-
 def make_user_msg(ctx: dict, request: str) -> str:
     return f"{format_context(ctx)}\n\n[USER_REQUEST]\n{request}\n[/USER_REQUEST]"
 
-
 def make_assistant_msg(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False)
-
 
 def example(ctx: dict, request: str, payload: dict) -> dict:
     return {
@@ -135,42 +147,38 @@ def example(ctx: dict, request: str, payload: dict) -> dict:
         ]
     }
 
-
-# Weight inference helpers
 HARD_PHRASES = ["olmasın", "yasak", "asla", "kesinlikle", "müsait değil", "yapmasın", "girmesin", "alamaz", "olmamalı"]
 SOFT_PHRASES = ["olsa iyi olur", "olmasa iyi olur", "tercih ederim", "tercih ederiz", "iyi olur"]
 WEAK_PHRASES = ["mümkünse", "imkân varsa", "olursa", "belki", "olabilir"]
 
-
 def weight_for(phrase: str) -> int:
-    return random.choice([100])  # default
+    return random.choice([100])  
 
-
-def explanation_for_teacher_not_available(teacher: str, slots: list) -> str:
-    if len(slots) == HOURS_PER_DAY:
+def explanation_for_teacher_not_available(teacher: str, slots: list, hours_per_day: int = HOURS_PER_DAY) -> str:
+    if len(slots) == hours_per_day:
         days = list({s["day"] for s in slots})
         return f"{teacher} öğretmeninin {', '.join(days)} günü tüm saatlerde mevcut olmaması kısıtlaması eklendi."
     hours = sorted({s["hour"] for s in slots})
     days = list({s["day"] for s in slots})
     return f"{teacher} öğretmeninin {', '.join(days)} günü {', '.join(str(h)+'.' for h in hours)} derslerde mevcut olmaması kısıtlaması eklendi."
 
-
-# ===== TEACHER_NOT_AVAILABLE =====
 def gen_teacher_not_available(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         teacher = random.choice(TEACHERS)
-        day = random.choice(DAYS_FULL)
+        ctx = make_context(extra_teachers=[teacher])
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
         all_day = random.random() < 0.4
         if all_day:
-            slots = [{"day": day, "hour": h} for h in range(1, HOURS_PER_DAY + 1)]
+            slots = [{"day": day, "hour": h} for h in range(1, H + 1)]
             hour_text = ""
         else:
-            num_hours = random.randint(1, 3)
-            hours = sorted(random.sample(range(1, HOURS_PER_DAY + 1), num_hours))
+            num_hours = random.randint(1, min(3, H))
+            hours = sorted(random.sample(range(1, H + 1), num_hours))
             slots = [{"day": day, "hour": h} for h in hours]
             if len(hours) == 1:
-                hour_text = f" {hour_phrase(hours[0])}"
+                hour_text = f" {hour_phrase(hours[0], max_h=H)}"
             else:
                 hour_text = " " + " ve ".join(ORDINAL_HOUR[h][0] for h in hours) + " derslerde"
 
@@ -190,7 +198,6 @@ def gen_teacher_not_available(n: int) -> list[dict]:
         ]
         request = random.choice(templates_all if all_day else templates_partial)
 
-        ctx = make_context(extra_teachers=[teacher])
         payload = {
             "constraints": [{
                 "type": "TEACHER_NOT_AVAILABLE",
@@ -199,24 +206,24 @@ def gen_teacher_not_available(n: int) -> list[dict]:
                 "params": {"teacher": teacher, "slots": slots},
             }],
             "confidence": round(random.uniform(0.88, 0.97), 2),
-            "explanation": explanation_for_teacher_not_available(teacher, slots),
+            "explanation": explanation_for_teacher_not_available(teacher, slots, hours_per_day=H),
             "warnings": [],
             "unresolved": [],
         }
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_NOT_AVAILABLE =====
 def gen_class_not_available(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         cls = random.choice(CLASSES)
-        day = random.choice(DAYS_FULL)
-        num_hours = random.randint(1, 3)
-        hours = sorted(random.sample(range(1, HOURS_PER_DAY + 1), num_hours))
+        ctx = make_context(extra_classes=[cls])
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
+        num_hours = random.randint(1, min(3, H))
+        hours = sorted(random.sample(range(1, H + 1), num_hours))
         slots = [{"day": day, "hour": h} for h in hours]
-        hour_text = " ve ".join(ORDINAL_HOUR[h][0] for h in hours) + " derslerde" if len(hours) > 1 else hour_phrase(hours[0])
+        hour_text = " ve ".join(ORDINAL_HOUR[h][0] for h in hours) + " derslerde" if len(hours) > 1 else hour_phrase(hours[0], max_h=H)
 
         templates = [
             f"{cls} sınıfı {day_phrase(day)} {hour_text} olmasın",
@@ -225,7 +232,6 @@ def gen_class_not_available(n: int) -> list[dict]:
             f"{day_phrase(day)} günü {hour_text} {cls} için ders koyma",
         ]
         request = random.choice(templates)
-        ctx = make_context(extra_classes=[cls])
         payload = {
             "constraints": [{
                 "type": "CLASS_NOT_AVAILABLE",
@@ -241,15 +247,14 @@ def gen_class_not_available(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SUBJECT_NOT_ON_DAY =====
 def gen_subject_not_on_day(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         subj = random.choice(SUBJECTS)
-        day = random.choice(DAYS_FULL)
         for_class = random.random() < 0.5
         cls = random.choice(CLASSES) if for_class else None
+        ctx = make_context(extra_classes=[cls] if cls else None)
+        day = random.choice(ctx["days"])
 
         if cls:
             templates = [
@@ -266,7 +271,6 @@ def gen_subject_not_on_day(n: int) -> list[dict]:
                 f"Hiçbir sınıfta {day_phrase(day)} günü {subj} olmasın",
             ]
         request = random.choice(templates)
-        ctx = make_context(extra_classes=[cls] if cls else None)
         params = {"subject": subj, "class": cls, "days": [day]}
         payload = {
             "constraints": [{
@@ -285,13 +289,13 @@ def gen_subject_not_on_day(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MAX_HOURS_DAILY =====
 def gen_teacher_max_hours_daily(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         teacher = random.choice(TEACHERS)
-        max_h = random.randint(3, 7)
+        ctx = make_context(extra_teachers=[teacher])
+        H = ctx["hoursPerDay"]
+        max_h = random.randint(2, max(2, H - 1))
         templates = [
             f"{teacher_phrase(teacher)} günde en fazla {max_h} ders",
             f"{teacher_phrase(teacher)} günde max {max_h} saat",
@@ -299,7 +303,6 @@ def gen_teacher_max_hours_daily(n: int) -> list[dict]:
             f"{teacher_phrase(teacher)} günlük {max_h} dersten fazla olmasın",
         ]
         request = random.choice(templates)
-        ctx = make_context(extra_teachers=[teacher])
         payload = {
             "constraints": [{
                 "type": "TEACHER_MAX_HOURS_DAILY",
@@ -315,20 +318,19 @@ def gen_teacher_max_hours_daily(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MAX_DAYS_PER_WEEK =====
 def gen_teacher_max_days_per_week(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         teacher = random.choice(TEACHERS)
-        max_d = random.randint(2, 5)
+        ctx = make_context(extra_teachers=[teacher])
+        num_days = len(ctx["days"])
+        max_d = random.randint(2, max(2, num_days - 1))
         templates = [
             f"{teacher_phrase(teacher)} haftada en fazla {max_d} gün gelsin",
             f"{teacher_phrase(teacher)} haftada {max_d} günden fazla okula gelmesin",
             f"{teacher_phrase(teacher)} haftalık {max_d} gün ders versin",
         ]
         request = random.choice(templates)
-        ctx = make_context(extra_teachers=[teacher])
         payload = {
             "constraints": [{
                 "type": "TEACHER_MAX_DAYS_PER_WEEK",
@@ -344,8 +346,6 @@ def gen_teacher_max_days_per_week(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MAX_GAPS_PER_DAY =====
 def gen_teacher_max_gaps_per_day(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -373,8 +373,6 @@ def gen_teacher_max_gaps_per_day(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MAX_GAPS_PER_WEEK =====
 def gen_teacher_max_gaps_per_week(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -401,8 +399,6 @@ def gen_teacher_max_gaps_per_week(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHERS_MAX_GAPS_PER_WEEK (tüm öğretmenler) =====
 def gen_teachers_max_gaps_per_week(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -429,8 +425,6 @@ def gen_teachers_max_gaps_per_week(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_MAX_GAPS_PER_WEEK =====
 def gen_class_max_gaps_per_week(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -458,21 +452,22 @@ def gen_class_max_gaps_per_week(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SUBJECT_PREFERRED_HOURS =====
 def gen_subject_preferred_hours(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         subj = random.choice(SUBJECTS)
-        morning = random.random() < 0.6
-        if morning:
-            hours = list(range(1, random.randint(3, 5)))
-            phrase = random.choice(["sabah", "ilk derslerde", "günün başında", "öğleden önce"])
-        else:
-            hours = list(range(random.randint(4, 6), HOURS_PER_DAY + 1))
-            phrase = random.choice(["öğleden sonra", "son derslerde", "günün sonunda"])
         for_class = random.random() < 0.4
         cls = random.choice(CLASSES) if for_class else None
+        ctx = make_context(extra_classes=[cls] if cls else None)
+        H = ctx["hoursPerDay"]
+        morning = random.random() < 0.6
+        if morning:
+            hours = list(range(1, min(random.randint(3, 5), H + 1)))
+            phrase = random.choice(["sabah", "ilk derslerde", "günün başında", "öğleden önce"])
+        else:
+            start = max(1, min(random.randint(4, 6), H))
+            hours = list(range(start, H + 1))
+            phrase = random.choice(["öğleden sonra", "son derslerde", "günün sonunda"])
         if cls:
             templates = [
                 f"{subj} dersi {phrase} olsun {cls} için",
@@ -485,7 +480,6 @@ def gen_subject_preferred_hours(n: int) -> list[dict]:
                 f"{phrase} {subj} olsun",
             ]
         request = random.choice(templates)
-        ctx = make_context(extra_classes=[cls] if cls else None)
         payload = {
             "constraints": [{
                 "type": "SUBJECT_PREFERRED_HOURS",
@@ -503,8 +497,6 @@ def gen_subject_preferred_hours(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SUBJECT_LAST_HOUR_OF_DAY =====
 def gen_subject_last_hour(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -540,8 +532,6 @@ def gen_subject_last_hour(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SUBJECT_MAX_HOURS_DAILY =====
 def gen_subject_max_hours_daily(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -578,8 +568,6 @@ def gen_subject_max_hours_daily(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SUBJECT_CONSECUTIVE_HOURS (çift saat) =====
 def gen_subject_consecutive(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -614,19 +602,21 @@ def gen_subject_consecutive(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ROOM_NOT_AVAILABLE =====
 def gen_room_not_available(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         room = random.choice(ROOMS)
-        day = random.choice(DAYS_FULL)
+        ctx = make_context()
+        if room not in ctx["rooms"]:
+            ctx["rooms"].append(room)
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
         all_day = random.random() < 0.5
         if all_day:
-            slots = [{"day": day, "hour": h} for h in range(1, HOURS_PER_DAY + 1)]
+            slots = [{"day": day, "hour": h} for h in range(1, H + 1)]
         else:
-            num = random.randint(1, 3)
-            hours = sorted(random.sample(range(1, HOURS_PER_DAY + 1), num))
+            num = random.randint(1, min(3, H))
+            hours = sorted(random.sample(range(1, H + 1), num))
             slots = [{"day": day, "hour": h} for h in hours]
         templates = [
             f"{room} dersliği {day_phrase(day)} günü kapalı",
@@ -634,9 +624,6 @@ def gen_room_not_available(n: int) -> list[dict]:
             f"{day_phrase(day)} günü {room} müsait değil",
         ]
         request = random.choice(templates)
-        ctx = make_context()
-        if room not in ctx["rooms"]:
-            ctx["rooms"].append(room)
         payload = {
             "constraints": [{
                 "type": "ROOM_NOT_AVAILABLE",
@@ -652,8 +639,6 @@ def gen_room_not_available(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SUBJECT_PREFERRED_ROOM =====
 def gen_subject_preferred_room(n: int) -> list[dict]:
     pairs = [
         ("Fizik", ["Fizik Lab", "Lab1"]),
@@ -696,8 +681,6 @@ def gen_subject_preferred_room(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_HOME_ROOM =====
 def gen_teacher_home_room(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -727,8 +710,6 @@ def gen_teacher_home_room(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_HOME_ROOM =====
 def gen_class_home_room(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -759,18 +740,17 @@ def gen_class_home_room(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== KOMBINASYON (çoklu constraint) =====
 def gen_combinations(n: int) -> list[dict]:
     out = []
     for _ in range(n):
-        # 2 öğretmen aynı gün yok
+
         t1 = random.choice(TEACHERS)
         t2 = random.choice([t for t in TEACHERS if t != t1])
-        day = random.choice(DAYS_FULL)
-        request = f"{first_name(t1)} ve {first_name(t2)} {day_phrase(day)} günü yok"
         ctx = make_context(extra_teachers=[t1, t2])
-        slots = [{"day": day, "hour": h} for h in range(1, HOURS_PER_DAY + 1)]
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
+        request = f"{first_name(t1)} ve {first_name(t2)} {day_phrase(day)} günü yok"
+        slots = [{"day": day, "hour": h} for h in range(1, H + 1)]
         payload = {
             "constraints": [
                 {"type": "TEACHER_NOT_AVAILABLE", "weight": 100, "active": True,
@@ -786,20 +766,18 @@ def gen_combinations(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== BELİRSİZLİK (warnings / unresolved) =====
 def gen_ambiguous(n: int) -> list[dict]:
     out = []
     for i in range(n):
         kind = i % 4
         if kind == 0:
-            # 2 isim eşleşmesi
+
             full = random.choice(TEACHERS)
             same_first = first_name(full)
             other = f"{same_first} Karaca"
             ctx = make_context()
             ctx["teachers"] = list(set(ctx["teachers"] + [full, other]))
-            day = random.choice(DAYS_FULL)
+            day = random.choice(ctx["days"])
             request = f"{same_first} hoca {day_phrase(day)} günü yok"
             payload = {
                 "constraints": [],
@@ -810,10 +788,10 @@ def gen_ambiguous(n: int) -> list[dict]:
             }
             out.append(example(ctx, request, payload))
         elif kind == 1:
-            # Bilinmeyen isim
+
             ctx = make_context()
             unknown = "Zühtü Pamukkale"
-            day = random.choice(DAYS_FULL)
+            day = random.choice(ctx["days"])
             request = f"{unknown} hoca {day_phrase(day)} günü olmasın"
             payload = {
                 "constraints": [],
@@ -824,7 +802,7 @@ def gen_ambiguous(n: int) -> list[dict]:
             }
             out.append(example(ctx, request, payload))
         elif kind == 2:
-            # Anlaşılmaz cümle
+
             ctx = make_context()
             request = random.choice([
                 "kanka şu programa bişeyler yap ya",
@@ -841,7 +819,7 @@ def gen_ambiguous(n: int) -> list[dict]:
             }
             out.append(example(ctx, request, payload))
         else:
-            # Eksik bilgi
+
             teacher = random.choice(TEACHERS)
             ctx = make_context(extra_teachers=[teacher])
             request = f"{first_name(teacher)} hoca erken çıkmalı"
@@ -855,8 +833,6 @@ def gen_ambiguous(n: int) -> list[dict]:
             out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MIN_HOURS_DAILY =====
 def gen_teacher_min_hours_daily(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -885,15 +861,15 @@ def gen_teacher_min_hours_daily(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_NOT_AVAILABLE_INTERVAL =====
 def gen_teacher_not_available_interval(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         teacher = random.choice(TEACHERS)
-        day = random.choice(DAYS_FULL)
-        start = random.randint(1, HOURS_PER_DAY - 1)
-        end = random.randint(start + 1, HOURS_PER_DAY)
+        ctx = make_context(extra_teachers=[teacher])
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
+        start = random.randint(1, max(1, H - 1))
+        end = random.randint(start + 1, H) if start < H else H
         templates = [
             f"{teacher_phrase(teacher)} {day_phrase(day)} {start}. ders ile {end}. ders arası müsait değil",
             f"{teacher_phrase(teacher)} {day_phrase(day)} {start} ile {end} saatler arası olmasın",
@@ -901,7 +877,6 @@ def gen_teacher_not_available_interval(n: int) -> list[dict]:
             f"{teacher_phrase(teacher)} {day_phrase(day)} {start}. ile {end}. ders arası izinli",
         ]
         request = random.choice(templates)
-        ctx = make_context(extra_teachers=[teacher])
         payload = {
             "constraints": [{
                 "type": "TEACHER_NOT_AVAILABLE_INTERVAL",
@@ -917,20 +892,19 @@ def gen_teacher_not_available_interval(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MIN_DAYS_PER_WEEK =====
 def gen_teacher_min_days_per_week(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         teacher = random.choice(TEACHERS)
-        min_d = random.randint(2, 4)
+        ctx = make_context(extra_teachers=[teacher])
+        num_days = len(ctx["days"])
+        min_d = random.randint(2, max(2, num_days - 1))
         templates = [
             f"{teacher_phrase(teacher)} haftada en az {min_d} gün okula gelsin",
             f"{teacher_phrase(teacher)} haftalık minimum {min_d} gün ders versin",
             f"{teacher_phrase(teacher)} haftada {min_d} günden az gelmesin",
         ]
         request = random.choice(templates)
-        ctx = make_context(extra_teachers=[teacher])
         payload = {
             "constraints": [{
                 "type": "TEACHER_MIN_DAYS_PER_WEEK",
@@ -946,8 +920,6 @@ def gen_teacher_min_days_per_week(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MAX_HOURS_CONTINUOUSLY =====
 def gen_teacher_max_hours_continuously(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -976,8 +948,6 @@ def gen_teacher_max_hours_continuously(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MAX_BUILDING_CHANGES_PER_DAY =====
 def gen_teacher_max_building_changes_per_day(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1005,8 +975,6 @@ def gen_teacher_max_building_changes_per_day(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MAX_BUILDING_CHANGES_PER_WEEK =====
 def gen_teacher_max_building_changes_per_week(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1034,8 +1002,6 @@ def gen_teacher_max_building_changes_per_week(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MIN_GAPS_BETWEEN_BUILDING_CHANGES =====
 def gen_teacher_min_gaps_between_building_changes(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1063,8 +1029,6 @@ def gen_teacher_min_gaps_between_building_changes(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_NOT_FIRST_HOUR =====
 def gen_teacher_not_first_hour(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1092,20 +1056,19 @@ def gen_teacher_not_first_hour(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_NOT_LAST_HOUR =====
 def gen_teacher_not_last_hour(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         teacher = random.choice(TEACHERS)
+        ctx = make_context(extra_teachers=[teacher])
+        H = ctx["hoursPerDay"]
         templates = [
             f"{teacher_phrase(teacher)} son derse girmesin",
             f"{teacher_phrase(teacher)} günün son saatinde olmasın",
-            f"{teacher_phrase(teacher)} {HOURS_PER_DAY}. derse koyma",
+            f"{teacher_phrase(teacher)} {H}. derse koyma",
             f"{teacher_phrase(teacher)} son saatte ders vermesin",
         ]
         request = random.choice(templates)
-        ctx = make_context(extra_teachers=[teacher])
         payload = {
             "constraints": [{
                 "type": "TEACHER_NOT_LAST_HOUR",
@@ -1121,8 +1084,6 @@ def gen_teacher_not_last_hour(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_MIN_REST_BETWEEN_DAYS =====
 def gen_teacher_min_rest_between_days(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1150,8 +1111,6 @@ def gen_teacher_min_rest_between_days(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_MAX_HOURS_DAILY =====
 def gen_class_max_hours_daily(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1179,8 +1138,6 @@ def gen_class_max_hours_daily(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_MIN_HOURS_DAILY =====
 def gen_class_min_hours_daily(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1208,8 +1165,6 @@ def gen_class_min_hours_daily(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_MAX_GAPS_PER_DAY =====
 def gen_class_max_gaps_per_day(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1237,8 +1192,6 @@ def gen_class_max_gaps_per_day(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_EARLY_MAX_BEGINNINGS =====
 def gen_class_early_max_beginnings(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1266,8 +1219,6 @@ def gen_class_early_max_beginnings(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_MAX_BUILDING_CHANGES_PER_DAY =====
 def gen_class_max_building_changes_per_day(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1295,8 +1246,6 @@ def gen_class_max_building_changes_per_day(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_MIN_GAPS_BETWEEN_BUILDING_CHANGES =====
 def gen_class_min_gaps_between_building_changes(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1324,8 +1273,6 @@ def gen_class_min_gaps_between_building_changes(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_NOT_FIRST_HOUR =====
 def gen_class_not_first_hour(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1353,8 +1300,6 @@ def gen_class_not_first_hour(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CLASS_MAX_HOURS_CONTINUOUSLY =====
 def gen_class_max_hours_continuously(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1382,21 +1327,20 @@ def gen_class_max_hours_continuously(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ACTIVITY_FIXED_TIME =====
 def gen_activity_fixed_time(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         aid = random.randint(1, 50)
-        day = random.choice(DAYS_FULL)
-        hour = random.randint(1, HOURS_PER_DAY)
+        ctx = make_context()
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
+        hour = random.randint(1, H)
         templates = [
             f"{aid} numaralı aktivite {day_phrase(day)} {hour}. derse sabitlensin",
             f"{aid} numaralı ders {day_phrase(day)} {hour}. saatte olsun",
             f"Aktivite #{aid} {day_phrase(day)} {hour}. derste yapılsın",
         ]
         request = random.choice(templates)
-        ctx = make_context()
         payload = {
             "constraints": [{
                 "type": "ACTIVITY_FIXED_TIME",
@@ -1412,8 +1356,6 @@ def gen_activity_fixed_time(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ACTIVITIES_SAME_STARTING_TIME =====
 def gen_activities_same_starting_time(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1441,8 +1383,6 @@ def gen_activities_same_starting_time(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ACTIVITIES_NOT_OVERLAPPING =====
 def gen_activities_not_overlapping(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1470,8 +1410,6 @@ def gen_activities_not_overlapping(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ACTIVITIES_SAME_STARTING_DAY =====
 def gen_activities_same_starting_day(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1499,8 +1437,6 @@ def gen_activities_same_starting_day(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ACTIVITY_ENDS_STUDENTS_DAY =====
 def gen_activity_ends_students_day(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1527,8 +1463,6 @@ def gen_activity_ends_students_day(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SUBJECT_NOT_FIRST_HOUR =====
 def gen_subject_not_first_hour(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1562,8 +1496,6 @@ def gen_subject_not_first_hour(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== MIN_DAYS_BETWEEN_ACTIVITIES_CUSTOM =====
 def gen_min_days_between_activities_custom(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1592,8 +1524,6 @@ def gen_min_days_between_activities_custom(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== MIN_GAPS_BETWEEN_ACTIVITIES =====
 def gen_min_gaps_between_activities(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1621,8 +1551,6 @@ def gen_min_gaps_between_activities(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== MAX_GAPS_BETWEEN_ACTIVITIES =====
 def gen_max_gaps_between_activities(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1650,14 +1578,14 @@ def gen_max_gaps_between_activities(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ACTIVITY_PREFERRED_STARTING_TIMES =====
 def gen_activity_preferred_starting_times(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         aid = random.randint(1, 50)
-        day = random.choice(DAYS_FULL)
-        hours = sorted(random.sample(range(1, HOURS_PER_DAY + 1), random.randint(1, 3)))
+        ctx = make_context()
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
+        hours = sorted(random.sample(range(1, H + 1), random.randint(1, min(3, H))))
         slots = [{"day": day, "hour": h} for h in hours]
         hours_str = ", ".join(str(h) for h in hours)
         templates = [
@@ -1665,7 +1593,6 @@ def gen_activity_preferred_starting_times(n: int) -> list[dict]:
             f"Aktivite {aid} {day_phrase(day)} {hours_str}. saatlerde başlasın",
         ]
         request = random.choice(templates)
-        ctx = make_context()
         payload = {
             "constraints": [{
                 "type": "ACTIVITY_PREFERRED_STARTING_TIMES",
@@ -1681,8 +1608,6 @@ def gen_activity_preferred_starting_times(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SUBJECT_PREFERRED_ROOMS =====
 def gen_subject_preferred_rooms(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1714,8 +1639,6 @@ def gen_subject_preferred_rooms(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_PREFERRED_ROOM =====
 def gen_teacher_preferred_room(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1745,8 +1668,6 @@ def gen_teacher_preferred_room(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TEACHER_PREFERRED_ROOMS =====
 def gen_teacher_preferred_rooms(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1777,8 +1698,6 @@ def gen_teacher_preferred_rooms(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ACTIVITY_PREFERRED_ROOM =====
 def gen_activity_preferred_room(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1807,8 +1726,6 @@ def gen_activity_preferred_room(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ACTIVITY_PREFERRED_ROOMS =====
 def gen_activity_preferred_rooms(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1839,8 +1756,6 @@ def gen_activity_preferred_rooms(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SUBJECT_ACTIVITY_TAG_PREFERRED_ROOM =====
 def gen_subject_activity_tag_preferred_room(n: int) -> list[dict]:
     out = []
     tags = ["Lab", "Teori", "Pratik", "Atölye", "Test"]
@@ -1872,8 +1787,6 @@ def gen_subject_activity_tag_preferred_room(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ACTIVITIES_OCCUPY_MAX_DIFFERENT_ROOMS =====
 def gen_activities_occupy_max_different_rooms(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1901,8 +1814,6 @@ def gen_activities_occupy_max_different_rooms(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== STUDENTS_SET_HOME_ROOMS =====
 def gen_students_set_home_rooms(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1934,13 +1845,14 @@ def gen_students_set_home_rooms(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== BREAK_TIMES =====
 def gen_break_times(n: int) -> list[dict]:
     out = []
     for _ in range(n):
-        day = random.choice(DAYS_FULL)
-        hour = random.randint(3, HOURS_PER_DAY - 1)
+        ctx = make_context()
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
+        lo, hi = (3, max(3, H - 1)) if H >= 4 else (2, max(2, H - 1))
+        hour = random.randint(lo, hi)
         slots = [{"day": day, "hour": hour}]
         templates = [
             f"{day_phrase(day)} {hour}. ders teneffüs olsun",
@@ -1948,7 +1860,6 @@ def gen_break_times(n: int) -> list[dict]:
             f"{day_phrase(day)} {hour}. ders boş bırakılsın",
         ]
         request = random.choice(templates)
-        ctx = make_context()
         payload = {
             "constraints": [{
                 "type": "BREAK_TIMES",
@@ -1964,8 +1875,6 @@ def gen_break_times(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ALL_TEACHERS_MAX_HOURS_DAILY =====
 def gen_all_teachers_max_hours_daily(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -1992,8 +1901,6 @@ def gen_all_teachers_max_hours_daily(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== ALL_TEACHERS_MAX_DAYS_PER_WEEK =====
 def gen_all_teachers_max_days_per_week(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -2020,8 +1927,6 @@ def gen_all_teachers_max_days_per_week(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== STUDENTS_MAX_GAPS_PER_WEEK =====
 def gen_students_max_gaps_per_week(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -2048,8 +1953,6 @@ def gen_students_max_gaps_per_week(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== STUDENTS_EARLY_MAX_BEGINNINGS =====
 def gen_students_early_max_beginnings(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -2075,8 +1978,6 @@ def gen_students_early_max_beginnings(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== STUDENTS_MAX_HOURS_DAILY =====
 def gen_students_max_hours_daily(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -2103,8 +2004,6 @@ def gen_students_max_hours_daily(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== MAX_TOTAL_ACTIVITIES_FROM_SET =====
 def gen_max_total_activities_from_set(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -2132,7 +2031,6 @@ def gen_max_total_activities_from_set(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
 def gen_data_mutations(n: int) -> list[dict]:
     """
     AI üzerinden CRUD işlem örnekleri — kind:"data_mutation".
@@ -2155,7 +2053,7 @@ def gen_data_mutations(n: int) -> list[dict]:
         "link_teacher_subject", "unlink_teacher_subject",
         "add_activity_combo", "update_teacher_hours", "wizard",
     ]
-    # Yaklaşık eşit dağılım (200 örnek = her op ~13-15 tane)
+
     for i in range(n):
         op = OPS_BASIC[i % len(OPS_BASIC)]
         ctx = make_context()
@@ -2356,7 +2254,7 @@ def gen_data_mutations(n: int) -> list[dict]:
             }
 
         elif op == "delete_day":
-            day = random.choice(DAYS_FULL)
+            day = random.choice(ctx["days"])
             request = random.choice([
                 f"{day} gününü programdan kaldır",
                 f"{day} gününü sil",
@@ -2460,7 +2358,7 @@ def gen_data_mutations(n: int) -> list[dict]:
                 "confidence": round(random.uniform(0.85, 0.93), 2),
             }
 
-        else:  # wizard
+        else:  
             request = random.choice([
                 "Ders programı oluşturalım, nereden başlayalım?",
                 "Yeni bir okul kuruyorum, yardım eder misin?",
@@ -2481,7 +2379,6 @@ def gen_data_mutations(n: int) -> list[dict]:
 
         out.append(example(ctx, request, payload))
     return out
-
 
 def gen_conversational_wizard(n: int) -> list[dict]:
     """
@@ -2555,7 +2452,7 @@ def gen_conversational_wizard(n: int) -> list[dict]:
         ctx = make_context()
 
         if kind == "first_contact":
-            # Context'i boş yap (subjects boş)
+
             ctx["subjects"] = []
             ctx["classes"] = []
             ctx["rooms"] = []
@@ -2680,7 +2577,7 @@ def gen_conversational_wizard(n: int) -> list[dict]:
                 "confidence": round(random.uniform(0.88, 0.95), 2),
             }
 
-        else:  # after_activities
+        else:  
             ctx["subjects"] = _short_subjects()
             ctx["classes"] = _short_classes()
             ctx["rooms"] = _short_rooms()
@@ -2704,12 +2601,6 @@ def gen_conversational_wizard(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ============================================================
-# YENİ KAPABİLİTELER (capability parity ile gelen)
-# ============================================================
-
-# ===== RUN_SOLVER — AI "programı üret" komutuyla FET'i tetikler =====
 def gen_run_solver(n: int) -> list[dict]:
     """
     Kullanıcının "programı üret / şimdi başlat / 150 saniyede üret" tarzı
@@ -2736,7 +2627,7 @@ def gen_run_solver(n: int) -> list[dict]:
         "Hazırsam üretebilirsin", "Şimdi programı tamamla",
     ]
     for _ in range(n):
-        # 40% chance süreli, 60% basit
+
         sec = None
         if random.random() < 0.4:
             if random.random() < 0.6:
@@ -2766,8 +2657,6 @@ def gen_run_solver(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== PER-CLASS SUBJECT-ROOM — "9. sınıfların müzik dersi X labında" =====
 def gen_per_class_subject_room(n: int) -> list[dict]:
     """
     Class-filtreli subject-room atamaları. SUBJECT_PREFERRED_ROOM global olduğu
@@ -2788,7 +2677,6 @@ def gen_per_class_subject_room(n: int) -> list[dict]:
         subj, rooms = random.choice(subject_room_pairs)
         room = random.choice(rooms)
 
-        # %60 yıl filtreli (9. sınıflar), %40 tek sınıf filtreli (9A)
         if random.random() < 0.6:
             year = random.choice(["9", "10", "11", "12"])
             class_pool = [f"{year}{ch}" for ch in "ABCDEF"]
@@ -2850,8 +2738,6 @@ def gen_per_class_subject_room(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== CONSTRAINT RELAX — "kısıtlamayı gevşet / çözüm bulunamadı" =====
 def gen_constraint_relax(n: int) -> list[dict]:
     """
     Kullanıcı "çözüm bulunamadı / kısıtlamayı gevşet / öneri ver" gibi
@@ -2889,7 +2775,7 @@ def gen_constraint_relax(n: int) -> list[dict]:
 
     for _ in range(n):
         ctx = make_context()
-        # Context'e fake constraints listesi ekle
+
         active_constraints = []
         cnum = random.randint(3, 7)
         for i in range(cnum):
@@ -2905,7 +2791,6 @@ def gen_constraint_relax(n: int) -> list[dict]:
 
         request = random.choice(relax_phrases)
 
-        # AI en katı 3-5 kısıtlamayı seçip 70'e düşürür
         chosen = sorted(active_constraints, key=lambda c: -c["weight"])[:min(5, len(active_constraints))]
         actions = [
             {
@@ -2931,8 +2816,6 @@ def gen_constraint_relax(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SET_SETTING — "FET zaman limitini 5 dakika yap" =====
 def gen_set_setting(n: int) -> list[dict]:
     """
     Kullanıcı ayarları AI üzerinden değiştirebilsin.
@@ -2968,8 +2851,6 @@ def gen_set_setting(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== GENERIC ADD_CONSTRAINT — AI mutation op'u ile direkt kısıtlama eklesin =====
 def gen_generic_add_constraint(n: int) -> list[dict]:
     """
     AI'nın artık `add_constraint` mutation op'u ile herhangi bir FET kısıtlamasını
@@ -2993,7 +2874,7 @@ def gen_generic_add_constraint(n: int) -> list[dict]:
         request, ctype, build_params, extras = random.choice(patterns)
         ctx = make_context(extra_teachers=[e for e in extras if " " in e] or None,
                           extra_classes=[e for e in extras if " " not in e and e[0].isdigit()] or None)
-        # Param subject/teacher/class isimlerini context'ten al
+
         if ctype.startswith("TEACHER"):
             target = extras[0] if extras else random.choice(ctx["teachers"])
             params = build_params(target)
@@ -3020,14 +2901,8 @@ def gen_generic_add_constraint(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ============================================================
-# Paket 1+2+3 — Split / Slot Edit / Lock / Substitute / Merge / Export / Validate / Stats
-# ============================================================
-
 DAYS_FULL_TR = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
 
-# ===== SPLIT ACTIVITIES — sınıf X gruba bölünür =====
 def gen_split_activities(n: int) -> list[dict]:
     """
     "9A sanat saatinde 2 gruba bölünür: görsel sanatlar ve müzik"
@@ -3049,7 +2924,7 @@ def gen_split_activities(n: int) -> list[dict]:
         cls_year = random.choice(["9", "10", "11", "12", "7", "8"])
         cls_letter = random.choice("ABCDEF")
         cls = f"{cls_year}{cls_letter}"
-        group_count = random.choice([2, 2, 2, 3])  # mostly 2
+        group_count = random.choice([2, 2, 2, 3])  
         sample = random.sample(pairs_2, group_count)
         hours = random.choice([1, 2, 2, 2, 3])
         groups_for_request = [s[0] for s in sample]
@@ -3100,16 +2975,16 @@ def gen_split_activities(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SET TIMETABLE SLOT — "9A salı 3. ders fizik olsun" =====
 def gen_set_timetable_slot(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         cls_year = random.choice(["9", "10", "11", "12"])
         cls_letter = random.choice("ABCDEF")
         cls = f"{cls_year}{cls_letter}"
-        day = random.choice(DAYS_FULL_TR)
-        hour = random.randint(1, 8)
+        ctx = make_context(extra_classes=[cls])
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
+        hour = random.randint(1, H)
         subj = random.choice(SUBJECTS)
         templates = [
             f"{cls} {day} {hour}. ders {subj} olsun",
@@ -3119,7 +2994,6 @@ def gen_set_timetable_slot(n: int) -> list[dict]:
             f"{cls} için {day} {hour}. ders {subj} olarak ayarla",
         ]
         request = random.choice(templates)
-        ctx = make_context(extra_classes=[cls])
         if subj not in ctx["subjects"]:
             ctx["subjects"].append(subj)
         payload = {
@@ -3139,16 +3013,16 @@ def gen_set_timetable_slot(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== LOCK / UNLOCK SLOT =====
 def gen_lock_unlock_slot(n: int) -> list[dict]:
     out = []
     for _ in range(n):
         cls_year = random.choice(["9", "10", "11", "12"])
         cls_letter = random.choice("ABCDEF")
         cls = f"{cls_year}{cls_letter}"
-        day = random.choice(DAYS_FULL_TR)
-        hour = random.randint(1, 8)
+        ctx = make_context(extra_classes=[cls])
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
+        hour = random.randint(1, H)
         is_lock = random.random() < 0.7
 
         if is_lock:
@@ -3173,7 +3047,6 @@ def gen_lock_unlock_slot(n: int) -> list[dict]:
             expl = f"{cls} {day} {hour}. dersinin kilidini kaldıracağım — FET yeniden üretirken bu slot'u serbest bırakacak."
 
         request = random.choice(templates)
-        ctx = make_context(extra_classes=[cls])
         payload = {
             "kind": "data_mutation",
             "actions": [{
@@ -3188,8 +3061,6 @@ def gen_lock_unlock_slot(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== SUBSTITUTE TEACHER — "Ahmet hocanın 9A fiziğini Cem'e ver" =====
 def gen_substitute_teacher(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -3235,8 +3106,6 @@ def gen_substitute_teacher(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== MERGE ACTIVITIES — "9A ve 9B beraber müzik dinleyecek" =====
 def gen_merge_activities(n: int) -> list[dict]:
     out = []
     for _ in range(n):
@@ -3290,8 +3159,6 @@ def gen_merge_activities(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== EXPORT TIMETABLE — "9A programını PDF olarak indir" =====
 def gen_export_timetable(n: int) -> list[dict]:
     out = []
     fmt_phrases = [
@@ -3344,8 +3211,6 @@ def gen_export_timetable(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== VALIDATE SCHEDULE — query response (pre-flight check) =====
 def gen_validate_schedule(n: int) -> list[dict]:
     out = []
     triggers = [
@@ -3363,7 +3228,7 @@ def gen_validate_schedule(n: int) -> list[dict]:
     for _ in range(n):
         request = random.choice(triggers)
         ctx = make_context()
-        # Tool çağrısı senaryosu — AI önce validateSchedule'u çağırır
+
         payload = {
             "kind": "tool_call",
             "tool": "validateSchedule",
@@ -3373,8 +3238,6 @@ def gen_validate_schedule(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
-
-# ===== TIMETABLE STATS — query response =====
 def gen_timetable_stats(n: int) -> list[dict]:
     out = []
     triggers_global = [
@@ -3410,6 +3273,1194 @@ def gen_timetable_stats(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
+def _tool_call(tool: str, args: dict, reasoning: str) -> dict:
+    return {
+        "kind": "tool_call",
+        "tool": tool,
+        "args": args,
+        "reasoning": reasoning,
+    }
+
+def gen_timetable_query(n: int) -> list[dict]:
+    """
+    Kullanıcı üretilmiş çizelge hakkında sorular sorar — AI doğru tool_call
+    yapmalı. 7 alt-senaryo (A-G), her birinde geniş template havuzu.
+
+    Dağıtım (300 dict'te): A=80, B=50, C=50, D=40, E=30, F=25, G=25
+    """
+    out = []
+    out += _gen_q_slot(int(n * 80 / 300))
+    out += _gen_q_class_tt(int(n * 50 / 300))
+    out += _gen_q_teacher_tt(int(n * 50 / 300))
+    out += _gen_q_room_tt(int(n * 40 / 300))
+    out += _gen_q_day_tt(int(n * 30 / 300))
+    out += _gen_q_who_teaching(int(n * 25 / 300))
+    out += _gen_q_free_slots(int(n * 25 / 300))
+
+    while len(out) < n:
+        out += _gen_q_slot(1)
+    return out[:n]
+
+def _gen_q_slot(n: int) -> list[dict]:
+    out = []
+    for _ in range(n):
+        cls_year = random.choice(["9", "10", "11", "12"])
+        cls_letter = random.choice("ABCDEF")
+        cls = f"{cls_year}{cls_letter}"
+        ctx = make_context(extra_classes=[cls])
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
+
+        special = random.random()
+        if special < 0.10:
+            hour = H
+            phrasings = [
+                f"{cls} {day} son ders kim?",
+                f"{cls} {day} son saat hangi öğretmen?",
+                f"{cls} sınıfının {day} son dersi kim veriyor?",
+                f"{cls} için {day} son saat ne?",
+                f"{cls} {day} günü son ders kim?",
+            ]
+        elif special < 0.18:
+            hour = 1
+            phrasings = [
+                f"{cls} {day} ilk ders kim?",
+                f"{cls} {day} 1. ders hangi öğretmen?",
+                f"{cls} sınıfının {day} ilk dersi ne?",
+                f"{cls} {day} günü ilk ders kim veriyor?",
+            ]
+        else:
+            hour = random.randint(1, H)
+            phrasings = [
+                f"{cls} {day} {hour}. ders kim?",
+                f"{cls} {day} {hour}. saat hangi öğretmen?",
+                f"{cls} {day} {hour}. ders hangi derslik?",
+                f"{cls} sınıfının {day} {hour}. dersi ne?",
+                f"{cls} için {day} {hour}. ders kim veriyor?",
+                f"{cls} {day} {hour} ders kim?",
+                f"{cls} {day[:3]} {hour}. ders ne?",
+                f"{cls} {day} günü {hour}. saat öğretmen kim?",
+                f"{cls} {day} {hour}. saat hangi konu?",
+                f"{cls}'nın {day} {hour}. dersi nedir?",
+                f"{cls} {day} {hour}. ders hangi ders?",
+                f"{cls} {day} {hour}. saat öğretmen ne yapıyor?",
+            ]
+        request = random.choice(phrasings)
+        payload = _tool_call(
+            "getTimetableSlot",
+            {"class": cls, "day": day, "hour": hour},
+            f"Kullanıcı {cls} {day} {hour}. derste kim/ne sordu — getTimetableSlot ile çizelgeden çekiyorum.",
+        )
+        out.append(example(ctx, request, payload))
+    return out
+
+def _gen_q_class_tt(n: int) -> list[dict]:
+    out = []
+    for _ in range(n):
+        cls_year = random.choice(["9", "10", "11", "12"])
+        cls_letter = random.choice("ABCDEF")
+        cls = f"{cls_year}{cls_letter}"
+        phrasings = [
+            f"{cls} programını göster",
+            f"{cls} haftalık programı nedir?",
+            f"{cls} neler alıyor bu hafta?",
+            f"{cls} sınıfının çizelgesi",
+            f"{cls} nasıl bir program oldu?",
+            f"{cls} için programı listele",
+            f"{cls} programını aç",
+            f"{cls}'nın haftalık dersleri",
+            f"{cls} ders programı",
+            f"{cls} çizelgesi nasıl oluştu?",
+            f"{cls}'nin tam programı",
+            f"{cls}'nın ders dağılımı",
+            f"{cls} sınıfı haftalık planı",
+            f"{cls} için hangi dersler hangi günde?",
+            f"{cls}'in programını aç bakayım",
+        ]
+        request = random.choice(phrasings)
+        ctx = make_context(extra_classes=[cls])
+        payload = _tool_call(
+            "getClassTimetable",
+            {"class": cls},
+            f"Kullanıcı {cls} sınıfının tam programını istedi — getClassTimetable ile grid'i çekiyorum.",
+        )
+        out.append(example(ctx, request, payload))
+    return out
+
+def _gen_q_teacher_tt(n: int) -> list[dict]:
+    out = []
+    for _ in range(n):
+        teacher = random.choice(TEACHERS)
+        first = teacher.split()[0] if " " in teacher else teacher
+        phrasings = [
+            f"{teacher} ne zaman ders veriyor?",
+            f"{teacher}'in haftalık programı",
+            f"{teacher} hocanın derslerini göster",
+            f"{first}'in programı",
+            f"{teacher} hocanın çizelgesi",
+            f"{first} öğretmenin haftalık dersleri",
+            f"{teacher} hangi günler ders veriyor?",
+            f"{first} hocanın programı nedir?",
+            f"{teacher} ne zamanlar derse giriyor?",
+            f"{first} hoca haftada hangi dersleri veriyor?",
+            f"{teacher}'in programını göster",
+            f"{first} hocanın çizelgesini ver",
+        ]
+        request = random.choice(phrasings)
+        ctx = make_context(extra_teachers=[teacher])
+        payload = _tool_call(
+            "getTeacherTimetable",
+            {"teacher": teacher},
+            f"Kullanıcı {teacher} öğretmenin haftalık programını istedi — getTeacherTimetable çağırıyorum.",
+        )
+        out.append(example(ctx, request, payload))
+    return out
+
+def _gen_q_room_tt(n: int) -> list[dict]:
+    out = []
+    rooms_pool = [
+        "Lab1", "Lab2", "Fizik Lab", "Kimya Lab", "Biyoloji Lab",
+        "BT Sınıfı", "Bilgisayar Lab", "Müzik Sınıfı", "Spor Salonu",
+        "Konferans Salonu", "Resim Atölyesi", "201", "202", "203", "105",
+    ]
+    for _ in range(n):
+        room = random.choice(rooms_pool)
+        phrasings = [
+            f"{room} ne zaman kullanılıyor?",
+            f"{room} programı",
+            f"{room} ne zaman boş?",
+            f"{room} kullanım takvimi",
+            f"{room} haftalık",
+            f"{room} dersliği ne zaman kullanılıyor?",
+            f"{room} programını göster",
+            f"{room}'da hangi günler ders var?",
+            f"{room} kullanım çizelgesi",
+            f"{room} dersliğinin haftalık programı",
+        ]
+        request = random.choice(phrasings)
+        ctx = make_context()
+        if room not in ctx["rooms"]:
+            ctx["rooms"].append(room)
+        payload = _tool_call(
+            "getRoomTimetable",
+            {"room": room},
+            f"Kullanıcı {room} dersliğinin haftalık kullanımını istedi — getRoomTimetable çağırıyorum.",
+        )
+        out.append(example(ctx, request, payload))
+    return out
+
+def _gen_q_day_tt(n: int) -> list[dict]:
+    out = []
+    for _ in range(n):
+        with_class = random.random() < 0.4
+        if with_class:
+            cls_year = random.choice(["9", "10", "11", "12"])
+            cls_letter = random.choice("ABCDEF")
+            cls = f"{cls_year}{cls_letter}"
+            ctx = make_context(extra_classes=[cls])
+            day = random.choice(ctx["days"])
+            phrasings = [
+                f"{day} günü {cls}'nın dersleri",
+                f"{day} {cls} programı",
+                f"{cls} {day} günü ne var?",
+                f"{day} günü {cls}'da neler var?",
+                f"{cls}'nın {day} programı",
+            ]
+            request = random.choice(phrasings)
+            args = {"day": day, "class": cls}
+            reasoning = f"Kullanıcı {cls} sınıfının {day} günündeki dersleri istedi — getDayTimetable class filter ile."
+        else:
+            ctx = make_context()
+            day = random.choice(ctx["days"])
+            phrasings = [
+                f"{day} günü ne dersler var?",
+                f"{day} günü tüm sınıflar",
+                f"{day} programı",
+                f"{day} günü ne oluyor?",
+                f"{day} haftalık planda ne var?",
+                f"{day} dersleri",
+            ]
+            request = random.choice(phrasings)
+            args = {"day": day}
+            reasoning = f"Kullanıcı {day} günü tüm derslerini istedi — getDayTimetable çağırıyorum."
+        payload = _tool_call("getDayTimetable", args, reasoning)
+        out.append(example(ctx, request, payload))
+    return out
+
+def _gen_q_who_teaching(n: int) -> list[dict]:
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        day = random.choice(D)
+        hour = random.randint(1, H)
+        phrasings = [
+            f"{day} {hour}. ders kim hangi sınıfta?",
+            f"{day} {hour}. derste kim ders veriyor?",
+            f"{day} {hour}. saatte herkes nerede?",
+            f"{day} {hour}. ders kimler nerede?",
+            f"{day} {hour}. saatte öğretmenler ne yapıyor?",
+            f"{day} günü {hour}. saatte hangi sınıfta kim?",
+            f"{day} {hour}. ders kim girer?",
+            f"{day} saat {hour}'de ne oluyor?",
+        ]
+        request = random.choice(phrasings)
+        payload = _tool_call(
+            "whoIsTeaching",
+            {"day": day, "hour": hour},
+            f"Kullanıcı {day} {hour}. saatteki tüm dersleri istedi — whoIsTeaching çağırıyorum.",
+        )
+        out.append(example(ctx, request, payload))
+    return out
+
+def _gen_q_free_slots(n: int) -> list[dict]:
+    out = []
+    for _ in range(n):
+        choice = random.choice(["class", "teacher", "room"])
+        if choice == "class":
+            cls_year = random.choice(["9", "10", "11", "12"])
+            cls_letter = random.choice("ABCDEF")
+            cls = f"{cls_year}{cls_letter}"
+            phrasings = [
+                f"{cls}'nın boş saatleri ne zaman?",
+                f"{cls}'da hangi günler boş yer var?",
+                f"{cls} ne zaman boş?",
+                f"{cls}'nın boş slotları",
+                f"{cls}'nın müsait saatleri",
+            ]
+            args = {"class": cls}
+            ctx = make_context(extra_classes=[cls])
+            reasoning = f"Kullanıcı {cls} sınıfının boş slot'larını istedi."
+        elif choice == "teacher":
+            teacher = random.choice(TEACHERS)
+            first = teacher.split()[0] if " " in teacher else teacher
+            phrasings = [
+                f"{teacher} ne zaman boş?",
+                f"{first}'in boş saatleri",
+                f"{teacher} hocanın boş saatleri",
+                f"{first} hangi saatlerde müsait?",
+                f"{teacher} ne zamanlar boş?",
+            ]
+            args = {"teacher": teacher}
+            ctx = make_context(extra_teachers=[teacher])
+            reasoning = f"Kullanıcı {teacher} öğretmenin boş slot'larını istedi."
+        else:
+            room = random.choice(["Lab1", "Lab2", "BT Sınıfı", "Müzik Sınıfı", "201", "302", "Konferans Salonu"])
+            phrasings = [
+                f"{room} ne zaman boş?",
+                f"{room} müsait saatleri",
+                f"{room} ne zaman müsait?",
+                f"{room} dersliğinin boş zamanları",
+            ]
+            args = {"room": room}
+            ctx = make_context()
+            if room not in ctx["rooms"]:
+                ctx["rooms"].append(room)
+            reasoning = f"Kullanıcı {room} dersliğinin boş slot'larını istedi."
+        request = random.choice(phrasings)
+        payload = _tool_call("getFreeSlots", args, reasoning)
+        out.append(example(ctx, request, payload))
+    return out
+
+def _block_phrase(block: int) -> str:
+    if block == 1:
+        return random.choice(["1'er saat", "tek tek"])
+    return random.choice([
+        f"blok {block}",
+        f"günde {block} ders yan yana",
+        f"{block}'şer ders blok",
+        f"{block} ders peş peşe",
+        f"blok ders ({block})",
+        f"{block}'er ders bir arada",
+    ])
+
+def _year_phrase(year: str, mode: str) -> str:
+    return {
+        "ların": f"{year}. sınıfların",
+        "lara": f"{year}. sınıflara",
+        "lar": f"{year}. sınıflar",
+        "tum": f"tüm {year}. sınıfların",
+        "tum_lara": f"tüm {year}. sınıflara",
+    }[mode]
+
+def gen_filtered_activity_update(n: int) -> list[dict]:
+    """
+    "9. sınıfların fizik dersi 6 saat olsun, günde 2 ders yan yana"
+    → multi-action update_activity (her 9. sınıf için ayrı).
+    """
+    out = []
+    for _ in range(n):
+
+        years = random.choices(
+            [["9"], ["10"], ["11"], ["12"], ["9", "10"], ["10", "11"], ["11", "12"]],
+            weights=[3, 3, 3, 3, 1, 1, 1],
+            k=1,
+        )[0]
+        letter_count = random.randint(2, 5)
+        letters = list("ABCDEF")[:letter_count]
+        all_classes: list[str] = []
+        for y in years:
+            for l in letters:
+                all_classes.append(f"{y}{l}")
+        subj = random.choice(SUBJECTS)
+        hours = random.choice([2, 3, 4, 5, 6])
+        block = random.choice([1, 2])
+        block_phr = _block_phrase(block)
+
+        if len(years) == 1:
+            year_mode = random.choice(["ların", "lara", "lar", "tum"])
+            year_text = _year_phrase(years[0], year_mode)
+            templates = [
+                f"{year_text} {subj.lower()} dersi {hours} saat olsun, {block_phr}",
+                f"{year_text} {subj.lower()} {hours} saat, {block_phr}",
+                f"{year_text} {subj.lower()} dersini {hours} saat yap, {block_phr}",
+                f"{year_text} için {subj.lower()} {hours} saat olsun ({block_phr})",
+                f"{year_text} {subj} dersi haftalık {hours} saat, {block_phr} olsun",
+                f"{year_text} {subj.lower()} {hours} saatlik, blok süresi {block}",
+            ] if block > 1 else [
+                f"{year_text} {subj.lower()} {hours} saat olsun",
+                f"{year_text} {subj.lower()} dersi {hours} saat",
+                f"{year_text} için {subj.lower()} haftalık {hours} saat",
+                f"{year_text} {subj} dersi {hours} saat olsun",
+            ]
+        else:
+            year_text = " ve ".join(f"{y}." for y in years) + " sınıfların"
+            templates = [
+                f"{year_text} {subj.lower()} {hours} saat, {block_phr}",
+                f"{year_text} {subj.lower()} dersi {hours} saat olsun",
+                f"{year_text} {subj.lower()} dersini {hours} saatlik yap, {block_phr}",
+            ]
+        request = random.choice(templates)
+
+        ctx = make_context(extra_classes=all_classes)
+        if subj not in ctx["subjects"]:
+            ctx["subjects"].append(subj)
+
+        actions = []
+        for cls in all_classes:
+            actions.append({
+                "op": "update_activity",
+                "params": {
+                    "class": cls,
+                    "subject": subj,
+                    "weeklyHours": hours,
+                    "blockDuration": block,
+                },
+                "description": f"{cls} {subj.lower()}: {hours} saat / blok {block}",
+            })
+
+        explanation = (
+            f"{', '.join(years)}. sınıfların tamamı için {subj} dersini haftalık {hours} saat, "
+            f"günde {block} ders yan yana (blockDuration={block}) olarak güncelleyeceğim. "
+            f"Toplam {len(all_classes)} sınıf etkilenecek."
+        )
+
+        payload = {
+            "kind": "data_mutation",
+            "actions": actions,
+            "explanation": explanation,
+            "requiresConfirmation": True,
+            "confidence": round(random.uniform(0.80, 0.92), 2),
+        }
+        out.append(example(ctx, request, payload))
+    return out
+
+def gen_filtered_activity_add(n: int) -> list[dict]:
+    """
+    Aynı pattern ama YENİ aktivite ekleme.
+    "9. sınıflara X dersinden Y saat ekle"
+    """
+    out = []
+    for _ in range(n):
+        years = random.choices(
+            [["9"], ["10"], ["11"], ["12"], ["9", "10"], ["10", "11"]],
+            weights=[3, 3, 3, 3, 1, 1],
+            k=1,
+        )[0]
+        letter_count = random.randint(2, 5)
+        letters = list("ABCDEF")[:letter_count]
+        all_classes: list[str] = []
+        for y in years:
+            for l in letters:
+                all_classes.append(f"{y}{l}")
+        subj = random.choice(SUBJECTS)
+        hours = random.choice([1, 2, 3, 4])
+        block = random.choice([1, 1, 1, 2])
+
+        if len(years) == 1:
+            year_mode = random.choice(["ların", "lara", "tum_lara"])
+            year_text = _year_phrase(years[0], year_mode)
+            block_part = f", {_block_phrase(block)}" if block > 1 else ""
+            templates = [
+                f"{year_text} {subj.lower()} dersinden {hours} saat ekle{block_part}",
+                f"{year_text} {hours} saat {subj.lower()} ekle{block_part}",
+                f"{year_text} {subj} dersini ekle, haftalık {hours} saat{block_part}",
+                f"{year_text} {subj.lower()} {hours} saatlik ekle{block_part}",
+                f"{year_text} için {subj.lower()} {hours} saat oluştur{block_part}",
+            ]
+        else:
+            year_text = " ve ".join(f"{y}." for y in years) + " sınıflara"
+            block_part = f", {_block_phrase(block)}" if block > 1 else ""
+            templates = [
+                f"{year_text} {subj.lower()} {hours} saat ekle{block_part}",
+                f"{year_text} {subj.lower()} dersini ekle ({hours} saat){block_part}",
+            ]
+        request = random.choice(templates)
+
+        ctx = make_context(extra_classes=all_classes)
+        if subj not in ctx["subjects"]:
+            ctx["subjects"].append(subj)
+
+        actions = []
+        for cls in all_classes:
+            params = {
+                "class": cls,
+                "subject": subj,
+                "weeklyHours": hours,
+            }
+            if block > 1:
+                params["blockDuration"] = block
+            actions.append({
+                "op": "add_activity",
+                "params": params,
+                "description": f"{cls} → {subj} ({hours} saat" + (f", blok {block}" if block > 1 else "") + ")",
+            })
+
+        explanation = (
+            f"{', '.join(years)}. sınıfların tamamına {subj} dersinden haftalık {hours} saat "
+            + (f"({_block_phrase(block)}) " if block > 1 else "")
+            + f"ekleyeceğim. Toplam {len(all_classes)} sınıf için ayrı aktivite oluşturulacak."
+        )
+
+        payload = {
+            "kind": "data_mutation",
+            "actions": actions,
+            "explanation": explanation,
+            "requiresConfirmation": True,
+            "confidence": round(random.uniform(0.82, 0.92), 2),
+        }
+        out.append(example(ctx, request, payload))
+    return out
+
+def gen_slot_swap(n: int) -> list[dict]:
+    """
+    "9A salı 3 ile cuma 5 yer değiştirsin" → swap_timetable_slots
+    Bazen aynı sınıf içi, bazen iki farklı sınıf.
+    """
+    out = []
+    for _ in range(n):
+        same_class = random.random() < 0.7
+        cls1_year = random.choice(["9", "10", "11", "12"])
+        cls1_letter = random.choice("ABCDEF")
+        cls1 = f"{cls1_year}{cls1_letter}"
+        if same_class:
+            cls2 = cls1
+        else:
+            cls2_year = random.choice(["9", "10", "11", "12"])
+            cls2_letter = random.choice("ABCDEF")
+            cls2 = f"{cls2_year}{cls2_letter}"
+        ctx = make_context(extra_classes=[cls1, cls2])
+        D, H = ctx["days"], ctx["hoursPerDay"]
+        if len(D) >= 2:
+            day1, day2 = random.sample(D, 2)
+        else:
+            day1 = day2 = D[0]
+        hour1 = random.randint(1, H)
+        hour2 = random.randint(1, H)
+
+        if same_class:
+            templates = [
+                f"{cls1} {day1} {hour1} ile {day2} {hour2} ders yer değiştirsin",
+                f"{cls1} {day1} {hour1}. ders ile {day2} {hour2}. ders yer değiştirsin",
+                f"{cls1} sınıfının {day1} {hour1}. dersi ile {day2} {hour2}. dersi swap olsun",
+                f"{cls1} {day1}/{hour1} ↔ {day2}/{hour2} yer değiştir",
+                f"{cls1} için {day1} {hour1}. saati {day2} {hour2}. saatle değiştir",
+                f"{cls1}'da {day1} {hour1}. ders {day2} {hour2}. derse taşınsın, eskisi yerine onun değişsin",
+            ]
+        else:
+            templates = [
+                f"{cls1} {day1} {hour1} ile {cls2} {day2} {hour2} yer değiştirsin",
+                f"{cls1}'nın {day1} {hour1}. dersi ile {cls2}'nın {day2} {hour2}. dersi swap",
+                f"{cls1} {day1} {hour1}. ders ile {cls2} {day2} {hour2}. ders değişsin",
+            ]
+        request = random.choice(templates)
+        payload = {
+            "kind": "data_mutation",
+            "actions": [
+                {
+                    "op": "swap_timetable_slots",
+                    "params": {
+                        "slot1": {"class": cls1, "day": day1, "hour": hour1},
+                        "slot2": {"class": cls2, "day": day2, "hour": hour2},
+                    },
+                    "description": f"{cls1} {day1}/{hour1} ↔ {cls2} {day2}/{hour2}",
+                }
+            ],
+            "explanation": (
+                f"{cls1} {day1} {hour1}. ders ile {cls2} {day2} {hour2}. ders'i yer değiştireceğim. "
+                f"Her iki aktiviteye ACTIVITY_FIXED_TIME constraint eklenir; programı yeniden üretince FET uygular."
+            ),
+            "requiresConfirmation": True,
+            "confidence": round(random.uniform(0.80, 0.92), 2),
+        }
+        out.append(example(ctx, request, payload))
+    return out
+
+def gen_pair_subjects_consecutive(n: int) -> list[dict]:
+    """
+    "9A için Fizik ve Matematik peş peşe olsun" → pair_subjects_consecutive
+    """
+    out = []
+    pairs = [
+        ("Fizik", "Matematik"),
+        ("Matematik", "Geometri"),
+        ("Kimya", "Biyoloji"),
+        ("Türkçe", "Edebiyat"),
+        ("Tarih", "Coğrafya"),
+        ("Fizik", "Kimya"),
+        ("İngilizce", "Almanca"),
+    ]
+    for _ in range(n):
+        cls_year = random.choice(["9", "10", "11", "12"])
+        cls_letter = random.choice("ABCDEF")
+        cls = f"{cls_year}{cls_letter}"
+        s1, s2 = random.choice(pairs)
+        templates = [
+            f"{cls} için {s1} ve {s2} peş peşe olsun",
+            f"{cls} sınıfında {s1}'den hemen sonra {s2} olsun",
+            f"{cls} {s1} ile {s2} ardışık olsun",
+            f"{cls} için {s1} {s2} bir arada (peş peşe)",
+            f"{cls} {s1} dersi bittikten hemen sonra {s2} başlasın",
+            f"{cls} {s1} ve {s2} art arda gelsin",
+            f"{cls}'da {s1} → {s2} ardışık yap",
+            f"{cls} için lab-teorik gibi: {s1} sonra {s2}",
+        ]
+        request = random.choice(templates)
+        ctx = make_context(extra_classes=[cls])
+        for s in (s1, s2):
+            if s not in ctx["subjects"]:
+                ctx["subjects"].append(s)
+        payload = {
+            "kind": "data_mutation",
+            "actions": [
+                {
+                    "op": "pair_subjects_consecutive",
+                    "params": {"class": cls, "subject1": s1, "subject2": s2},
+                    "description": f"{cls} → '{s1}' hemen ardından '{s2}'",
+                }
+            ],
+            "explanation": (
+                f"{cls} sınıfında '{s1}' bittikten hemen sonra '{s2}' başlamasını zorunlu kılan "
+                f"TWO_ACTIVITIES_CONSECUTIVE kısıtlaması ekleyeceğim. FET bu iki aktiviteyi aynı günde "
+                f"peş peşe yerleştirecek."
+            ),
+            "requiresConfirmation": True,
+            "confidence": round(random.uniform(0.82, 0.92), 2),
+        }
+        out.append(example(ctx, request, payload))
+    return out
+
+def gen_subject_spread_days(n: int) -> list[dict]:
+    """
+    "Matematik 4 saat ama farklı 4 günde olsun" → 2-constraint combo:
+    1) add_activity (veya update_activity) ile weeklyHours=4, blockDuration=1
+    2) add_constraint SUBJECT_MAX_HOURS_DAILY {subject, maxHours=1}
+    """
+    out = []
+    for _ in range(n):
+        cls_year = random.choice(["9", "10", "11", "12"])
+        cls_letter = random.choice("ABCDEF")
+        cls = f"{cls_year}{cls_letter}"
+        subj = random.choice(SUBJECTS)
+        hours = random.choice([3, 4, 5])
+        templates = [
+            f"{cls} {subj.lower()} {hours} saat ama farklı {hours} günde olsun",
+            f"{cls} {subj} dersi {hours} saat, farklı günlere yayılsın",
+            f"{cls} için {subj.lower()} haftalık {hours} saat ve günde 1 dersten fazla olmasın",
+            f"{cls} {subj} {hours} saat olsun, hepsi farklı günde",
+            f"{cls} {subj.lower()} {hours} saat, 1'er ders günde",
+            f"{cls} {subj} {hours} farklı güne yayılarak {hours} saat",
+        ]
+        request = random.choice(templates)
+        ctx = make_context(extra_classes=[cls])
+        if subj not in ctx["subjects"]:
+            ctx["subjects"].append(subj)
+        payload = {
+            "kind": "data_mutation",
+            "actions": [
+                {
+                    "op": "update_activity",
+                    "params": {
+                        "class": cls,
+                        "subject": subj,
+                        "weeklyHours": hours,
+                        "blockDuration": 1,
+                    },
+                    "description": f"{cls} {subj.lower()}: {hours} saat / blok 1",
+                },
+                {
+                    "op": "add_constraint",
+                    "params": {
+                        "type": "SUBJECT_MAX_HOURS_DAILY",
+                        "weight": 100,
+                        "params": {"subject": subj, "maxHours": 1},
+                    },
+                    "description": f"{subj} günde en fazla 1 saat (farklı günlere yayılır)",
+                },
+            ],
+            "explanation": (
+                f"{cls} sınıfının {subj} dersini haftalık {hours} saat ve günde 1 saat olarak yapılandıracağım. "
+                f"weeklyHours={hours} + blockDuration=1 + SUBJECT_MAX_HOURS_DAILY=1 kombinasyonu FET'in dersi "
+                f"{hours} ayrı güne yaymasını zorunlu kılar."
+            ),
+            "requiresConfirmation": True,
+            "confidence": round(random.uniform(0.80, 0.90), 2),
+        }
+        out.append(example(ctx, request, payload))
+    return out
+
+def gen_page_navigation(n: int) -> list[dict]:
+    """
+    "Öğretmenler sayfasına geç" → navigate_to
+    """
+    out = []
+    pages = [
+        ("teachers", ["Öğretmenler", "öğretmen sayfası", "öğretmenler ekranı"]),
+        ("classes", ["Sınıflar", "sınıf sayfası", "sınıflar ekranı"]),
+        ("rooms", ["Derslikler", "derslik sayfası", "oda sayfası"]),
+        ("subjects", ["Dersler", "ders sayfası", "dersler ekranı"]),
+        ("activities", ["Ders Dağılımı", "aktiviteler", "ders dağıtım sayfası"]),
+        ("schedule", ["Gün Saat Planı", "saat planı"]),
+        ("constraints", ["Kısıtlamalar", "kısıtlama sayfası"]),
+        ("generate", ["Programı Üret", "üretim sayfası"]),
+        ("timetable", ["Program", "çizelge sayfası", "haftalık program"]),
+        ("settings", ["Ayarlar", "ayarlar sayfası", "settings"]),
+        ("welcome", ["Başlangıç", "hoş geldin sayfası", "ana sayfa"]),
+    ]
+    for _ in range(n):
+        page, names = random.choice(pages)
+        name = random.choice(names)
+        templates = [
+            f"{name} sayfasına geç",
+            f"{name} sayfasını aç",
+            f"Beni {name} sayfasına götür",
+            f"{name} ekranına git",
+            f"{name} sayfasına yönlendir",
+            f"{name}'e geç",
+        ]
+        request = random.choice(templates)
+        ctx = make_context()
+        payload = {
+            "kind": "data_mutation",
+            "actions": [
+                {
+                    "op": "navigate_to",
+                    "params": {"page": page},
+                    "description": f"/{page} sayfasına geç",
+                }
+            ],
+            "explanation": f"/{page} sayfasına yönlendireceğim.",
+            "requiresConfirmation": True,
+            "confidence": round(random.uniform(0.86, 0.95), 2),
+        }
+        out.append(example(ctx, request, payload))
+    return out
+
+def gen_multi_step_planning(n: int) -> list[dict]:
+    """
+    Karmaşık istekler için iteratif tool_call. Model ilk turda bir
+    keşif/araştırma tool'u çağırır, reasoning'de "önce X, sonra Y" der.
+    """
+    out = []
+    SCENARIOS = [
+
+        {
+            "templates": [
+                "{cls}'nın {subject} dersini {day}'a taşı ama {teacher} hocayla çakışmasın",
+                "{cls} {subject} dersini {day}'a al, {teacher} ile çakışma olmasın",
+                "{subject} dersini {cls}'da {day} gününe taşımak istiyorum ama {teacher}'le çakışmasın",
+                "{cls} sınıfının {subject} saatini {day}'a aktar, {teacher} hocayla aynı saate denk gelmesin",
+            ],
+            "tool": "getTeacherTimetable",
+            "args": lambda v: {"teacher": v["teacher"]},
+            "reasoning": "Önce {teacher} hocasının {day} günü programına bakmam gerek, sonra {cls} {subject} dersi için uygun saat seçeceğim.",
+            "needs": ["cls", "subject", "day", "teacher"],
+        },
+
+        {
+            "templates": [
+                "{teacher} hocanın boş saatlerine {subject} dersi ekle",
+                "{teacher} öğretmenin boşlarında {subject} dersi olsun",
+                "{teacher}'in müsait saatlerine {subject} koy",
+                "{teacher} hocaya boş saatlerine {subject} dersi yerleştir",
+            ],
+            "tool": "getFreeSlots",
+            "args": lambda v: {"teacher": v["teacher"]},
+            "reasoning": "Önce {teacher} hocasının boş slot'larını bulmam gerek, sonra oraya {subject} dersini ekleyeceğim.",
+            "needs": ["teacher", "subject"],
+        },
+
+        {
+            "templates": [
+                "{day} 1. ders boş olanları bul ve oraya {subject} koy",
+                "{day} ilk ders kimde boşsa {subject} ekle",
+                "{day} 1. saat boş sınıfları bul, {subject} dersi yerleştir",
+                "{day} ilk saat boş olan sınıflara {subject} ata",
+            ],
+            "tool": "getDayTimetable",
+            "args": lambda v: {"day": v["day"]},
+            "reasoning": "Önce {day} günü 1. derste hangi sınıfların boş olduğunu görmem gerek, sonra {subject} dersini boş slot'lara ekleyeceğim.",
+            "needs": ["day", "subject"],
+        },
+
+        {
+            "templates": [
+                "{room} en az kullanılan derslik mi? Eğer öyleyse {subject} dersini oraya al",
+                "{room} dersliği boş duruyor mu? Boşsa oraya {subject} koy",
+                "{room} az kullanılıyorsa {subject} dersini oraya taşı",
+            ],
+            "tool": "getRoomTimetable",
+            "args": lambda v: {"room": v["room"]},
+            "reasoning": "Önce {room} dersliğinin doluluk durumunu kontrol etmeliyim, sonra {subject} dersini taşıyıp taşımamaya karar vereceğim.",
+            "needs": ["room", "subject"],
+        },
+
+        {
+            "templates": [
+                "{subject} derslerini 9. sınıfların hepsine yay, aynı güne 2'den fazla koyma",
+                "{subject} dersini tüm 10. sınıflara dağıt, günde 2'den fazla olmasın",
+                "11. sınıfların hepsine {subject} dersi ekle, hafta içine yay",
+            ],
+            "tool": "getClassActivities",
+            "args": lambda v: {"classYear": v["year"]},
+            "reasoning": "Önce {year}. sınıfların mevcut {subject} aktivitelerini görmem gerek, sonra eksikleri tespit edip eklemeleri yapacağım.",
+            "needs": ["year", "subject"],
+        },
+
+        {
+            "templates": [
+                "{teacher} hoca {day} yokmuş, derslerini başka güne taşı",
+                "{teacher} öğretmen {day} izinli, dersleri başka güne kaydırılsın",
+                "{teacher}'in {day} dersleri başka bir güne alınsın",
+            ],
+            "tool": "getTeacherTimetable",
+            "args": lambda v: {"teacher": v["teacher"]},
+            "reasoning": "Önce {teacher} hocasının {day} günü hangi derslere girdiğini görmem gerek, sonra her birini uygun başka bir güne taşıyacağım.",
+            "needs": ["teacher", "day"],
+        },
+
+        {
+            "templates": [
+                "{cls}'nın ders programı bitti mi? Eğer eksikse kalan saatleri tamamla",
+                "{cls} programı tam mı? Eksik varsa tamamla",
+                "{cls}'nın çizelgesi bitmiş mi kontrol et, eksik dersleri ekle",
+            ],
+            "tool": "validateSchedule",
+            "args": lambda v: {"class": v["cls"]},
+            "reasoning": "Önce {cls} sınıfının programının tam olup olmadığını doğrulamam gerek, sonra eksik kalan saatleri tamamlayacağım.",
+            "needs": ["cls"],
+        },
+
+        {
+            "templates": [
+                "İki {subject} öğretmeni var, az ders alanına {subject2} dersi ekle",
+                "{subject} branşında iki hoca var, daha az yük alanına {subject2} ver",
+                "İki {subject} hocasından az ders alanına {subject2} dersi koy",
+            ],
+            "tool": "getTeachersBySubject",
+            "args": lambda v: {"subject": v["subject"]},
+            "reasoning": "Önce {subject} dersini veren öğretmenleri ve ders yüklerini görmem gerek, sonra az ders alana {subject2} ekleyeceğim.",
+            "needs": ["subject", "subject2"],
+        },
+
+        {
+            "templates": [
+                "{day} 8 ders var, hepsini 7'ye indir, sonra teneffüsü ekle",
+                "{day} günü ders sayısı 8'den 7'ye düşsün, ardından mola koy",
+                "{day} 8 saati 7 saate indirelim, teneffüs yerleştir",
+            ],
+            "tool": "getDayTimetable",
+            "args": lambda v: {"day": v["day"]},
+            "reasoning": "Önce {day} günü mevcut tüm derslerin yerleşimini görmem gerek, sonra 1 saati kaldırıp teneffüs slot'u yerleştireceğim.",
+            "needs": ["day"],
+        },
+
+        {
+            "templates": [
+                "{subject} öğretmeni az ders alıyor, ona {cls}'da {subject} dersi ekle",
+                "{subject} hocası boşta, {cls} sınıfına {subject} verelim",
+                "{subject} öğretmeninin yükü düşük, {cls}'a {subject} dersi koy",
+            ],
+            "tool": "getTeachersBySubject",
+            "args": lambda v: {"subject": v["subject"]},
+            "reasoning": "Önce {subject} dersini veren öğretmenleri ve mevcut yüklerini görmem gerek, sonra {cls}'a {subject} dersi atayacağım.",
+            "needs": ["subject", "cls"],
+        },
+
+        {
+            "templates": [
+                "{cls}'nın programını göster sonra {day} günü {subject} ekle",
+                "{cls} çizelgesine bakalım, ardından {day}'a {subject} koyalım",
+                "{cls}'ın haftalık programını çek, {day}'a {subject} ekle",
+            ],
+            "tool": "getClassTimetable",
+            "args": lambda v: {"class": v["cls"]},
+            "reasoning": "Önce {cls} sınıfının mevcut haftalık programını çekmem gerek, sonra {day} günü uygun saate {subject} dersini ekleyeceğim.",
+            "needs": ["cls", "day", "subject"],
+        },
+
+        {
+            "templates": [
+                "{cls}'daki {subject} dersinin saatini değiştir",
+                "{cls} {subject} dersinin yerini düzenle",
+                "{cls}'ın {subject} aktivitesinin slotunu güncelle",
+            ],
+            "tool": "getActivityDetails",
+            "args": lambda v: {"class": v["cls"], "subject": v["subject"]},
+            "reasoning": "Önce {cls} sınıfındaki {subject} aktivitesinin mevcut bilgilerini görmem gerek, sonra slotunu güncelleyeceğim.",
+            "needs": ["cls", "subject"],
+        },
+
+        {
+            "templates": [
+                "Sistemde kaç kısıtlama var? Çoksa hafif olanları gevşet",
+                "Kısıtlama yoğunluğu fazla mı? Fazlaysa düşür",
+                "Aktif kısıtlamaları say, gerekirse azalt",
+            ],
+            "tool": "countConstraints",
+            "args": lambda v: {},
+            "reasoning": "Önce aktif kısıtlama sayısını öğrenmem gerek, sonra çoksa zayıf ağırlıklı olanları gevşeteceğim.",
+            "needs": [],
+        },
+
+        {
+            "templates": [
+                "Hangi gün daha boş? O güne {subject} dersi ekle",
+                "En boş günü bul, oraya {subject} koy",
+                "En az dolu güne {subject} dersi yerleştir",
+            ],
+            "tool": "getTimetableStats",
+            "args": lambda v: {},
+            "reasoning": "Önce gün bazlı doluluk istatistiklerine bakmam gerek, sonra en boş güne {subject} dersini ekleyeceğim.",
+            "needs": ["subject"],
+        },
+
+        {
+            "templates": [
+                "{day} {hour}. ders kimde? Boşsa {subject} ekle",
+                "{day} {hour}. saat kim var? Yoksa {subject} koy",
+                "{day} {hour}. ders boş mu? {subject} dersi yerleştirilebilir mi?",
+            ],
+            "tool": "whoIsTeaching",
+            "args": lambda v: {"day": v["day"], "hour": v["hour"]},
+            "reasoning": "Önce {day} {hour}. derste kimin ders verdiğini öğrenmem gerek, sonra boşsa {subject} dersini ekleyeceğim.",
+            "needs": ["day", "hour", "subject"],
+        },
+    ]
+    for _ in range(n):
+        scen = random.choice(SCENARIOS)
+
+        ctx_extra_teachers = []
+        ctx_extra_classes = []
+        v = {}
+        if "teacher" in scen["needs"]:
+            v["teacher"] = random.choice(TEACHERS)
+            ctx_extra_teachers.append(v["teacher"])
+        if "cls" in scen["needs"]:
+            cls_year = random.choice(["9", "10", "11", "12"])
+            cls_letter = random.choice("ABCDEF")
+            v["cls"] = f"{cls_year}{cls_letter}"
+            ctx_extra_classes.append(v["cls"])
+        if "subject" in scen["needs"]:
+            v["subject"] = random.choice(SUBJECTS)
+        if "subject2" in scen["needs"]:
+            other = random.choice(SUBJECTS)
+            while other == v.get("subject"):
+                other = random.choice(SUBJECTS)
+            v["subject2"] = other
+        if "day" in scen["needs"]:
+            v["day"] = random.choice(DAYS_FULL)
+        if "room" in scen["needs"]:
+            v["room"] = random.choice(["Lab1", "Lab2", "BT Sınıfı", "Müzik Sınıfı", "201", "302", "Konferans Salonu"])
+        if "year" in scen["needs"]:
+            v["year"] = random.choice(["9", "10", "11", "12"])
+        if "hour" in scen["needs"]:
+            v["hour"] = random.randint(1, 8)
+        ctx = make_context(
+            extra_teachers=ctx_extra_teachers or None,
+            extra_classes=ctx_extra_classes or None,
+        )
+        if "room" in v and v["room"] not in ctx["rooms"]:
+            ctx["rooms"].append(v["room"])
+        if "subject" in v and v["subject"] not in ctx["subjects"]:
+            ctx["subjects"].append(v["subject"])
+        if "subject2" in v and v["subject2"] not in ctx["subjects"]:
+            ctx["subjects"].append(v["subject2"])
+        template = random.choice(scen["templates"])
+
+        request = template.format(**{k: v.get(k, "") for k in ["cls", "subject", "subject2", "day", "teacher", "room", "year", "hour"]})
+        args = scen["args"](v)
+        reasoning = scen["reasoning"].format(**{k: v.get(k, "") for k in ["cls", "subject", "subject2", "day", "teacher", "room", "year", "hour"]})
+        payload = _tool_call(scen["tool"], args, reasoning)
+        out.append(example(ctx, request, payload))
+    return out
+
+def gen_out_of_scope(n: int) -> list[dict]:
+    """
+    Sistem dışı (out-of-scope) istekler — nazik red + capability listesi.
+    """
+    out = []
+    REQUESTS = [
+
+        "nasılsın?",
+        "olm bişey anlatsana",
+        "espri yap",
+        "kim kazandı maç?",
+        "yapay zekayla sohbet edelim",
+        "bana motivasyon ver",
+        "bir hikaye anlat",
+        "bugün nasıl geçti?",
+
+        "öğrencilerin notlarını göster",
+        "Ahmet'in matematikten kaç aldığını söyle",
+        "9A'nın devamsızlığını göster",
+        "sınav programı oluştur",
+        "anket yap",
+        "öğrenci listesi getir",
+        "veli toplantısı planla",
+        "öğrenci başarı raporu çıkar",
+
+        "öğretmen maaşları ne kadar?",
+        "bordro hesapla",
+        "okul masraflarını göster",
+        "bütçe planla",
+        "fatura ödeme listesi",
+
+        "Ahmet hocaya mesaj at",
+        "velilere email gönder",
+        "SMS at tüm öğretmenlere",
+        "WhatsApp grubu oluştur",
+        "veli toplantısı bildir",
+        "duyuru yaz öğretmenlere",
+
+        "Google Calendar'a aktar",
+        "Outlook'a sync et",
+        "kişisel takvimime ekle",
+        "iCal export yap",
+        "Apple Calendar'a bağla",
+
+        "Python kodu yaz",
+        "İngilizce'ye çevir şu cümleyi",
+        "şu metni özetle",
+        "matematik problemi çöz",
+        "react component yaz",
+        "SQL sorgu yaz",
+        "AI olarak kendini tanıt",
+        "hangi modelsin sen?",
+        "hangi versiyonu kullanıyorsun?",
+        "OpenAI mi Anthropic mi?",
+
+        "hava nasıl yarın?",
+        "şu sayfayı tara ve özet ver",
+        "PDF rapor üret",
+        "öğretmen değerlendirme formu hazırla",
+    ]
+    ANSWERS = [
+        "Bunu yapamam — ben sadece ders programı düzenliyorum. Şunları yapabilirim: kısıtlama ekle, öğretmen/sınıf/derslik ekle, program üret, slot kilitle, ders değiştir.",
+        "Maalesef bu konuda yardımcı olamam. Görevim ders programı oluşturmak. İstersen 'Ahmet hoca cuma yok' gibi bir kısıtlama veya 'Lab1 dersliği ekle' gibi bir veri işlemi yapabilirim.",
+        "Bu sistemin alanı dışında. Ders programı yönetimi yapıyorum: program üret, kısıtlama ekle, öğretmen düzenle, slot kilitle. Bunlardan biriyle yardımcı olabilirim.",
+        "Bu konuda yardımcı olamam — sadece ders programı oluşturma/düzenleme yapıyorum. Kısıtlama, slot, öğretmen, sınıf, derslik işlemleri için buradayım.",
+        "Üzgünüm, bu benim görev alanım değil. Ders programı üretimi, kısıtlama yönetimi, slot düzenleme ve veri girişi konularında yardım edebilirim.",
+        "Bunu yapma yetkim yok — ben ders programı asistanıyım. Program üret, kısıtlama ekle, ders/öğretmen/derslik değiştir, çizelge sorgula gibi şeyler yapabilirim.",
+        "Yapamam bunu. Ders programı oluşturucuyum: kısıtlama tanımla, FET solver çalıştır, slot kilitle, aktivite ekle/sil — bu konularda yardımcı olurum.",
+        "Görev tanımım dışında. Yalnızca ders programı oluşturmak ve düzenlemek için tasarlandım. 'Programı üret', 'Lab1 derslik ekle' gibi taleplerle yardımcı olabilirim.",
+    ]
+    for _ in range(n):
+        request = random.choice(REQUESTS)
+        answer = random.choice(ANSWERS)
+        ctx = make_context()
+        payload = {
+            "kind": "query",
+            "answer": answer,
+            "outOfScope": True,
+            "confidence": round(random.uniform(0.92, 0.98), 2),
+        }
+        out.append(example(ctx, request, payload))
+    return out
+
+def gen_disambiguation(n: int) -> list[dict]:
+    """
+    Aynı isim 2+ kez geçtiğinde model needsClarification:true ile soru sorar.
+    """
+    out = []
+    AMBIG_FIRST_NAMES = ["Ahmet", "Mehmet", "Ayşe", "Fatma", "Murat", "Ali", "Selin", "Emine", "Hasan", "Zeynep"]
+    SURNAMES_A = ["Yılmaz", "Demir", "Kaya", "Aksoy", "Yıldız", "Arslan"]
+    SURNAMES_B = ["Öztürk", "Çelik", "Şahin", "Polat", "Korkmaz", "Doğan", "Karaca", "Aydın"]
+
+    def teacher_scenario():
+        first = random.choice(AMBIG_FIRST_NAMES)
+        t1 = f"{first} {random.choice(SURNAMES_A)}"
+        t2_sur = random.choice(SURNAMES_B)
+        t2 = f"{first} {t2_sur}"
+        while t2 == t1:
+            t2 = f"{first} {random.choice(SURNAMES_B)}"
+        ctx = make_context(extra_teachers=[t1, t2])
+        day = random.choice(DAYS_FULL)
+        subject = random.choice(SUBJECTS)
+        cls = f"{random.choice(['9','10','11','12'])}{random.choice('ABCDEF')}"
+        templates = [
+            f"{first} hoca {day} yok",
+            f"{first} öğretmen {day} müsait değil",
+            f"{first} hoca az ders alıyor, ona {subject} dersi ekle",
+            f"{first} hanım'a {cls}'da {subject} dersi ekle",
+            f"{first} Bey'in saatlerini göster",
+            f"{first} öğretmeni sil",
+            f"{first} öğretmen {day} günü izinli",
+            f"{first}'in programını ver",
+            f"{first} hocaya {cls} sınıfında ders ata",
+            f"{first} öğretmenin günlük max 4 ders olsun",
+            f"{first} hoca ile {cls} sınıfı çakışmasın",
+            f"{first}'in {day} dersleri başka güne taşınsın",
+            f"{first} hocam {day} ilk derste olmasın",
+            f"{first}'i {subject} branşına ata",
+            f"{first} hoca son derste olmasın",
+        ]
+        request = random.choice(templates)
+        answer_variants = [
+            f"İki {first} var: '{t1}' ve '{t2}'. Hangisini kastediyorsunuz?",
+            f"'{first}' isminde 2 öğretmen var — '{t1}' mı '{t2}' mi?",
+            f"{first} olarak '{t1}' ve '{t2}' var. Hangisini kastettiniz?",
+            f"İki tane {first} öğretmen mevcut: '{t1}' ve '{t2}'. Hangisi?",
+            f"'{first}' adında iki hoca var: '{t1}' ve '{t2}'. Lütfen netleştirin.",
+        ]
+        payload = {
+            "kind": "query",
+            "answer": random.choice(answer_variants),
+            "data": [{"option": t1}, {"option": t2}],
+            "needsClarification": True,
+            "confidence": round(random.uniform(0.35, 0.55), 2),
+        }
+        return ctx, request, payload
+
+    def class_scenario():
+        year = random.choice(["9", "10", "11"])
+        letter = random.choice("ABC")
+        c1 = f"{year}{letter}"
+        c2 = f"{year}{letter}/Sosyal"
+        ctx = make_context(extra_classes=[c1, c2])
+        day = random.choice(DAYS_FULL)
+        subject = random.choice(SUBJECTS)
+        templates = [
+            f"{c1} günde 8 ders alsın",
+            f"{c1}'ye {subject} ekle",
+            f"{c1}'nın programını göster",
+            f"{c1} {day} 8 saat ders alsın",
+            f"{c1}'da {subject} son derste olsun",
+            f"{c1} {day} ilk derste boş olsun",
+            f"{c1}'a {subject} dersi yerleştir",
+            f"{c1}'nın {day} programı nasıl?",
+        ]
+        request = random.choice(templates)
+        answer_variants = [
+            f"İki '{c1}' var: '{c1}' ve '{c2}'. Hangisini kastediyorsunuz?",
+            f"'{c1}' adında iki sınıf var — '{c1}' mı '{c2}' mi?",
+            f"{c1} olarak '{c1}' ve '{c2}' mevcut. Hangisi?",
+            f"İki tane {c1} sınıfı var: '{c1}' ve '{c2}'. Lütfen netleştirin.",
+        ]
+        payload = {
+            "kind": "query",
+            "answer": random.choice(answer_variants),
+            "data": [{"option": c1}, {"option": c2}],
+            "needsClarification": True,
+            "confidence": round(random.uniform(0.35, 0.55), 2),
+        }
+        return ctx, request, payload
+
+    def room_scenario():
+        base = random.choice(["Lab1", "Salon", "Lab2", "Stüdyo"])
+        suffix_a = random.choice(["Fizik", "Kimya", "Bilgisayar", "Biyoloji"])
+        suffix_b = random.choice(["Bilgisayar", "Yabancı Dil", "Elektronik", "Müzik"])
+        while suffix_a == suffix_b:
+            suffix_b = random.choice(["Bilgisayar", "Yabancı Dil", "Elektronik", "Müzik"])
+        r1 = f"{base} {suffix_a}"
+        r2 = f"{base} {suffix_b}"
+        ctx = make_context()
+        if r1 not in ctx["rooms"]:
+            ctx["rooms"].append(r1)
+        if r2 not in ctx["rooms"]:
+            ctx["rooms"].append(r2)
+        day = random.choice(DAYS_FULL)
+        templates = [
+            f"{base} {day} yok",
+            f"{base} dersliğine Fizik ekle",
+            f"{base}'i sil",
+            f"{base} {day} kapalı olsun",
+            f"{base} dersliği müsait değil",
+        ]
+        request = random.choice(templates)
+        answer_variants = [
+            f"İki '{base}' var: '{r1}' ve '{r2}'. Hangisini kastediyorsunuz?",
+            f"'{base}' adında iki derslik var — '{r1}' mı '{r2}' mi?",
+            f"{base} olarak '{r1}' ve '{r2}' mevcut. Hangisi?",
+        ]
+        payload = {
+            "kind": "query",
+            "answer": random.choice(answer_variants),
+            "data": [{"option": r1}, {"option": r2}],
+            "needsClarification": True,
+            "confidence": round(random.uniform(0.35, 0.55), 2),
+        }
+        return ctx, request, payload
+
+    def subject_scenario():
+        pairs = [
+            ("Edebiyat", "Türk Edebiyatı", "Çağdaş Türk Edebiyatı"),
+            ("Beden", "Beden Eğitimi", "Beden ve Sağlık"),
+            ("Tarih", "Türk Tarihi", "Çağdaş Tarih"),
+            ("Matematik", "Temel Matematik", "İleri Matematik"),
+            ("Fizik", "Genel Fizik", "Uygulamalı Fizik"),
+        ]
+        short, s1, s2 = random.choice(pairs)
+        ctx = make_context()
+        if s1 not in ctx["subjects"]:
+            ctx["subjects"].append(s1)
+        if s2 not in ctx["subjects"]:
+            ctx["subjects"].append(s2)
+        cls = f"{random.choice(['9','10','11','12'])}{random.choice('ABCDEF')}"
+        templates = [
+            f"{short} dersi son saatte olsun",
+            f"{short} hocası kim?",
+            f"{cls}'ye {short} dersi ekle",
+            f"{short} dersi günde max 2 saat",
+            f"{short} dersi ilk derste olmasın",
+        ]
+        request = random.choice(templates)
+        answer_variants = [
+            f"İki '{short}' dersi var: '{s1}' ve '{s2}'. Hangisini kastediyorsunuz?",
+            f"'{short}' olarak '{s1}' ve '{s2}' var — hangisi?",
+            f"{short} adında 2 branş mevcut: '{s1}' ve '{s2}'. Lütfen netleştirin.",
+        ]
+        payload = {
+            "kind": "query",
+            "answer": random.choice(answer_variants),
+            "data": [{"option": s1}, {"option": s2}],
+            "needsClarification": True,
+            "confidence": round(random.uniform(0.35, 0.55), 2),
+        }
+        return ctx, request, payload
+
+    for _ in range(n):
+        r = random.random()
+        if r < 0.50:
+            ctx, request, payload = teacher_scenario()
+        elif r < 0.75:
+            ctx, request, payload = class_scenario()
+        elif r < 0.87:
+            ctx, request, payload = room_scenario()
+        else:
+            ctx, request, payload = subject_scenario()
+        out.append(example(ctx, request, payload))
+    return out
 
 GENERATORS = {
     "teacher_not_available":      (gen_teacher_not_available, 250),
@@ -3476,13 +4527,13 @@ GENERATORS = {
     "max_total_activities_from_set":              (gen_max_total_activities_from_set, 50),
     "data_mutations":                             (gen_data_mutations, 200),
     "conversational_wizard":                      (gen_conversational_wizard, 300),
-    # ── Yeni capability'ler (capability parity) ──
+
     "run_solver":                                 (gen_run_solver, 250),
     "per_class_subject_room":                     (gen_per_class_subject_room, 250),
     "constraint_relax":                           (gen_constraint_relax, 200),
     "set_setting":                                (gen_set_setting, 100),
     "generic_add_constraint":                     (gen_generic_add_constraint, 150),
-    # ── Paket 1+2+3 ──
+
     "split_activities":                           (gen_split_activities, 150),
     "set_timetable_slot":                         (gen_set_timetable_slot, 100),
     "lock_unlock_slot":                           (gen_lock_unlock_slot, 80),
@@ -3491,16 +4542,47 @@ GENERATORS = {
     "export_timetable":                           (gen_export_timetable, 80),
     "validate_schedule":                          (gen_validate_schedule, 60),
     "timetable_stats":                            (gen_timetable_stats, 60),
+
+    "timetable_query":                            (gen_timetable_query, 300),
+    "filtered_activity_update":                   (gen_filtered_activity_update, 150),
+    "filtered_activity_add":                      (gen_filtered_activity_add, 100),
+
+    "slot_swap":                                  (gen_slot_swap, 120),
+    "pair_subjects_consecutive":                  (gen_pair_subjects_consecutive, 100),
+    "subject_spread_days":                        (gen_subject_spread_days, 80),
+    "page_navigation":                            (gen_page_navigation, 60),
+
+    "multi_step_planning":                        (gen_multi_step_planning, 100),
+    "out_of_scope":                               (gen_out_of_scope, 120),
+    "disambiguation":                             (gen_disambiguation, 100),
 }
 
-
 SCALE = int(os.environ.get("DPO_DATASET_SCALE", "22"))
+TARGET_MIN = int(os.environ.get("DPO_DATASET_TARGET_MIN", "2000"))
+TARGET_MAX = int(os.environ.get("DPO_DATASET_TARGET_MAX", "4000"))
 
+def compute_count(base_count: int) -> int:
+    """Per-generator adaptif scale: küçükleri yükselt, büyükleri düşür.
+
+    Kategori dengesizliğini azaltmak için tek bir global SCALE yerine
+    her generator'ın final örnek sayısını [TARGET_MIN, TARGET_MAX]
+    aralığına clamp ediyoruz. Bu sayede max:min oranı ~3:1'in altına
+    iniyor (önceden 6600:1100 gibi 6:1+ oranlar vardı).
+
+    SCALE env var backward-compat amacıyla korunuyor: naive = base * SCALE,
+    sonra [TARGET_MIN, TARGET_MAX] aralığına clamp.
+    """
+    naive = base_count * SCALE
+    if naive < TARGET_MIN:
+        return TARGET_MIN
+    if naive > TARGET_MAX:
+        return TARGET_MAX
+    return naive
 
 def main():
     total = 0
     for name, (gen, n) in GENERATORS.items():
-        examples = gen(n * SCALE)
+        examples = gen(compute_count(n))
         path = DS / f"{name}.jsonl"
         with path.open("w", encoding="utf-8") as f:
             for ex in examples:
@@ -3510,7 +4592,6 @@ def main():
 
     print(f"\nToplam: {total} örnek üretildi.")
 
-    # Train/test split (85/15)
     all_examples = []
     for name in GENERATORS:
         with (DS / f"{name}.jsonl").open(encoding="utf-8") as f:
@@ -3533,7 +4614,6 @@ def main():
             f.write(line + "\n")
     print(f"\nTrain: {len(train)} örnek → {split_dir / 'train.jsonl'}")
     print(f"Eval:  {len(evals)} örnek → {split_dir / 'eval.jsonl'}")
-
 
 if __name__ == "__main__":
     main()

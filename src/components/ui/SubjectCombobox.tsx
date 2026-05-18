@@ -4,12 +4,6 @@ import { cn } from '../../lib/cn';
 import { tr } from '../../lib/i18n';
 import type { Subject } from '../../lib/types';
 
-/**
- * Türkçe-uyumlu normalize: küçük harf (tr-TR locale ile ki "İ" → "i"),
- * combining diacritic'leri sıyır. "Türkçe" → "turkce", "Şükriye" → "sukriye".
- *
- * Not: Unicode combining mark range U+0300..U+036F için regex.
- */
 function normalize(s: string): string {
   return s
     .toLocaleLowerCase('tr-TR')
@@ -18,34 +12,15 @@ function normalize(s: string): string {
 }
 
 export type SubjectComboboxProps = {
-  /** Mevcut seçili subject id'leri */
   value: number[];
   onChange: (ids: number[]) => void;
-  /** Tüm subject seçenekleri */
   subjects: Subject[];
-  /**
-   * Listede olmayan bir isim Enter ile eklendiğinde çağırılır.
-   * Başarılıysa yeni Subject döner; null = oluşturulamadı.
-   */
   onCreateSubject: (name: string) => Promise<Subject | null>;
   id?: string;
   placeholder?: string;
   disabled?: boolean;
 };
 
-/**
- * Subject combobox — autocomplete + chip + yeni-yarat.
- *
- * Davranış:
- *  - focus / type ile dropdown açılır
- *  - "türk" → "Türkçe" suggest (substring + Türkçe-deburred eşleşme)
- *  - dropdown'dan seçince chip olarak eklenir, input temizlenir
- *  - listede olmayan ad + Enter → "+ Yeni ders ekle: X" satırı çıkar;
- *    tıkla veya tekrar Enter ile yaratılır
- *  - chip'lerden × ile çıkarılabilir
- *  - klavye: ↑↓ ile gezin, Enter ile seç, Esc ile kapat, Backspace
- *    (input boşken) son chip'i çıkarır
- */
 export function SubjectCombobox({
   value,
   onChange,
@@ -78,10 +53,6 @@ export function SubjectCombobox({
     return available.filter((s) => normalize(s.name).includes(normQuery));
   }, [subjects, value, normQuery]);
 
-  /**
-   * Tam eşleşen bir subject var mı? (case+diakritik-insensitive)
-   * Varsa "yeni yarat" satırı gösterilmez.
-   */
   const exactMatchExists = useMemo(() => {
     if (!normQuery) return true;
     return subjects.some((s) => normalize(s.name) === normQuery);
@@ -89,14 +60,9 @@ export function SubjectCombobox({
 
   const showCreate = !!query.trim() && !exactMatchExists;
 
-  /**
-   * Dropdown'daki seçilebilir öğelerin toplam sayısı (suggestions + create
-   * satırı). Klavye navigasyonu bu aralıkta dönmeli.
-   */
   const totalItems = suggestions.length + (showCreate ? 1 : 0);
 
   useEffect(() => {
-    // query değişince highlight'ı baştan başlat
     setHighlight(0);
   }, [query]);
 
@@ -116,7 +82,6 @@ export function SubjectCombobox({
     onChange([...value, id]);
     setQuery('');
     setHighlight(0);
-    // Açık tut — kullanıcı arka arkaya birden fazla eklemek isteyebilir
     inputRef.current?.focus();
   }
 
@@ -131,7 +96,6 @@ export function SubjectCombobox({
     try {
       const created = await onCreateSubject(trimmed);
       if (created) {
-        // Subject zaten value içine eklendi olabilir mi? Hayır, yeni id geldi.
         onChange([...value, created.id]);
         setQuery('');
         setHighlight(0);
@@ -165,7 +129,6 @@ export function SubjectCombobox({
     } else if (e.key === 'Escape') {
       setOpen(false);
     } else if (e.key === 'Backspace' && query === '' && value.length > 0) {
-      // Boş input'ta backspace son chip'i siler
       removeSubject(value[value.length - 1]!);
     }
   }

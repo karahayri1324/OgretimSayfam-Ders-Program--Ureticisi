@@ -94,6 +94,7 @@ const labelMap: Record<ConstraintType, string> = {
   STUDENTS_EARLY_MAX_BEGINNINGS: 'Tüm sınıflar geç başlama azami sayısı',
   STUDENTS_MAX_HOURS_DAILY: 'Tüm sınıflar günlük maksimum ders saati',
   MAX_TOTAL_ACTIVITIES_FROM_SET: 'Aktivite grubunun toplam maksimum saati',
+  TWO_ACTIVITIES_CONSECUTIVE: 'İki aktivite peş peşe (ardışık)',
 };
 
 export function constraintTypeLabel(type: ConstraintType): string {

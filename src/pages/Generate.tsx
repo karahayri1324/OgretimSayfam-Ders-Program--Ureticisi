@@ -38,8 +38,6 @@ export default function Generate() {
     loadClasses();
   }, [loadLatest, loadSettings, loadActivities, loadTeachers, loadClasses]);
 
-  // Settings'ten gelen fetTimeLimitSec'e göre slider'ı senkronize et —
-  // kullanıcı slider'a dokunmadıysa (touched=false) güncelle.
   useEffect(() => {
     if (!timeLimitTouched && Number.isFinite(settings.fetTimeLimitSec)) {
       setTimeLimit(settings.fetTimeLimitSec);
@@ -66,8 +64,6 @@ export default function Generate() {
 
   const running = status === 'running';
 
-  // Önkoşul kontrolü — UI seviyesinde "Önce veri ekle" mesajı; IPC handler
-  // da aynı kontrolü yapar (defensive).
   const missingPrereqs: string[] = [];
   if (teachers.length === 0) missingPrereqs.push('Öğretmen tanımlı değil');
   if (classes.length === 0) missingPrereqs.push('Sınıf tanımlı değil');

@@ -8,7 +8,6 @@ import { parseTimetable } from '../electron/fet/xml-parser';
 import type { SchoolBundle } from '../electron/fet/types';
 
 function makeLargeSchool(): SchoolBundle {
-  // 5 gün × 8 saat
   const days = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'].map(
     (name, i) => ({ id: i + 1, name, orderIndex: i }),
   );

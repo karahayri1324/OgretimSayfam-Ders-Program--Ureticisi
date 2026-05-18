@@ -1,7 +1,3 @@
-/**
- * Constraint orkestratörü. Tüm constraint'leri handler'lara dispatch eder,
- * Time_Constraints_List / Space_Constraints_List için ayrılmış XML node'ları üretir.
- */
 
 import type { Constraint } from '../../../src/lib/types.js';
 import type { BuilderContext } from '../types.js';
@@ -31,7 +27,6 @@ export function buildAllConstraints(
   return { time, space };
 }
 
-/** Sadece time/space ayrımına bakmadan tüm node'ları döner (test/debug için). */
 export function buildTimeConstraints(
   constraints: Constraint[],
   ctx: BuilderContext,

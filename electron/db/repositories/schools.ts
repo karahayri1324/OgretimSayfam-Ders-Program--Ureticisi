@@ -49,7 +49,6 @@ export const schoolsRepo = {
     return rowToSchool(row);
   },
 
-  /** Aktif okul id'sini döner. IPC handler'ları her yerden bunu çağırır. */
   getActiveId(): number {
     return this.getActive().id;
   },

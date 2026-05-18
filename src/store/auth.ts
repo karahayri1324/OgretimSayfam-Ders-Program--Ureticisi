@@ -1,10 +1,5 @@
 import { create } from 'zustand';
 
-/**
- * Basit local auth state — şimdilik gerçek backend yok.
- * Guest modu test için, login/register placeholder.
- * Kararlar localStorage'a yazılır ki refresh'te giriş ekranı tekrar gelmesin.
- */
 
 const STORAGE_KEY = 'osf-auth-v1';
 
@@ -39,7 +34,6 @@ function write(s: Persisted) {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
   } catch {
-    // sessizce yut
   }
 }
 
@@ -48,11 +42,8 @@ type AuthState = {
   guest: boolean;
   email: string | null;
   name: string | null;
-  /** Test/placeholder login — gerçek backend gelene kadar her şeyi kabul ediyor. */
   login: (email: string, _password: string) => Promise<void>;
-  /** Test/placeholder register. */
   register: (name: string, email: string, _password: string) => Promise<void>;
-  /** Misafir devam — local-only çalış. */
   continueAsGuest: () => void;
   logout: () => void;
 };

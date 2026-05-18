@@ -1,13 +1,3 @@
-/**
- * Split activities + per-day hours kabul testleri.
- *
- * - Split: aynı split_group_id'li iki aktivitenin FET XML'inde
- *   ConstraintActivitiesSameStartingTime ile birleştirildiğini doğrular ve
- *   üretilen timetable'da gerçekten aynı saatte olduklarını ispatlar.
- * - Per-day: bir gün için 5 saat, diğerleri 6 saat verildiğinde global
- *   Hours_List=6 olur ve kısa günün 6. saatine ConstraintBreakTimes
- *   eklenir; üretilen timetable o slot'ta hiç aktivite barındırmaz.
- */
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';

@@ -1,13 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { Day, Hour, Subject, TimetableSlot } from './types';
 
-/**
- * Görüntülenen timetable grid'ini export edilebilir tabloya çevirir.
- *
- * Renderer'da Timetable.tsx 3 view (class/teacher/room) içerir; her view tek
- * bir entity için (örn: 9A sınıfı) gün × saat matrisini gösterir. Bu modül
- * UI'daki aynı matrisi alır ve PDF/Excel/HTML için ortak tabloyu üretir.
- */
 
 const DAY_LABELS: Record<string, string> = {
   mon: 'Pazartesi',
@@ -43,9 +36,6 @@ function viewLabel(v: ViewMode): string {
   return 'Derslik';
 }
 
-/**
- * UI'daki gibi `${dayIndex}_${hourIndex}` anahtarlı bir slot haritası kurar.
- */
 function buildSlotMap(slots: TimetableSlot[]): Map<string, TimetableSlot> {
   const m = new Map<string, TimetableSlot>();
   for (const s of slots) m.set(`${s.dayIndex}_${s.hourIndex}`, s);

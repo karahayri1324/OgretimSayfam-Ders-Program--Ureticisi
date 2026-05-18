@@ -7,18 +7,9 @@ type LogLevel = 'INFO' | 'WARN' | 'ERROR';
 
 let cachedLogFile: string | null = null;
 
-/**
- * Kullanıcı dostu log dizini.
- *  - Packaged: ~/Documents/ÖğretimSayfam Ders Programı/loglar/
- *  - Dev/no app: cwd altında veya tmpdir fallback
- *
- * Buraya `paths.ts`'i import etmiyoruz çünkü logger çok erken çağrılabilir
- * (initDatabase/registerHandlers öncesi). Bağımsız hesaplıyoruz.
- */
 function resolveLogDir(): string {
   try {
     if (app?.getPath) {
-      // Documents altı tercih edilir — kullanıcı dostu konum.
       try {
         const docs = app.getPath('documents');
         return path.join(docs, 'ÖğretimSayfam Ders Programı', 'loglar');
@@ -27,9 +18,7 @@ function resolveLogDir(): string {
       }
     }
   } catch {
-    /* fallthrough */
   }
-  // Test / non-Electron ortamlar için fallback
   return path.join(os.tmpdir(), 'ders-program-olusturucu-logs');
 }
 
@@ -39,7 +28,6 @@ function getLogFile(): string {
   try {
     fs.mkdirSync(logDir, { recursive: true });
   } catch {
-    // sessiz geç — logger her zaman çalışmalı
   }
   const today = new Date().toISOString().slice(0, 10);
   cachedLogFile = path.join(logDir, `${today}.log`);

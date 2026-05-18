@@ -16,7 +16,6 @@ import Advanced from './pages/Advanced';
 import { useAuthStore } from './store/auth';
 
 export default function App() {
-  // Auth state — authed (gerçek/placeholder giriş) veya guest (misafir test) ise app'a giriş
   const allowed = useAuthStore((s) => s.authed || s.guest);
 
   if (!allowed) {

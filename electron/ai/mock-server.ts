@@ -7,18 +7,6 @@ import type {
 } from '../../src/lib/types.js';
 import { executeTool, type ToolResult } from './tools.js';
 
-/**
- * Mock AI sunucusu — gerçek LLM olmadan yerel test/develop için kalıp eşleme yapar.
- *
- * Stratejimiz:
- *   1. Türkçe metni normalize et (lowercase + boşluk).
- *   2. Sırayla bilinen pattern'leri dene; eşleşen pattern bulunduğunda
- *      bir AIConstraint üret, isim referanslarını context içinde fuzzy match et.
- *   3. Hiçbir pattern eşleşmezse low-confidence "anlayamadım" yanıtı dön.
- *
- * Bu dosyanın "AI"ya benzemesi gerekmiyor — production'da yerini gerçek
- * fine-tuned model alacak. Şu an deterministik regex/keyword tabanlı.
- */
 
 export type AIContext = {
   teachers: string[];
@@ -27,10 +15,6 @@ export type AIContext = {
   rooms: string[];
   days: string[];
   hoursPerDay: number;
-  /**
-   * Aktif kısıtlamalar — AI'nın "şu kısıtlamayı 100→70 yap" tarzı önerileri
-   * için. Opsiyonel: tüm prompt'lar context tüketmiyor.
-   */
   constraints?: Array<{
     id: number;
     type: string;
@@ -99,7 +83,6 @@ const WORD_NUMBERS_CARDINAL: Record<string, number> = {
   on: 10,
 };
 
-/** TR diakritik insensitive normalize. */
 function deburr(s: string): string {
   return s
     .toLocaleLowerCase('tr')
@@ -115,7 +98,6 @@ function deburr(s: string): string {
 function normalizeDay(token: string): string | null {
   const t = token.toLocaleLowerCase('tr');
   if (DAY_NORMALIZE[t]) return DAY_NORMALIZE[t];
-  // diakritik insensitive ikinci deneme
   const d = deburr(token);
   for (const [k, v] of Object.entries(DAY_NORMALIZE)) {
     if (deburr(k) === d) return v;
@@ -123,10 +105,8 @@ function normalizeDay(token: string): string | null {
   return null;
 }
 
-/** Metin içindeki tüm gün referanslarını sırayla bul. */
 function findDays(text: string): string[] {
   const found: string[] = [];
-  // Türkçe ek ayırıcısı olarak apostrof ve diğer noktalama da bölücü sayılır.
   const tokens = text.split(/[\s,.;:'"`]+/).filter(Boolean);
   for (const tok of tokens) {
     const d = normalizeDay(tok);
@@ -134,7 +114,6 @@ function findDays(text: string): string[] {
       found.push(d);
       continue;
     }
-    // "Cumaya", "Cumadan" gibi Türkçe ek eklenmiş haller — baş kısmı eşleştir
     const stripped = tok.replace(
       /(da|de|ta|te|dan|den|tan|ten|ya|ye|a|e|nin|nın|nun|nün|n[ıi]n)$/i,
       '',
@@ -147,17 +126,14 @@ function findDays(text: string): string[] {
   return found;
 }
 
-/** "2." "5." "ikinci" "üçüncü" gibi saat numaralarını çıkar. */
 function findHours(text: string): number[] {
   const found = new Set<number>();
-  // "1.", "2." numaralı saatler
   const re = /(\d{1,2})\s*\./g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const n = parseInt(m[1]!, 10);
     if (n >= 1 && n <= 20) found.add(n);
   }
-  // kelime karşılıkları ("ikinci", "beşinci"...)
   const lower = text.toLocaleLowerCase('tr');
   for (const [word, n] of Object.entries(WORD_NUMBERS)) {
     const pat = new RegExp(`\\b${word}\\b`);
@@ -221,10 +197,6 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/**
- * fuzzyMatch'in çoklu sürümü — bir mesajda geçen TÜM aday isimleri döner.
- * "Ahmet ve Ayşe öğretmenlerini sil" → ["Ahmet", "Ayşe"]
- */
 function fuzzyMatchMany(text: string, candidates: string[]): string[] {
   if (candidates.length === 0) return [];
   const lowText = deburr(text);
@@ -265,8 +237,6 @@ function extractRenameTarget(text: string, currentName: string): string | null {
       return target;
     }
   }
-  // "Y olarak değiştir" — current sonrası taranamadıysa fallback: tüm metinde
-  // "<token> olarak" geçen ilk grubu al.
   const re2 = /([A-Za-z0-9çğıöşüÇĞİÖŞÜ._-]{1,40})\s+(?:olarak|olarak\s+yap)\b/i;
   const m2 = re2.exec(text);
   if (m2 && m2[1]) {
@@ -278,7 +248,6 @@ function extractRenameTarget(text: string, currentName: string): string | null {
   return null;
 }
 
-/** Weight tahmini — mesajdaki dil tonuna göre. */
 function inferWeight(text: string): number {
   const lower = text.toLocaleLowerCase('tr');
   if (/(kesinlikle|asla|yasak|olmaz)/.test(lower)) return 100;
@@ -289,35 +258,28 @@ function inferWeight(text: string): number {
   return 100;
 }
 
-/** Tüm saatler için (1..hoursPerDay) günün slot listesini üretir. */
 function buildFullDaySlots(day: string, hoursPerDay: number): Slot[] {
   const out: Slot[] = [];
   for (let h = 1; h <= hoursPerDay; h++) out.push({ day, hour: h });
   return out;
 }
 
-/** Birden çok gün × verilen saatler için cartesian slot listesi. */
 function buildSlots(days: string[], hours: number[]): Slot[] {
   const out: Slot[] = [];
   for (const d of days) for (const h of hours) out.push({ day: d, hour: h });
   return out;
 }
 
-// --- Pattern detectors --------------------------------------------------------
 
 type Detector = (text: string, lower: string, ctx: AIContext) =>
   | { constraint: AIConstraint; warnings?: string[]; unresolved?: string[] }
   | null;
 
-/** 1) "X hoca Y günü yok/olmasın/müsait değil"  (saat verilmemiş → tüm gün) */
 const detectTeacherNotAvailableFullDay: Detector = (text, lower, ctx) => {
-  // "hoca", "öğretmen", "ogretmen" geçiyor mu?
   const teacherTrigger = /(hoca|ogretmen|öğretmen)/.test(lower);
   if (!teacherTrigger) return null;
-  // not-available trigger: yok, olmasın, müsait değil
   const noTrigger = /(yok\b|olmasin|olmasın|musait\s+degil|müsait\s+değil|gelmez|gelmesin)/.test(lower);
   if (!noTrigger) return null;
-  // saat referansı varsa bu pattern değil (sonraki ele alacak)
   if (/\d+\s*\.\s*ders|\d+\s*\.\s*saat/.test(lower)) return null;
   if (Object.keys(WORD_NUMBERS).some((w) => new RegExp(`\\b${w}\\b`).test(lower))) return null;
 
@@ -738,6 +700,18 @@ export function mockParseSync(
   const exp = detectExport(text, lowerDeburr, context);
   if (exp) return exp;
 
+  // 0.52) Slot swap — "9A salı 3 ile cuma 5 yer değiştirsin"
+  const swap = detectSwapSlots(text, lowerDeburr, context);
+  if (swap) return swap;
+
+  // 0.53) Pair consecutive — "Fizik ve Matematik peş peşe olsun"
+  const pair = detectPairConsecutive(text, lowerDeburr, context);
+  if (pair) return pair;
+
+  // 0.54) Navigate — "Öğretmenler sayfasına geç"
+  const nav = detectNavigate(text, lowerDeburr);
+  if (nav) return nav;
+
   // 0.5) Belirsiz kısa istek ("Öğretmen ekle", "Sil", "Ders ekle") — netleştir.
   //      Data_mutation'dan önce çalışmalı, aksi takdirde "Öğretmen" adında
   //      bir öğretmen yaratmaya çalışır (extractPersonName "Öğretmen"i ad sayar).
@@ -1038,7 +1012,6 @@ function detectSummaryOrListQuery(
       };
     }
   }
-  // "özet", "şu anda durum ne", "rapor", "kısa bilgi"
   if (
     /(\bozet\b|özet|durum\s+ne|durumu\s+ne|rapor|kisa\s+bilgi|kısa\s+bilgi|toplu\s+bak|\bdurum\b|\btoplam\b)/.test(
       lowerDeburr,
@@ -1850,11 +1823,6 @@ function detectDataMutation(
     }
   }
 
-  // "Matematik, Fizik, Türkçe derslerini ekle" / "Matematik ve Fizik ekle"
-  // Çoklu branş — virgül veya "ve" ile ayrılmış isim listesi.
-  // Gate: ya "ders/branş" anahtarı geçiyor, ya da cümle açıkça çoklu (virgül/
-  // "ve") + "ekle" ifadesi içeriyor ve diğer entity tipleri (öğretmen, sınıf,
-  // derslik) bahsedilmemiş.
   const hasSubjectKeyword =
     /(brans|branş|ders|dersi|dersini|dersleri|derslerini|brans[ıi]|branş[ıi])/.test(
       lower,
@@ -1865,7 +1833,7 @@ function detectDataMutation(
     /(ekle|ilave|olustur|oluştur)/.test(lowerDeburr) &&
     !/(hoca|ogretmen|öğretmen|sinif|sınıf|derslik|oda|salon|lab)/.test(lower) &&
     !/saat/.test(lower) &&
-    !/\b\d/.test(text) // "9A ekle" gibi sınıf adı içeren cümleyi atla
+    !/\b\d/.test(text)
   ) {
     const subjectNames = extractSubjectList(text, ctx);
     if (subjectNames.length > 1) {
@@ -1953,12 +1921,7 @@ function buildMutation(actions: DataMutationAction[], explanation: string): AIRe
   };
 }
 
-/**
- * "Lab1 dersliği" / "'Lab1' dersliği ekle" → "Lab1"
- * Pattern: keyword'den önce gelen ad ya da tırnaklar.
- */
 function extractQuotedOrAfter(text: string, keyword: RegExp): string | null {
-  // tırnaklı: 'Lab1', "Lab1"
   const quoted = text.match(/['"`]([^'"`]{1,40})['"`]/);
   if (quoted) return quoted[1]!.trim();
   // "Lab1 dersliği" pattern — keyword'den ÖNCE 1-3 kelime
@@ -2498,18 +2461,6 @@ function detectRelaxRequest(
   };
 }
 
-/**
- * "Programı üret" / "şimdi başlat" / "150 saniyede üret" → run_solver kindi.
- *
- * Süre parsing:
- *   - "150 saniye / 150 sn / 2 dakika / 5 dk" → timeLimitSec
- *   - yoksa undefined (Generate sayfası settings.fetTimeLimitSec'i kullanır)
- *
- * Trigger:
- *   - "programi uret", "üret", "şimdi baslat", "çalıştır", "olustur"
- *   - tek başına "uret" çok yaygın, false positive engellemek için "programı"
- *     veya "şimdi/hemen/artık" gibi ek söz aranır.
- */
 function detectRunSolverRequest(
   text: string,
   lowerDeburr: string,
@@ -2533,12 +2484,10 @@ function detectRunSolverRequest(
     );
   if (!isStrong) return null;
 
-  // "ekle / kayit / kayıt" varsa — bu bir CRUD intent'idir, run_solver değil
   if (/(ekle|ilave|kayit|kayıt|sil|kaldir|kaldır)/.test(lowerDeburr)) {
     return null;
   }
 
-  // Süre yakalama
   let timeLimitSec: number | undefined;
   const lowerTr = text.toLocaleLowerCase('tr');
   const m = lowerTr.match(
@@ -2766,9 +2715,6 @@ function detectSetTimetableSlot(
   };
 }
 
-/**
- * "Ahmet hocanın 9A fiziğini Cem'e ver" / "9A matematikte Ahmet yerine Selim"
- */
 function detectSubstituteTeacher(
   text: string,
   lowerDeburr: string,
@@ -2780,7 +2726,6 @@ function detectSubstituteTeacher(
   if (!hasSubKeywords) return null;
   if (/(ekle|sil|kaldir|kaldır)/.test(lowerDeburr)) return null;
 
-  // Class
   const classMatch = lowerDeburr.match(/\b(\d{1,2})\s*([a-z])\b/);
   if (!classMatch) return null;
   const className = `${classMatch[1]}${classMatch[2]!.toUpperCase()}`;
@@ -2932,4 +2877,176 @@ function parseLeadingInt(text: string): number | null {
   const n = parseInt(m[1]!, 10);
   if (n < 1 || n > 20) return null;
   return n;
+}
+
+/**
+ * "9A salı 3 ile cuma 5 yer değiştirsin" → swap_timetable_slots
+ * İki (class, day, hour) çiftini parse eder.
+ */
+function detectSwapSlots(
+  text: string,
+  lowerDeburr: string,
+  _ctx: AIContext,
+): AIResponse | null {
+  const hasSwap =
+    /(yer\s+degis|yer\s+değiş|swap|degistir|değiştir).*(slot|ders|saat)/.test(lowerDeburr) ||
+    /(ile|le|la).*(yer\s+degis|yer\s+değiş)/.test(lowerDeburr);
+  if (!hasSwap) return null;
+
+  // İki sınıf + iki gün + iki saat çıkar
+  const classMatches = [...lowerDeburr.matchAll(/\b(\d{1,2})\s*([a-z])\b/g)];
+  if (classMatches.length < 1) return null;
+
+  // Gün eşleştirme
+  const days: string[] = [];
+  for (const [key, full] of Object.entries(DAY_NORMALIZE)) {
+    if (lowerDeburr.includes(key)) {
+      if (!days.includes(full)) days.push(full);
+    }
+  }
+  if (days.length < 2) return null;
+
+  // Saat eşleştirme
+  const hourMatches = [...text.matchAll(/(\d{1,2})\.?\s*(?:ders|saat)/g)];
+  if (hourMatches.length < 2) return null;
+  const hours = hourMatches.slice(0, 2).map((m) => parseInt(m[1]!, 10));
+  if (hours.some((h) => !Number.isFinite(h) || h < 1 || h > 20)) return null;
+
+  // İkinci sınıf yoksa aynısı varsay (aynı sınıf içi swap)
+  const class1 = `${classMatches[0]![1]}${classMatches[0]![2]!.toUpperCase()}`;
+  const class2 =
+    classMatches.length >= 2
+      ? `${classMatches[1]![1]}${classMatches[1]![2]!.toUpperCase()}`
+      : class1;
+
+  return {
+    kind: 'data_mutation',
+    actions: [
+      {
+        op: 'swap_timetable_slots',
+        params: {
+          slot1: { class: class1, day: days[0], hour: hours[0] },
+          slot2: { class: class2, day: days[1], hour: hours[1] },
+        },
+        description: `${class1} ${days[0]}/${hours[0]} ↔ ${class2} ${days[1]}/${hours[1]}`,
+      },
+    ],
+    explanation:
+      `${class1} ${days[0]} ${hours[0]}. ders ile ${class2} ${days[1]} ${hours[1]}. ders'i ` +
+      `yer değiştireceğim. Her iki aktiviteye ACTIVITY_FIXED_TIME constraint eklenir; ` +
+      `programı yeniden üretince FET swap'i uygular.`,
+    requiresConfirmation: true,
+    confidence: 0.82,
+  };
+}
+
+function detectPairConsecutive(
+  text: string,
+  lowerDeburr: string,
+  ctx: AIContext,
+): AIResponse | null {
+  const hasConsecutive =
+    /(pes\s+pese|peş\s+peşe|ardisik|ardışık|hemen\s+ardin|hemen\s+ardın|art\s+arda|consecutive|bir\s+arada|yan\s+yana)/.test(
+      lowerDeburr,
+    );
+  if (!hasConsecutive) return null;
+  if (/blok\s+halinde|blok\s+ders/.test(lowerDeburr)) return null;
+
+  const subjects = extractSubjectList(text, ctx);
+  if (subjects.length < 2) return null;
+
+  const classMatch = lowerDeburr.match(/\b(\d{1,2})\s*([a-z])\b/);
+  let className: string | null = null;
+  if (classMatch) {
+    className = `${classMatch[1]}${classMatch[2]!.toUpperCase()}`;
+  } else if (ctx.classes.length === 1) {
+    className = ctx.classes[0]!;
+  } else {
+    // Sınıf belli değilse netleştir
+    return {
+      kind: 'query',
+      answer: `'${subjects[0]}' ve '${subjects[1]}' hangi sınıf için peş peşe olsun? Örnek: "9A için Fizik ve Matematik peş peşe"`,
+      confidence: 0.7,
+    };
+  }
+
+  return {
+    kind: 'data_mutation',
+    actions: [
+      {
+        op: 'pair_subjects_consecutive',
+        params: {
+          class: className,
+          subject1: subjects[0],
+          subject2: subjects[1],
+        },
+        description: `${className} → '${subjects[0]}' hemen ardından '${subjects[1]}'`,
+      },
+    ],
+    explanation:
+      `${className} sınıfında '${subjects[0]}' bittikten hemen sonra '${subjects[1]}' başlamasını ` +
+      `zorunlu kılan TWO_ACTIVITIES_CONSECUTIVE kısıtlaması ekleyeceğim. ` +
+      `FET bu iki aktiviteyi aynı günde peş peşe yerleştirecek.`,
+    requiresConfirmation: true,
+    confidence: 0.85,
+  };
+}
+
+/**
+ * "Öğretmenler sayfasına geç" → navigate_to
+ *
+ * SIKI: hem "sayfa/ekran/page" gibi navigation anchor hem de uygun verb gerekli.
+ * Aksi takdirde "Beden eğitimi son derste olsun" veya "Kaç dersliğim var?"
+ * gibi başka intent'ler false positive olur.
+ */
+function detectNavigate(text: string, lowerDeburr: string): AIResponse | null {
+  // Anchor: explicit "sayfa" veya "ekran" veya "page" + navigation verb
+  const hasPageAnchor =
+    /\b(sayfa(?:ya|sina|sina|sını|sinin|sının|si|sı)?|ekran(?:a|ina|ına|ini|ını|i|ı)?|page)\b/.test(
+      lowerDeburr,
+    );
+  if (!hasPageAnchor) return null;
+  const hasNavVerb =
+    /\b(gec|geç|git|gotur|götür|ac|aç|yonlendi|yönlendi|navigate|don|dön)\b/.test(
+      lowerDeburr,
+    );
+  if (!hasNavVerb) return null;
+
+  // CRUD niyeti varsa atla — "öğretmen sayfasına yeni ekle" gibi
+  if (/\b(ekle|sil|kaldir|kaldır|guncelle|güncelle|olustur|oluştur)\b/.test(lowerDeburr)) {
+    return null;
+  }
+
+  const pageMap: Array<[RegExp, string]> = [
+    [/\b(ogretmen|öğretmen)/, 'teachers'],
+    [/\b(sinif|sınıf)(?!a|ı|i)/, 'classes'],
+    [/\b(derslik|derslikler|oda)\b/, 'rooms'],
+    [/\b(ders\s+dagilim|ders\s+dağılım|aktivite|aktiviteler)\b/, 'activities'],
+    [/\b(dersler\b|ders\s+sayfas|ders\s+ekran)/, 'subjects'],
+    [/\b(gun\s+saat|gün\s+saat|saat\s+plan|gun\s+plan|gün\s+plan)\b/, 'schedule'],
+    [/\b(kisitlam|kısıtlam)/, 'constraints'],
+    [/\b(uret|üret|generate|uretim|üretim)\b/, 'generate'],
+    [/\b(program(?!\s+olu)|cizelge|çizelge|timetable)\b/, 'timetable'],
+    [/\b(ayar|settings|setting)\b/, 'settings'],
+    [/\b(gelismis|gelişmiş|advanced)\b/, 'advanced'],
+    [/\b(baslangic|başlangıç|hosgeldin|hoşgeldin|welcome|ana\s+sayfa|home)\b/, 'welcome'],
+  ];
+  for (const [re, page] of pageMap) {
+    if (re.test(lowerDeburr)) {
+      return {
+        kind: 'data_mutation',
+        actions: [
+          {
+            op: 'navigate_to',
+            params: { page },
+            description: `/${page} sayfasına geç`,
+          },
+        ],
+        explanation: `/${page} sayfasına yönlendireceğim.`,
+        requiresConfirmation: true,
+        confidence: 0.88,
+      };
+    }
+  }
+  return null;
 }

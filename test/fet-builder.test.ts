@@ -1,14 +1,3 @@
-/**
- * FET XML builder smoke testi.
- *
- * Bu test:
- *  - Küçük bir SchoolBundle ile buildFetXml çağırır
- *  - Türkçe karakter, block expansion, auto constraint'ler ve constraint
- *    handler çıktısının XML'de doğru göründüğünü doğrular
- *  - Üretilen XML'i geçici dosyaya yazıp /usr/bin/fet-cl ile çalıştırarak
- *    FET'in dosyayı kabul ettiğini ve activities.xml ürettiğini ispatlar
- *    (CI/headless ortamlarda fet-cl yoksa o blok skip edilir)
- */
 
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
@@ -66,7 +55,6 @@ function makeBundle(): SchoolBundle {
       { id: 2, name: 'Spor Salonu', capacity: 60, building: null, notes: null },
     ],
     activities: [
-      // 9A Matematik: weekly=4, block=1 → 4 ayrı Activity, Duration=1
       {
         id: 1,
         classId: 1,
@@ -76,7 +64,6 @@ function makeBundle(): SchoolBundle {
         blockDuration: 1,
         notes: null,
       },
-      // 9B Beden Eğitimi: weekly=4, block=2 → 2 ayrı Activity, Duration=2
       {
         id: 2,
         classId: 2,
@@ -102,7 +89,6 @@ function makeBundle(): SchoolBundle {
           slots: [{ day: 'Cuma', hour: 1 }, { day: 'Cuma', hour: 2 }],
         },
       },
-      // Bilinmeyen öğretmen → skipped
       {
         id: 101,
         type: 'TEACHER_NOT_AVAILABLE',
@@ -131,13 +117,10 @@ describe('buildFetXml', () => {
 
   it('Activity satırlarını block duration\'a göre genişletir', () => {
     const out = buildFetXml(makeBundle());
-    // 9A Mat: 4 saat, block 1 → 4 ayrı Activity (Id'leri 1,2,3,4)
-    // 9B Beden: 4 saat, block 2 → 2 ayrı Activity (Id'leri 5,6), Duration=2
     const ids9A = out.fetActivityIdsByActivity.get(1);
     const ids9B = out.fetActivityIdsByActivity.get(2);
     expect(ids9A).toHaveLength(4);
     expect(ids9B).toHaveLength(2);
-    // her DB activity ayrı Activity_Group_Id
     expect(out.activityGroupIdById.get(1)).not.toBe(out.activityGroupIdById.get(2));
   });
 

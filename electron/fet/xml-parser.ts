@@ -1,16 +1,3 @@
-/**
- * FET output → TimetableSlot[].
- *
- * FET, outputDir altında `timetables/<base>/<base>_activities.xml` üretir.
- * Bu dosya her Activity'nin yerleştiği {Day, Hour, Room} bilgisini içerir.
- *
- * Bizim parser:
- *  1) timetables klasöründeki tek alt dizini bulur (base name)
- *  2) <base>_activities.xml'i okur
- *  3) FET Activity Id → DB activity id eşleştirmesi yapar (fetActivityIdsByActivity)
- *  4) Day adı → dayIndex (0-based), Hour adı → hourIndex (0-based)
- *  5) Activity'nin teacher/subject/class/room bilgilerini DB activity'den çıkarır
- */
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,24 +7,10 @@ import type { SchoolBundle } from './types.js';
 
 export type ParseContext = {
   bundle: SchoolBundle;
-  /** DB activity id → FET Activity Id'leri */
   fetActivityIdsByActivity: Map<number, number[]>;
-  /** FET Activity Id → DB activity id (yukarıdakinin tersi) */
   dbActivityIdByFetId?: Map<number, number>;
 };
 
-/**
- * Çıktı dizininden timetable'ı parse eder.
- *
- * outputDir tipik olarak şu yapıdadır:
- *   outputDir/
- *     timetables/
- *       <base>/
- *         <base>_activities.xml
- *         ...
- *     logs/
- *       result.txt
- */
 export async function parseTimetable(
   outputDir: string,
   ctx: ParseContext,
@@ -84,7 +57,6 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): TimetableSlot
     .sort((a, b) => a.orderIndex - b.orderIndex)
     .forEach((h, i) => hourIndexByName.set(h.name, i));
 
-  // FET Activity Id → DB activity id
   const dbIdByFetId = ctx.dbActivityIdByFetId
     ?? invertFetIdMap(ctx.fetActivityIdsByActivity);
 
@@ -100,7 +72,7 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): TimetableSlot
     const fetId = typeof raw.Id === 'string' ? parseInt(raw.Id, 10) : raw.Id;
     if (typeof fetId !== 'number' || !Number.isFinite(fetId)) continue;
     const dbId = dbIdByFetId.get(fetId);
-    if (dbId === undefined) continue; // tanınmayan id; atla
+    if (dbId === undefined) continue;
     const act = dbActivityById.get(dbId);
     if (!act) continue;
 
@@ -116,7 +88,6 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): TimetableSlot
     const roomName = (raw.Room ?? '').toString().trim();
     const room = roomName ? roomByName.get(roomName) : null;
 
-    // block duration > 1 ise her saat için ayrı slot üret (UI grid-cell başına)
     const block = Math.max(1, act.blockDuration || 1);
     for (let i = 0; i < block; i++) {
       slots.push({
@@ -152,7 +123,6 @@ function toArray<T>(value: unknown): T[] {
 }
 
 async function findActivitiesXml(outputDir: string): Promise<string | null> {
-  // outputDir/timetables/<base>/<base>_activities.xml
   const ttDir = path.join(outputDir, 'timetables');
   if (!(await exists(ttDir))) return null;
   const entries = await fs.promises.readdir(ttDir, { withFileTypes: true });

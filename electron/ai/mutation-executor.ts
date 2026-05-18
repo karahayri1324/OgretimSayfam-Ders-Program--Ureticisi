@@ -17,19 +17,6 @@ import type {
   DataMutationOp,
 } from '../../src/lib/types.js';
 
-/**
- * AI'nın "data_mutation" yanıtındaki action listesini DB'ye uygular.
- *
- * Davranış:
- *  - Her action sırayla çalıştırılır; biri patlasa diğerleri devam eder
- *    (kısmen başarı kabul). Caller (IPC) toplam istatistiği döndürür.
- *  - İsim eşleştirmesi idempotent: zaten var olan teacher/subject/room/class
- *    eklenmek istenirse mevcut id kullanılır (duplicate yaratmaz).
- *  - Repository çağrılarına yalın delege: yeni DB tablosu / migration YOK.
- *
- * Bu modül *yan etki yapar* — tools.ts'deki read-only tool'ların aksine.
- * Sadece kullanıcı onayından sonra IPC layer'dan çağrılmalı.
- */
 
 function deburr(s: string): string {
   return s
@@ -836,13 +823,6 @@ const handlers: Record<DataMutationOp, Handler> = {
     );
   },
 
-  /**
-   * Mevcut çizelgedeki bir slot'u olduğu yerde kilitler (re-gen'de değişmesin).
-   * params: { class, day, hour }
-   *
-   * En son üretilen timetable'a bakar, (class, day, hour) eşleşen slot'u bulur,
-   * o aktiviteye ACTIVITY_FIXED_TIME constraint ekler.
-   */
   lock_timetable_slot(params) {
     const className = requireString(params, 'class');
     const day = requireString(params, 'day');
@@ -859,7 +839,6 @@ const handlers: Record<DataMutationOp, Handler> = {
       );
     }
 
-    // dayName → dayIndex
     const days = daysRepo.list();
     const dayObj =
       days.find((d) => d.name === day) ??
@@ -878,7 +857,6 @@ const handlers: Record<DataMutationOp, Handler> = {
       );
     }
 
-    // Idempotent: aynı aktivite/saat için zaten varsa atla
     const existing = constraintsRepo.list().find(
       (c) =>
         c.type === 'ACTIVITY_FIXED_TIME' &&
@@ -1137,6 +1115,205 @@ const handlers: Record<DataMutationOp, Handler> = {
     // Gerçek export AIPanel'de — burada sadece validate edip mesaj döner
     const scope = className ? `${className} sınıfı için` : 'tüm sınıflar için';
     return `${format.toUpperCase()} export hazırlanıyor (${scope}).`;
+  },
+
+  // ════════════════════════════════════════════════════════════════════
+  // Paket 4 — Slot manipulation + Navigation
+  // ════════════════════════════════════════════════════════════════════
+
+  /**
+   * İki slot'u yer değiştir. Mevcut çizelgeden iki (class, day, hour) alır,
+   * her birine karşılığında ACTIVITY_FIXED_TIME kısıtlaması ekler ki
+   * yeniden üretildiğinde swap kalıcı olsun.
+   *
+   * params: {
+   *   slot1: { class, day, hour },
+   *   slot2: { class, day, hour }
+   * }
+   *
+   * Bir slot'un mevcut FIXED_TIME constraint'i varsa silinir (idempotent).
+   */
+  swap_timetable_slots(params) {
+    const s1 = params.slot1 as Record<string, unknown> | undefined;
+    const s2 = params.slot2 as Record<string, unknown> | undefined;
+    if (!s1 || !s2 || typeof s1 !== 'object' || typeof s2 !== 'object') {
+      throw new Error("'slot1' ve 'slot2' obje olmalı.");
+    }
+    const class1 = requireString(s1, 'class');
+    const day1 = requireString(s1, 'day');
+    const hour1 = optInt(s1, 'hour');
+    const class2 = requireString(s2, 'class');
+    const day2 = requireString(s2, 'day');
+    const hour2 = optInt(s2, 'hour');
+    if (hour1 == null || hour2 == null) {
+      throw new Error("'hour' 1+ olmalı (her slot için).");
+    }
+
+    const latest = timetablesRepo.latest();
+    if (!latest) {
+      throw new Error(
+        'Henüz üretilmiş bir program yok. Önce "Programı Üret" deyin, sonra swap yapın.',
+      );
+    }
+    const klass1 = findByName(class1, classesRepo.list());
+    const klass2 = findByName(class2, classesRepo.list());
+    if (!klass1) throw new Error(`Sınıf bulunamadı: '${class1}'`);
+    if (!klass2) throw new Error(`Sınıf bulunamadı: '${class2}'`);
+
+    const days = daysRepo.list();
+    const dayObj1 =
+      days.find((d) => d.name === day1) ??
+      days.find((d) => deburr(d.name) === deburr(day1));
+    const dayObj2 =
+      days.find((d) => d.name === day2) ??
+      days.find((d) => deburr(d.name) === deburr(day2));
+    if (!dayObj1) throw new Error(`Gün bulunamadı: '${day1}'`);
+    if (!dayObj2) throw new Error(`Gün bulunamadı: '${day2}'`);
+
+    const slotA = latest.slots.find(
+      (s: TimetableSlot) =>
+        s.classId === klass1.id &&
+        s.dayIndex === dayObj1.orderIndex &&
+        s.hourIndex === hour1,
+    );
+    const slotB = latest.slots.find(
+      (s: TimetableSlot) =>
+        s.classId === klass2.id &&
+        s.dayIndex === dayObj2.orderIndex &&
+        s.hourIndex === hour2,
+    );
+    if (!slotA || !slotB) {
+      throw new Error(
+        "Slot'lardan biri programda yok (ya boşluk var ya da gün/saat dışı).",
+      );
+    }
+
+    // Önce her iki aktivite için eski FIXED_TIME constraint'lerini sil
+    for (const c of constraintsRepo.list()) {
+      if (c.type !== 'ACTIVITY_FIXED_TIME') continue;
+      const aid = (c.params as { activityId?: number }).activityId;
+      if (aid === slotA.activityId || aid === slotB.activityId) {
+        constraintsRepo.delete(c.id);
+      }
+    }
+
+    // Yeni FIXED_TIME constraint'leri: A → slot2, B → slot1
+    constraintsRepo.add({
+      type: 'ACTIVITY_FIXED_TIME',
+      weight: 100,
+      active: true,
+      params: { activityId: slotA.activityId, day: day2, hour: hour2 },
+      source: 'ai',
+      notes: `Swap: ${class1} ${day1}/${hour1} ↔ ${class2} ${day2}/${hour2}`,
+    });
+    constraintsRepo.add({
+      type: 'ACTIVITY_FIXED_TIME',
+      weight: 100,
+      active: true,
+      params: { activityId: slotB.activityId, day: day1, hour: hour1 },
+      source: 'ai',
+      notes: `Swap: ${class2} ${day2}/${hour2} ↔ ${class1} ${day1}/${hour1}`,
+    });
+
+    return (
+      `Slot'lar yer değiştirildi: ` +
+      `${class1} ${day1}/${hour1} (${slotA.subjectName}) ↔ ` +
+      `${class2} ${day2}/${hour2} (${slotB.subjectName}). ` +
+      `Programı yeniden üretince FET bu kuralları uygulayacak.`
+    );
+  },
+
+  /**
+   * İki dersi peş peşe yap (aynı sınıfta). "Fizik ve Matematik peş peşe
+   * olsun (lab-teorik entegrasyon)" tarzı. FET'te
+   * ConstraintTwoActivitiesConsecutive kullanılır.
+   *
+   * params: { class, subject1, subject2 }
+   *
+   * İki sınıf × subject aktivitesi bulunur, aralarına
+   * TWO_ACTIVITIES_CONSECUTIVE constraint eklenir.
+   */
+  pair_subjects_consecutive(params) {
+    const className = requireString(params, 'class');
+    const subject1 = requireString(params, 'subject1');
+    const subject2 = requireString(params, 'subject2');
+
+    const klass = findByName(className, classesRepo.list());
+    if (!klass) throw new Error(`Sınıf bulunamadı: '${className}'`);
+    const subj1 = findByName(subject1, subjectsRepo.list());
+    const subj2 = findByName(subject2, subjectsRepo.list());
+    if (!subj1) throw new Error(`Branş bulunamadı: '${subject1}'`);
+    if (!subj2) throw new Error(`Branş bulunamadı: '${subject2}'`);
+
+    const allActs = activitiesRepo.list();
+    const act1 = allActs.find(
+      (a) => a.classId === klass.id && a.subjectId === subj1.id,
+    );
+    const act2 = allActs.find(
+      (a) => a.classId === klass.id && a.subjectId === subj2.id,
+    );
+    if (!act1) {
+      throw new Error(
+        `${className} × ${subject1} aktivitesi bulunamadı. Önce add_activity ile ekleyin.`,
+      );
+    }
+    if (!act2) {
+      throw new Error(
+        `${className} × ${subject2} aktivitesi bulunamadı. Önce add_activity ile ekleyin.`,
+      );
+    }
+
+    // Aynı çifte zaten constraint varsa atla
+    const existing = constraintsRepo.list().find(
+      (c) =>
+        c.type === 'TWO_ACTIVITIES_CONSECUTIVE' &&
+        (c.params as { firstActivityId?: number }).firstActivityId === act1.id &&
+        (c.params as { secondActivityId?: number }).secondActivityId === act2.id,
+    );
+    if (existing) {
+      return `Zaten ardışık: ${subject1} → ${subject2} (${className}).`;
+    }
+
+    const weight = Math.max(0, Math.min(100, optInt(params, 'weight') ?? 100));
+    constraintsRepo.add({
+      type: 'TWO_ACTIVITIES_CONSECUTIVE',
+      weight,
+      active: true,
+      params: {
+        firstActivityId: act1.id,
+        secondActivityId: act2.id,
+      },
+      source: 'ai',
+      notes: `Peş peşe: ${className} → ${subject1} hemen ardından ${subject2}`,
+    });
+    return (
+      `${className} için '${subject1}' hemen ardından '${subject2}' olarak ` +
+      `ardışıklık kuralı eklendi (weight=${weight}).`
+    );
+  },
+
+  /**
+   * UI navigation tetikleyicisi. Backend tarafında side-effect yok —
+   * AIPanel handleConfirm bu op'u görünce navigate() çağırır.
+   *
+   * params: { page: string }  → '/teachers', '/classes', vs (veya 'teachers')
+   *
+   * Geçerli sayfalar: welcome, subjects, classes, rooms, teachers, activities,
+   *                   schedule, constraints, generate, timetable, advanced, settings
+   */
+  navigate_to(params) {
+    const raw = requireString(params, 'page').toLowerCase();
+    const page = raw.startsWith('/') ? raw.slice(1) : raw;
+    const valid = [
+      'welcome', 'subjects', 'classes', 'rooms', 'teachers', 'activities',
+      'schedule', 'constraints', 'generate', 'timetable', 'advanced', 'settings',
+    ];
+    if (!valid.includes(page)) {
+      throw new Error(
+        `Geçersiz sayfa: '${page}'. Geçerli: ${valid.join(', ')}`,
+      );
+    }
+    return `/${page} sayfasına yönlendiriliyor.`;
   },
 };
 

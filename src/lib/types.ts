@@ -83,12 +83,6 @@ export type Activity = {
   weeklyHours: number;
   blockDuration: number;
   notes: string | null;
-  /**
-   * NULL = bağımsız aktivite. Aynı değere sahip iki aktivite FET'te aynı
-   * saatte başlamaya zorlanır (ConstraintActivitiesSameStartingTime).
-   * "Split activities" özelliği bunu kullanır: aynı sınıf 2 gruba bölünüp
-   * iki ayrı dersi aynı anda alıyor (her grup farklı oda).
-   */
   splitGroupId: number | null;
 };
 
@@ -110,11 +104,6 @@ export type Hour = {
   endTime: string | null;
 };
 
-/**
- * Bir günün kendine özgü ders saatleri.
- * Boş kayıtlı gün → global `Hour[]` listesi fallback olur.
- * Doluysa: o gün için saat sayısı/adı/saat aralıkları override edilir.
- */
 export type DayHour = {
   id: number;
   dayId: number;
@@ -191,7 +180,8 @@ export type ConstraintType =
   | 'STUDENTS_MAX_GAPS_PER_WEEK'
   | 'STUDENTS_EARLY_MAX_BEGINNINGS'
   | 'STUDENTS_MAX_HOURS_DAILY'
-  | 'MAX_TOTAL_ACTIVITIES_FROM_SET';
+  | 'MAX_TOTAL_ACTIVITIES_FROM_SET'
+  | 'TWO_ACTIVITIES_CONSECUTIVE';
 
 export type Slot = { day: string | null; hour: number | null };
 
@@ -232,16 +222,6 @@ export type AIConstraint = {
   params: Record<string, unknown>;
 };
 
-/**
- * AI yanıtları discriminated union — yeni "agentic" modlar için.
- *  - constraint        → mevcut kısıtlama önerisi (kind eksikse default)
- *  - query             → doğal dil soruya cevap (info card)
- *  - tool_call         → AI'nın bilgi çekmek için tool çağrısı
- *  - schedule_update   → kullanıcı onayıyla uygulanacak program ayar değişikliği
- *  - data_mutation     → kullanıcı onayıyla uygulanacak CRUD işlem(ler)i
- *
- * `kind` alanı eksik gelirse `constraint` kabul edilir (backward compat).
- */
 export type AIConstraintResponse = {
   kind?: 'constraint';
   constraints: AIConstraint[];
@@ -274,10 +254,6 @@ export type AIScheduleUpdateResponse = {
   confidence?: number;
 };
 
-/**
- * AI'nın "programı üret" komutu — kullanıcı onayı ile generate IPC tetiklenir.
- * timeLimitSec belirtilmezse settings.fetTimeLimitSec kullanılır.
- */
 export type AIRunSolverResponse = {
   kind: 'run_solver';
   timeLimitSec?: number;
@@ -285,10 +261,6 @@ export type AIRunSolverResponse = {
   confidence?: number;
 };
 
-/**
- * AI üzerinden yapılabilen CRUD operasyon türleri. Schema.ts'deki Zod enum'u
- * ile birebir senkron tutulmalı; yeni op eklerken her ikisi de güncellenir.
- */
 export type DataMutationOp =
   | 'add_teacher'
   | 'update_teacher'
@@ -319,21 +291,20 @@ export type DataMutationOp =
   | 'delete_constraint'
   | 'add_activity_constraint'
   | 'set_setting'
-  // Paket 1 — split + slot editing + lock
   | 'add_split_activity'
   | 'set_timetable_slot'
   | 'lock_timetable_slot'
   | 'unlock_timetable_slot'
-  // Paket 2 — substitute + merge
   | 'substitute_teacher'
   | 'merge_activities'
-  // Paket 3 — export
-  | 'export_timetable';
+  | 'export_timetable'
+  | 'swap_timetable_slots'
+  | 'pair_subjects_consecutive'
+  | 'navigate_to';
 
 export type DataMutationAction = {
   op: DataMutationOp;
   params: Record<string, unknown>;
-  /** Türkçe insan-okunabilir özet — onay kartında gösterilir. */
   description: string;
 };
 

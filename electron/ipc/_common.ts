@@ -19,10 +19,6 @@ export const err = (
   error: { code, message, details },
 });
 
-/**
- * Handler'ları sarar. Beklenmedik exception'ları DB_ERROR olarak loglar.
- * Türkçe mesaj döner, raw error log dosyasına gider.
- */
 export async function safeHandler<T>(
   label: string,
   fn: () => Promise<T> | T,

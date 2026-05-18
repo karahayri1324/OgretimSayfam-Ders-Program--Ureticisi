@@ -1,176 +1,153 @@
-/**
- * LoginDemo — Login ekranı sol panelindeki canlı çoklu sahne animasyonu.
- *
- * Tasarım referansı: /mnt/data/Downloads/_retimsayfam-tasar_m.html içindeki
- * DemoFrame + DemoAIPanel — birebir port (TICK_MS, ANIM markers, sahne mantığı,
- * tipografi, renkler).
- *
- * 3 sahne tek döngüde (~29 saniye):
- *   Scene 1 (0–125)   — Öğretmenler: kullanıcı yeni öğretmen ekleme komutu yazıyor,
- *                       AI cevaplıyor, tabloya satır kayarak giriyor
- *   Scene 2 (125–235) — Programı Üret: kuralı ekliyor, üretimi başlatıyor,
- *                       progress bar dolu, log satırları akıyor
- *   Scene 3 (235–360) — Program: 5×8 grid hücre hücre renkli doluyor,
- *                       başarı kartı belirir
- */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  Sparkles,
+  Home,
+  BookOpen,
+  GraduationCap,
+  DoorOpen,
+  Users,
+  ListChecks,
+  Wand2,
+  CalendarCheck2,
+  Plus,
+  Pencil,
+  Trash2,
+  Check,
+  ArrowRight,
+  Sliders,
+  Settings as Cog,
+} from 'lucide-react';
+import { Logo } from './Logo';
+
+const defter = {
+  bg: '#FAF6EC',
+  paper: '#FFFDF8',
+  paper2: '#F4EFE2',
+  ink: '#1A1A1A',
+  mutedDeep: '#3F3A33',
+  muted: '#6B6258',
+  line: '#E6DFCE',
+  line2: '#D9D1BC',
+  primary: '#1E3FAE',
+  primaryInk: '#FFFFFF',
+  primarySoft: '#E7ECFA',
+  leaf: '#5C7A4A',
+  amber: '#D89B2A',
+  red: '#C0392B',
+} as const;
+
+const fontSerif = '"Instrument Serif", "Newsreader", ui-serif, Georgia, serif';
+const fontSans = '"Instrument Sans", "Geist", ui-sans-serif, system-ui, sans-serif';
+const fontMono = 'ui-monospace, "JetBrains Mono", "Geist Mono", monospace';
 
 const TICK_MS = 80;
 
 const ANIM = {
-  s1_intro: 0,
-  s1_type_start: 5,
+  s1_typeStart: 5,
   s1_send: 58,
   s1_think: 62,
-  s1_reply_start: 68,
+  s1_replyStart: 68,
   s1_tool1: 82,
   s1_tool2: 96,
-  s1_row_in: 104,
-  s1_hold: 120,
+  s1_row: 104,
 
   s2_switch: 125,
-  s2_type_start: 130,
+  s2_typeStart: 130,
   s2_send: 170,
   s2_think: 174,
   s2_reply: 180,
-  s2_gen_start: 186,
-  s2_gen_end: 220,
+  s2_genStart: 186,
+  s2_genEnd: 220,
   s2_success: 222,
-  s2_hold: 230,
 
   s3_switch: 235,
   s3_reply: 240,
-  s3_fill_start: 248,
-  s3_fill_end: 328,
-  s3_hold: 340,
+  s3_fillStart: 248,
+  s3_fillEnd: 328,
 
   loop: 360,
-};
+} as const;
 
 const USER_MSG_1 =
   "Ahmet Yılmaz matematik öğretmeni. 9A, 9B, 9C'ye 6'şar saat giriyor.";
 const USER_MSG_2 = 'Şimdi programı üret. Beden eğitimi son derste olsun.';
-
 const AI_MSG_1 =
   "Tamam. Ahmet Yılmaz'ı ekledim ve 9A/9B/9C'ye 6'şar saat Matematik atadım.";
 const AI_MSG_2 = 'Kuralı ekledim ve üretimi başlatıyorum…';
 const AI_MSG_3 =
   'Tamamlandı. 455 slot, 0 çakışma — Beden eğitimi her gün son derste.';
 
-const GEN_LOGS = [
-  'FET çekirdek başlatıldı (12 öğretmen · 13 sınıf · 9 ders)',
-  'Kısıtlamalar yükleniyor… 7 kural aktif',
-  'İlk çözüm aranıyor…',
-  'İlk çözüm bulundu (0.4s) · 38 yumuşak ihlal',
-  'Optimizasyon turu 1/3 … 12 ihlal',
-  'Optimizasyon turu 2/3 …  3 ihlal',
-  'Optimizasyon turu 3/3 …  0 ihlal',
-  'Tamamlandı: 455 slot · 0 çakışma · 1.2s',
-];
-
-// 8 ders rengi — grid hücreleri için
-const SUBJECT_COLORS = [
-  '#1E3FAE',
-  '#5C7A4A',
-  '#D89B2A',
-  '#7C5BD8',
-  '#1F8C8C',
-  '#C9621C',
-  '#B83A7A',
-  '#2090A8',
-];
-
 type Scene = 1 | 2 | 3;
+interface DerivedState {
+  scene: Scene;
+  cursor: boolean;
+  s1: {
+    typed: number;
+    sent: boolean;
+    thinking: boolean;
+    replyChars: number;
+    tool1: boolean;
+    tool2: boolean;
+    row: boolean;
+  };
+  s2: {
+    typed: number;
+    sent: boolean;
+    thinking: boolean;
+    replyChars: number;
+    progress: number;
+    success: boolean;
+  };
+  s3: { fill: number; replyChars: number };
+}
 
-function deriveScene(tick: number) {
+function clamp(n: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function derive(tick: number): DerivedState {
   let scene: Scene = 1;
   if (tick >= ANIM.s2_switch) scene = 2;
   if (tick >= ANIM.s3_switch) scene = 3;
-
   const cursor = Math.floor(tick / 4) % 2 === 0;
-
-  const s1_typed = Math.max(
-    0,
-    Math.min(
-      USER_MSG_1.length,
-      Math.floor((tick - ANIM.s1_type_start) * 1.3),
-    ),
-  );
-  const s1_sent = tick >= ANIM.s1_send;
-  const s1_thinking = tick >= ANIM.s1_think && tick < ANIM.s1_reply_start;
-  const s1_reply_chars = Math.max(
-    0,
-    Math.min(AI_MSG_1.length, Math.floor((tick - ANIM.s1_reply_start) * 1.8)),
-  );
-  const s1_tool1 = tick >= ANIM.s1_tool1;
-  const s1_tool2 = tick >= ANIM.s1_tool2;
-  const s1_row = tick >= ANIM.s1_row_in;
-
-  const s2_typed = Math.max(
-    0,
-    Math.min(USER_MSG_2.length, Math.floor((tick - ANIM.s2_type_start) * 1.5)),
-  );
-  const s2_sent = tick >= ANIM.s2_send;
-  const s2_thinking = tick >= ANIM.s2_think && tick < ANIM.s2_reply;
-  const s2_reply_chars = Math.max(
-    0,
-    Math.min(AI_MSG_2.length, Math.floor((tick - ANIM.s2_reply) * 2)),
-  );
-  const s2_progress =
-    tick < ANIM.s2_gen_start
-      ? 0
-      : tick >= ANIM.s2_gen_end
-        ? 100
-        : ((tick - ANIM.s2_gen_start) / (ANIM.s2_gen_end - ANIM.s2_gen_start)) *
-          100;
-  const s2_log_count =
-    tick < ANIM.s2_gen_start
-      ? 0
-      : Math.min(
-          GEN_LOGS.length,
-          Math.floor((tick - ANIM.s2_gen_start) / 4.5) + 1,
-        );
-  const s2_success = tick >= ANIM.s2_success;
-
-  const s3_fill =
-    tick < ANIM.s3_fill_start
-      ? 0
-      : tick >= ANIM.s3_fill_end
-        ? 1
-        : (tick - ANIM.s3_fill_start) /
-          (ANIM.s3_fill_end - ANIM.s3_fill_start);
-  const s3_reply_chars = Math.max(
-    0,
-    Math.min(AI_MSG_3.length, Math.floor((tick - ANIM.s3_reply) * 1.8)),
-  );
 
   return {
     scene,
     cursor,
     s1: {
-      typed: s1_typed,
-      sent: s1_sent,
-      thinking: s1_thinking,
-      replyChars: s1_reply_chars,
-      tool1: s1_tool1,
-      tool2: s1_tool2,
-      row: s1_row,
+      typed: clamp(Math.floor((tick - ANIM.s1_typeStart) * 1.3), 0, USER_MSG_1.length),
+      sent: tick >= ANIM.s1_send,
+      thinking: tick >= ANIM.s1_think && tick < ANIM.s1_replyStart,
+      replyChars: clamp(Math.floor((tick - ANIM.s1_replyStart) * 1.8), 0, AI_MSG_1.length),
+      tool1: tick >= ANIM.s1_tool1,
+      tool2: tick >= ANIM.s1_tool2,
+      row: tick >= ANIM.s1_row,
     },
     s2: {
-      typed: s2_typed,
-      sent: s2_sent,
-      thinking: s2_thinking,
-      replyChars: s2_reply_chars,
-      progress: s2_progress,
-      logCount: s2_log_count,
-      success: s2_success,
+      typed: clamp(Math.floor((tick - ANIM.s2_typeStart) * 1.5), 0, USER_MSG_2.length),
+      sent: tick >= ANIM.s2_send,
+      thinking: tick >= ANIM.s2_think && tick < ANIM.s2_reply,
+      replyChars: clamp(Math.floor((tick - ANIM.s2_reply) * 2), 0, AI_MSG_2.length),
+      progress:
+        tick < ANIM.s2_genStart
+          ? 0
+          : tick >= ANIM.s2_genEnd
+            ? 100
+            : ((tick - ANIM.s2_genStart) / (ANIM.s2_genEnd - ANIM.s2_genStart)) * 100,
+      success: tick >= ANIM.s2_success,
     },
-    s3: { fill: s3_fill, replyChars: s3_reply_chars },
+    s3: {
+      fill:
+        tick < ANIM.s3_fillStart
+          ? 0
+          : tick >= ANIM.s3_fillEnd
+            ? 1
+            : (tick - ANIM.s3_fillStart) / (ANIM.s3_fillEnd - ANIM.s3_fillStart),
+      replyChars: clamp(Math.floor((tick - ANIM.s3_reply) * 1.8), 0, AI_MSG_3.length),
+    },
   };
 }
-
-type DerivedState = ReturnType<typeof deriveScene>;
 
 export default function LoginDemo() {
   const [tick, setTick] = useState(0);
@@ -183,407 +160,228 @@ export default function LoginDemo() {
     return () => window.clearInterval(id);
   }, []);
 
-  const st = deriveScene(tick);
+  const st = derive(tick);
+
+  let page: ReactNode;
+  if (st.scene === 1) {
+    page = <MockTeachers showAhmet={st.s1.row} />;
+  } else if (st.scene === 2) {
+    page = (
+      <MockGenerate
+        running={st.s2.progress > 0 && st.s2.progress < 100}
+        progress={st.s2.progress}
+        done={st.s2.success}
+      />
+    );
+  } else {
+    page = <MockTimetable fillProgress={st.s3.fill} />;
+  }
+
+  const PAGE_W = 1440;
+  const PAGE_H = 880;
+
+  const leftRef = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(0.46);
+
+  useEffect(() => {
+    const el = leftRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const { width, height } = e.contentRect;
+        if (width <= 0 || height <= 0) continue;
+        const next = Math.min(width / PAGE_W, height / PAGE_H);
+        setScale((prev) => (Math.abs(prev - next) > 0.005 ? next : prev));
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
-    <div className="card-defter relative flex h-full flex-1 overflow-hidden">
-      <span className="tape" />
-      <div className="flex w-[52%] flex-shrink-0 border-r border-line bg-paper">
-        {st.scene === 1 && <ScenePageTeachers row={st.s1.row} />}
-        {st.scene === 2 && (
-          <ScenePageGenerate
-            progress={st.s2.progress}
-            logCount={st.s2.logCount}
-            done={st.s2.success}
-          />
-        )}
-        {st.scene === 3 && <ScenePageTimetable fill={st.s3.fill} />}
-      </div>
-      <div className="flex flex-1 flex-col bg-paper2">
-        <DemoAIPanel st={st} tick={tick} />
-      </div>
-    </div>
-  );
-}
-
-/* ────────────────────────────────────────────────────────────────
- * Mini pages — gerçek defter sayfalarının kompakt görsel temsili
- * ──────────────────────────────────────────────────────────────── */
-
-function ScenePageTeachers({ row }: { row: boolean }) {
-  const staticTeachers = [
-    { name: 'Selim Erdoğan', subj: 'MAT', hours: 24 },
-    { name: 'Nazan Kara', subj: 'FİZ', hours: 18 },
-    { name: 'Burak Demir', subj: 'TÜR', hours: 20 },
-    { name: 'Cem Toprak', subj: 'KİM', hours: 16 },
-    { name: 'Elif Yıldız', subj: 'İNG', hours: 22 },
-  ];
-
-  return (
-    <div className="flex w-full flex-col">
-      <MiniTopBar active="Öğretmenler" />
-      <div className="flex-1 overflow-hidden px-4 py-3">
-        <div className="mb-2 flex items-baseline justify-between">
-          <h3 className="serif text-[15px] text-ink">
-            Öğretmenler{' '}
-            <span className="text-muted">({staticTeachers.length + (row ? 1 : 0)})</span>
-          </h3>
-          <span className="rounded bg-primary px-2 py-0.5 text-[9px] font-semibold text-white">
-            + Öğretmen
-          </span>
-        </div>
-        <div className="overflow-hidden rounded border border-cardBorder bg-card">
-          <div className="grid grid-cols-[1fr_44px_44px] border-b border-cardBorder bg-paper2 px-3 py-1.5 text-[9px] font-semibold uppercase tracking-wider text-muted">
-            <span>Öğretmen</span>
-            <span>Ders</span>
-            <span className="text-right">Saat</span>
-          </div>
-          {staticTeachers.map((t) => (
-            <div
-              key={t.name}
-              className="grid grid-cols-[1fr_44px_44px] border-b border-cardBorder/60 px-3 py-1.5 text-[10.5px] last:border-b-0"
-            >
-              <span className="text-ink">{t.name}</span>
-              <span className="text-muted">{t.subj}</span>
-              <span className="text-right tabular-nums text-ink-700">
-                {t.hours}
-              </span>
-            </div>
-          ))}
-          {row && (
-            <div
-              className="grid animate-[d1slideUp_0.3s_ease-out] grid-cols-[1fr_44px_44px] border-l-[3px] border-primary bg-primary-soft px-3 py-1.5 text-[10.5px]"
-              style={{ borderTopColor: '#1E3FAE' }}
-            >
-              <span className="flex items-center gap-1.5 font-semibold text-ink">
-                <span className="grid size-3 place-items-center rounded-full bg-primary text-[7px] font-bold text-white">
-                  ✦
-                </span>
-                Ahmet Yılmaz
-              </span>
-              <span className="text-primary">MAT</span>
-              <span className="text-right tabular-nums font-semibold text-primary">
-                18
-              </span>
-            </div>
-          )}
-        </div>
-        <div className="mt-2 text-[9px] text-muted">
-          AI ile eklenenler{' '}
-          <span className="inline-block size-1 rounded-full bg-primary" /> ile
-          işaretlenir.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ScenePageGenerate({
-  progress,
-  logCount,
-  done,
-}: {
-  progress: number;
-  logCount: number;
-  done: boolean;
-}) {
-  const logs = GEN_LOGS.slice(0, logCount);
-  return (
-    <div className="flex w-full flex-col">
-      <MiniTopBar active="Programı Üret" />
-      <div className="flex flex-1 flex-col overflow-hidden px-4 py-3">
-        <h3 className="serif mb-2 text-[15px] text-ink">
-          Programı <span className="serif-italic text-primary">üret</span>
-        </h3>
-
-        <div className="mb-2 rounded-lg border border-cardBorder bg-card p-2.5">
-          <div className="mb-1 flex items-center justify-between text-[10px] text-muted">
-            <span>Zaman limiti</span>
-            <span className="tabular-nums">120 sn</span>
-          </div>
-          <div className="h-1 overflow-hidden rounded-full bg-paper2">
-            <div className="h-full w-[60%] rounded-full bg-line" />
-          </div>
-        </div>
-
-        <div className="mb-2 flex items-center gap-2">
-          <button
-            disabled
-            className={
-              'rounded-lg px-3 py-1.5 text-[10px] font-semibold transition-colors ' +
-              (done
-                ? 'bg-accent-leaf text-white'
-                : progress > 0
-                  ? 'bg-accent-amber text-white'
-                  : 'bg-primary text-white')
-            }
-          >
-            {done ? '✓ Tamamlandı' : progress > 0 ? 'Üretiyor…' : 'Üret'}
-          </button>
-          <span className="text-[10px] tabular-nums text-muted">
-            {Math.round(progress)}%
-          </span>
-        </div>
-
-        <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-paper2">
-          <div
-            className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-
-        <div className="flex-1 overflow-hidden rounded border border-cardBorder bg-paper2">
-          <div className="border-b border-cardBorder bg-paper2 px-2 py-1 font-mono text-[8.5px] uppercase tracking-wider text-muted">
-            FET log
-          </div>
-          <div className="space-y-0.5 px-2 py-1.5 font-mono text-[9.5px] leading-tight text-ink-700">
-            {logs.map((line, i) => (
-              <div
-                key={i}
-                className="animate-[d1slideUp_0.2s_ease-out]"
-                style={{
-                  color:
-                    line.includes('Tamamlandı') || line.includes('0 ihlal')
-                      ? '#5C7A4A'
-                      : line.includes('ihlal')
-                        ? '#D89B2A'
-                        : '#3F3A33',
-                }}
-              >
-                {line}
-              </div>
-            ))}
-            {!done && progress > 0 && (
-              <div className="text-muted">
-                <span className="inline-block animate-pulse">▊</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ScenePageTimetable({ fill }: { fill: number }) {
-  // 5 gün × 8 saat = 40 hücre
-  const days = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum'];
-  const cellCount = 40;
-  const visibleCount = Math.floor(cellCount * fill);
-
-  return (
-    <div className="flex w-full flex-col">
-      <MiniTopBar active="Program" />
-      <div className="flex flex-1 flex-col overflow-hidden px-4 py-3">
-        <div className="mb-2 flex items-baseline justify-between">
-          <h3 className="serif text-[15px] text-ink">
-            <span className="serif-italic text-primary">9-A</span> · haftalık
-            program
-          </h3>
-          <span className="rounded bg-paper2 px-1.5 py-0.5 text-[9px] text-muted">
-            PDF · XLSX
-          </span>
-        </div>
-
-        <div className="flex-1 overflow-hidden rounded-lg border border-cardBorder bg-card p-2">
-          <div className="grid grid-cols-[28px_repeat(5,1fr)] gap-1 text-[8.5px]">
-            <div />
-            {days.map((d) => (
-              <div
-                key={d}
-                className="text-center font-semibold uppercase tracking-wider text-muted"
-              >
-                {d}
-              </div>
-            ))}
-            {Array.from({ length: 8 }).map((_, row) => (
-              <>
-                <div
-                  key={`h-${row}`}
-                  className="flex items-center justify-end pr-0.5 font-semibold tabular-nums text-muted"
-                >
-                  {row + 1}
-                </div>
-                {Array.from({ length: 5 }).map((_, col) => {
-                  const idx = row * 5 + col;
-                  const skip = idx === 7 || idx === 23 || idx === 31; // teneffüs benzeri
-                  const visible = idx < visibleCount && !skip;
-                  const colorIdx = (idx * 3 + col + 1) % SUBJECT_COLORS.length;
-                  const color = SUBJECT_COLORS[colorIdx]!;
-                  return (
-                    <div
-                      key={`c-${idx}`}
-                      className="h-5 overflow-hidden rounded text-center transition-all duration-200"
-                      style={{
-                        background: visible
-                          ? color
-                          : 'rgba(217,209,188,0.35)',
-                        transform: visible ? 'scale(1)' : 'scale(0.85)',
-                        opacity: visible ? 0.9 : 1,
-                      }}
-                    >
-                      {visible && (
-                        <div className="flex h-full items-center justify-center text-[8.5px] font-semibold text-white">
-                          {['MAT', 'FİZ', 'TÜR', 'TAR', 'BED', 'KİM', 'İNG', 'COĞ'][colorIdx]}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </>
-            ))}
-          </div>
-        </div>
-
-        <div className="mt-2 flex items-center justify-between text-[9.5px] text-muted">
-          <span>
-            {visibleCount}/{cellCount} slot doldu
-          </span>
-          <span className="text-accent-leaf">
-            {fill >= 1 ? '✓ 0 çakışma · 1.2s' : '…'}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MiniTopBar({ active }: { active: string }) {
-  const tabs = ['Başlangıç', 'Dersler', 'Sınıflar', 'Öğretmenler', 'Programı Üret', 'Program'];
-  return (
-    <div className="flex items-center gap-1.5 border-b border-line bg-paper px-2.5 py-1.5">
-      <div className="mr-1.5 flex items-center gap-1">
-        <div className="grid size-4 place-items-center rounded bg-primary text-[8px] text-white">
-          <span className="serif-italic">ö</span>
-        </div>
-      </div>
-      {tabs.map((t) => (
+    <>
+      <style>{KEYFRAMES}</style>
+      <div style={{ display: 'flex', height: '100%', width: '100%', minHeight: 0 }}>
+        {}
         <div
-          key={t}
-          className={
-            'rounded px-1.5 py-0.5 text-[8.5px] font-medium whitespace-nowrap ' +
-            (t === active
-              ? 'bg-primary-soft text-primary'
-              : 'text-ink-700/70')
-          }
+          ref={leftRef}
+          style={{
+            flex: '1 1 0',
+            minWidth: 0,
+            overflow: 'hidden',
+            position: 'relative',
+            borderRight: `1px solid ${defter.line}`,
+            background: defter.paper,
+          }}
         >
-          {t}
+          <div
+            key={st.scene}
+            style={{
+              width: PAGE_W,
+              height: PAGE_H,
+              transform: `scale(${scale})`,
+              transformOrigin: 'top left',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+            }}
+          >
+            {page}
+          </div>
         </div>
-      ))}
-    </div>
+
+        {/* Sağ — AI sohbet paneli */}
+        <div style={{ width: 360, flexShrink: 0, display: 'flex', minHeight: 0 }}>
+          <DemoChatPanel st={st} />
+        </div>
+      </div>
+    </>
   );
 }
 
-/* ────────────────────────────────────────────────────────────────
- * AI panel — birebir port (sağda chat + composer)
- * ──────────────────────────────────────────────────────────────── */
-
-function DemoAIPanel({ st, tick }: { st: DerivedState; tick: number }) {
+// ─────────────────────────────────────────────────────────────
+// AI sohbet paneli
+// ─────────────────────────────────────────────────────────────
+function DemoChatPanel({ st }: { st: DerivedState }) {
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-line bg-paper px-3 py-2">
-        <div className="flex items-center gap-2">
-          <Spk color="#1E3FAE" size={13} />
-          <div>
-            <div className="text-[12px] font-semibold leading-tight">
-              AI Asistan
-            </div>
-            <div className="font-mono text-[9px] leading-tight text-muted">
-              haiku-4-5 · sahne {st.scene}/3
-            </div>
-          </div>
+    <div
+      style={{
+        flex: 1,
+        minWidth: 0,
+        background: defter.paper2,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <div
+        style={{
+          padding: '10px 14px',
+          borderBottom: `1px solid ${defter.line}`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          background: defter.paper,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Logo size={16} />
+          <div style={{ fontWeight: 600, fontSize: 12 }}>AI Asistan</div>
         </div>
-        <div className="flex gap-1 text-[12px] text-muted">
+        <div style={{ display: 'flex', gap: 6, color: defter.muted, fontSize: 12 }}>
           <span>⇤</span>
           <span>×</span>
         </div>
       </div>
 
-      {/* Mesajlar */}
-      <div className="flex flex-1 flex-col gap-2 overflow-hidden p-3">
-        <div className="card-defter shrink-0 px-2.5 py-2 text-[11px] leading-snug">
-          Merhaba <span className="serif-italic">Müdür Bey</span>. Komutlarını
-          yaz; ben yaparım.
+      <div
+        style={{
+          flex: 1,
+          padding: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          overflow: 'hidden',
+          minHeight: 0,
+        }}
+      >
+        <div
+          style={{
+            background: defter.paper,
+            border: `1px solid ${defter.line}`,
+            borderRadius: 10,
+            padding: '8px 11px',
+            fontSize: 11.5,
+            lineHeight: 1.45,
+            flexShrink: 0,
+          }}
+        >
+          Merhaba{' '}
+          <span style={{ fontFamily: fontSerif, fontStyle: 'italic' }}>Müdür Bey</span>.
+          Komutlarını yaz; ben yaparım.
         </div>
 
-        {/* Scene 1 */}
-        {st.s1.sent && <UserBubble text={USER_MSG_1} />}
-        {tick >= ANIM.s1_think && st.s1.thinking && <Typing />}
+        {st.s1.sent && <UserBubble>{USER_MSG_1}</UserBubble>}
+        {st.s1.thinking && <Typing />}
         {st.s1.replyChars > 0 && (
           <AiBubble>
             {AI_MSG_1.slice(0, st.s1.replyChars)}
             {st.s1.replyChars < AI_MSG_1.length && (
-              <Caret color="#1A1A1A" visible={st.cursor} />
+              <Caret color={defter.ink} visible={st.cursor} />
             )}
           </AiBubble>
         )}
-        {st.s1.tool1 && (
-          <ToolRow ok text="Öğretmen eklendi" detail="Ahmet Yılmaz · MAT" />
-        )}
+        {st.s1.tool1 && <ToolRow text="Öğretmen eklendi" detail="Ahmet Yılmaz · MAT" />}
         {st.s1.tool2 && (
-          <ToolRow
-            ok
-            highlight
-            text="Ders dağılımı"
-            detail="9A · 9B · 9C → 6 saat MAT"
-          />
+          <ToolRow text="Ders dağılımı" detail="9A · 9B · 9C → 6 saat MAT" highlight />
         )}
 
-        {/* Scene 2 */}
-        {st.scene >= 2 && st.s2.sent && <UserBubble text={USER_MSG_2} />}
+        {st.scene >= 2 && st.s2.sent && <UserBubble>{USER_MSG_2}</UserBubble>}
         {st.scene >= 2 && st.s2.thinking && <Typing />}
         {st.scene >= 2 && st.s2.replyChars > 0 && (
           <AiBubble>
             {AI_MSG_2.slice(0, st.s2.replyChars)}
             {st.s2.replyChars < AI_MSG_2.length && (
-              <Caret color="#1A1A1A" visible={st.cursor} />
+              <Caret color={defter.ink} visible={st.cursor} />
             )}
           </AiBubble>
         )}
         {st.s2.success && (
-          <ToolRow
-            ok
-            highlight
-            text="Program üretildi"
-            detail="455 slot · 0 çakışma · 1.2s"
-          />
+          <ToolRow text="Program üretildi" detail="455 slot · 0 çakışma · 1.2s" highlight />
         )}
 
-        {/* Scene 3 */}
         {st.scene >= 3 && st.s3.replyChars > 0 && (
           <AiBubble>
             {AI_MSG_3.slice(0, st.s3.replyChars)}
             {st.s3.replyChars < AI_MSG_3.length && (
-              <Caret color="#1A1A1A" visible={st.cursor} />
+              <Caret color={defter.ink} visible={st.cursor} />
             )}
           </AiBubble>
         )}
       </div>
 
-      {/* Composer */}
-      <div className="shrink-0 border-t border-line bg-paper p-2.5">
+      <div
+        style={{
+          padding: 10,
+          borderTop: `1px solid ${defter.line}`,
+          background: defter.paper,
+          flexShrink: 0,
+        }}
+      >
         <div
-          className="relative rounded-lg border-[1.5px] border-primary/30 bg-card px-2.5 py-1.5"
-          style={{ boxShadow: '0 0 0 3px rgba(30,63,174,0.06)' }}
+          style={{
+            background: defter.paper,
+            border: `1.5px solid ${defter.primary}55`,
+            borderRadius: 9,
+            padding: '7px 10px',
+            position: 'relative',
+            boxShadow: `0 0 0 3px ${defter.primary}10`,
+          }}
         >
-          <div className="min-h-[28px] pr-7 text-[11px] leading-relaxed text-ink">
-            <ComposerContent st={st} />
+          <div
+            style={{
+              fontSize: 11,
+              color: defter.ink,
+              lineHeight: 1.4,
+              minHeight: 30,
+              paddingRight: 26,
+            }}
+          >
+            <ComposerText st={st} />
           </div>
-          <div className="absolute bottom-1 right-1 grid size-[22px] place-items-center rounded-md bg-primary">
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="#fff"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="5" y1="12" x2="19" y2="12" />
-              <polyline points="13 6 19 12 13 18" />
-            </svg>
+          <div
+            style={{
+              position: 'absolute',
+              right: 5,
+              bottom: 5,
+              width: 22,
+              height: 22,
+              borderRadius: 6,
+              background: defter.primary,
+              display: 'grid',
+              placeItems: 'center',
+            }}
+          >
+            <ArrowRight size={10} color={defter.primaryInk} />
           </div>
         </div>
       </div>
@@ -591,60 +389,88 @@ function DemoAIPanel({ st, tick }: { st: DerivedState; tick: number }) {
   );
 }
 
-function ComposerContent({ st }: { st: DerivedState }) {
+function ComposerText({ st }: { st: DerivedState }) {
   if (st.scene === 1) {
     if (!st.s1.sent) {
       return (
         <>
           {USER_MSG_1.slice(0, st.s1.typed)}
-          <Caret color="#1E3FAE" visible={st.cursor || st.s1.typed > 0} />
+          <Caret color={defter.primary} visible={st.cursor || st.s1.typed > 0} />
         </>
       );
     }
-    return (
-      <span className="serif-italic text-[11.5px] text-muted">
-        asistan yanıt veriyor…
-      </span>
-    );
+    return <Placeholder>asistan yanıt veriyor…</Placeholder>;
   }
   if (st.scene === 2) {
     if (!st.s2.sent) {
       return (
         <>
           {USER_MSG_2.slice(0, st.s2.typed)}
-          <Caret color="#1E3FAE" visible={st.cursor || st.s2.typed > 0} />
+          <Caret color={defter.primary} visible={st.cursor || st.s2.typed > 0} />
         </>
       );
     }
-    return (
-      <span className="serif-italic text-[11.5px] text-muted">
-        üretim sürüyor…
-      </span>
-    );
+    return <Placeholder>üretim sürüyor…</Placeholder>;
   }
+  return <Placeholder>Mesaj yaz…</Placeholder>;
+}
+
+function Placeholder({ children }: { children: ReactNode }) {
   return (
-    <span className="serif-italic text-[11.5px] text-muted">Mesaj yaz…</span>
+    <span
+      style={{
+        color: defter.muted,
+        fontFamily: fontSerif,
+        fontStyle: 'italic',
+        fontSize: 11.5,
+      }}
+    >
+      {children}
+    </span>
   );
 }
 
-function UserBubble({ text }: { text: string }) {
+function UserBubble({ children }: { children: ReactNode }) {
   return (
-    <div className="flex shrink-0 animate-[d1slideUp_0.25s_ease-out] justify-end">
+    <div
+      style={{
+        display: 'flex',
+        justifyContent: 'flex-end',
+        animation: 'demo-slide-up 0.25s ease-out',
+        flexShrink: 0,
+      }}
+    >
       <div
-        className="max-w-[90%] bg-primary px-2.5 py-1.5 text-[11px] leading-snug text-white"
-        style={{ borderRadius: '10px 10px 3px 10px' }}
+        style={{
+          maxWidth: '90%',
+          padding: '7px 10px',
+          background: defter.primary,
+          color: defter.primaryInk,
+          borderRadius: '10px 10px 3px 10px',
+          fontSize: 11,
+          lineHeight: 1.4,
+        }}
       >
-        {text}
+        {children}
       </div>
     </div>
   );
 }
 
-function AiBubble({ children }: { children: React.ReactNode }) {
+function AiBubble({ children }: { children: ReactNode }) {
   return (
     <div
-      className="max-w-[92%] shrink-0 animate-[d1slideUp_0.25s_ease-out] border border-cardBorder bg-card px-2.5 py-1.5 text-[11px] leading-relaxed text-ink"
-      style={{ borderRadius: '3px 10px 10px 10px' }}
+      style={{
+        background: defter.paper,
+        border: `1px solid ${defter.line}`,
+        borderRadius: '3px 10px 10px 10px',
+        padding: '7px 10px',
+        fontSize: 11,
+        lineHeight: 1.5,
+        animation: 'demo-slide-up 0.25s ease-out',
+        flexShrink: 0,
+        maxWidth: '92%',
+      }}
     >
       {children}
     </div>
@@ -653,14 +479,16 @@ function AiBubble({ children }: { children: React.ReactNode }) {
 
 function Typing() {
   return (
-    <div className="flex shrink-0 gap-1 pl-1">
+    <div style={{ display: 'flex', gap: 3, paddingLeft: 4, flexShrink: 0 }}>
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="size-1.5 rounded-full bg-muted"
           style={{
-            animation: `d1pulse 0.9s infinite`,
-            animationDelay: `${i * 0.15}s`,
+            width: 5,
+            height: 5,
+            borderRadius: '50%',
+            background: defter.muted,
+            animation: `demo-pulse 0.9s infinite ${i * 0.15}s`,
           }}
         />
       ))}
@@ -671,47 +499,44 @@ function Typing() {
 function ToolRow({
   text,
   detail,
-  ok: _ok,
   highlight,
 }: {
   text: string;
   detail: string;
-  ok?: boolean;
   highlight?: boolean;
 }) {
   return (
     <div
-      className={
-        'flex shrink-0 animate-[d1slideUp_0.25s_ease-out] items-start gap-1.5 rounded-lg border px-2 py-1.5 text-[10.5px] ' +
-        (highlight
-          ? 'border-primary/40 bg-primary-soft'
-          : 'border-cardBorder bg-card')
-      }
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 7,
+        padding: '6px 9px',
+        background: highlight ? defter.primarySoft : defter.paper,
+        border: `1px solid ${highlight ? defter.primary + '55' : defter.line}`,
+        borderRadius: 8,
+        fontSize: 10.5,
+        animation: 'demo-slide-up 0.25s ease-out',
+        flexShrink: 0,
+      }}
     >
       <span
-        className="mt-0.5 grid size-3.5 shrink-0 place-items-center rounded-full"
-        style={{ background: highlight ? '#1E3FAE' : '#5C7A4A' }}
+        style={{
+          width: 13,
+          height: 13,
+          borderRadius: '50%',
+          background: highlight ? defter.primary : defter.leaf,
+          display: 'grid',
+          placeItems: 'center',
+          flexShrink: 0,
+          marginTop: 1,
+        }}
       >
-        <svg
-          width="7"
-          height="7"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#fff"
-          strokeWidth="4.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M5 12 L10 17 L20 6" />
-        </svg>
+        <Check size={7} strokeWidth={4} color={defter.primaryInk} />
       </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-[10.5px] font-semibold leading-tight text-ink">
-          {text}
-        </div>
-        <div className="mt-0.5 text-[9.5px] leading-tight text-muted">
-          {detail}
-        </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, color: defter.ink, fontSize: 10.5 }}>{text}</div>
+        <div style={{ color: defter.muted, fontSize: 9.5, marginTop: 1 }}>{detail}</div>
       </div>
     </div>
   );
@@ -720,19 +545,964 @@ function ToolRow({
 function Caret({ color, visible }: { color: string; visible: boolean }) {
   return (
     <span
-      className="-mb-0.5 ml-0.5 inline-block h-[11px] w-[1.5px] align-middle"
-      style={{ background: color, opacity: visible ? 1 : 0 }}
+      style={{
+        display: 'inline-block',
+        width: 1.5,
+        height: 11,
+        background: color,
+        marginLeft: 1,
+        marginBottom: -2,
+        opacity: visible ? 1 : 0,
+      }}
     />
   );
 }
 
-function Spk({ color = '#1E3FAE', size = 14 }: { color?: string; size?: number }) {
+// ─────────────────────────────────────────────────────────────
+// Mock pages — animasyon için ufak ve veri-bağımsız taklit ekranlar
+// ─────────────────────────────────────────────────────────────
+const NAV: { id: string; label: string; icon: typeof Home }[] = [
+  { id: 'home', label: 'Başlangıç', icon: Home },
+  { id: 'subjects', label: 'Dersler', icon: BookOpen },
+  { id: 'classes', label: 'Sınıflar', icon: GraduationCap },
+  { id: 'rooms', label: 'Derslikler', icon: DoorOpen },
+  { id: 'teachers', label: 'Öğretmenler', icon: Users },
+  { id: 'activities', label: 'Ders Dağılımı', icon: ListChecks },
+  { id: 'generate', label: 'Program Üret', icon: Wand2 },
+  { id: 'timetable', label: 'Program', icon: CalendarCheck2 },
+];
+
+function MockShell({
+  active,
+  breadcrumb,
+  children,
+}: {
+  active: string;
+  breadcrumb: ReactNode;
+  children: ReactNode;
+}) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <path
-        d="M12 2 L13.6 9.4 L21 11 L13.6 12.6 L12 20 L10.4 12.6 L3 11 L10.4 9.4 Z"
-        fill={color}
-      />
-    </svg>
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        background: defter.bg,
+        color: defter.ink,
+        fontFamily: fontSans,
+        fontSize: 14,
+        display: 'flex',
+        flexDirection: 'column',
+        backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent 31px, ${defter.line}88 31px, ${defter.line}88 32px)`,
+        backgroundPosition: '0 64px',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 20px',
+          background: defter.paper,
+          borderBottom: `1px solid ${defter.line}`,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Logo size={28} />
+            <div style={{ fontFamily: fontSerif, fontSize: 17, fontStyle: 'italic' }}>
+              ÖğretimSayfam
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 8 }}>
+            {NAV.map((t) => {
+              const Icon = t.icon;
+              const isActive = t.id === active;
+              return (
+                <div
+                  key={t.id}
+                  style={{
+                    padding: '7px 11px',
+                    borderRadius: 8,
+                    background: isActive ? defter.primarySoft : 'transparent',
+                    color: isActive ? defter.primary : defter.ink,
+                    fontSize: 13,
+                    fontWeight: isActive ? 600 : 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    border: isActive
+                      ? `1px solid ${defter.primary}22`
+                      : '1px solid transparent',
+                  }}
+                >
+                  <Icon size={14} color={isActive ? defter.primary : defter.muted} />
+                  {t.label}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <NavGhost icon={Sliders} label="Gelişmiş" />
+          <NavGhost icon={Cog} label="Ayarlar" />
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              padding: '7px 11px',
+              border: `1px solid ${defter.line}`,
+              borderRadius: 8,
+              marginLeft: 6,
+              background: defter.paper,
+            }}
+          >
+            <Sparkles size={14} color={defter.primary} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>AI Asistan</span>
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: defter.leaf,
+                marginLeft: 2,
+              }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div
+        style={{
+          flex: 1,
+          padding: '24px 36px',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ fontSize: 12, color: defter.muted, marginBottom: 12 }}>{breadcrumb}</div>
+        {children}
+      </div>
+    </div>
   );
 }
+
+function NavGhost({ icon: Icon, label }: { icon: typeof Home; label: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 7,
+        padding: '7px 11px',
+        fontSize: 13,
+        color: defter.ink,
+      }}
+    >
+      <Icon size={14} color={defter.muted} />
+      {label}
+    </div>
+  );
+}
+
+function MockTeachers({ showAhmet }: { showAhmet: boolean }) {
+  const list = [
+    showAhmet
+      ? { name: 'Ahmet Yılmaz', subj: 'MAT', hours: 18, note: '9A · 9B · 9C', isNew: true }
+      : null,
+    { name: 'Fatma Demir', subj: 'TÜR', hours: 24, note: '', isNew: false },
+    { name: 'Mehmet Kara', subj: 'FİZ', hours: 16, note: '', isNew: false },
+    { name: 'Ayşe Şahin', subj: 'KİM', hours: 20, note: 'Çift branş', isNew: false },
+    { name: 'Elif Aydın', subj: 'İNG', hours: 25, note: '', isNew: false },
+    { name: 'Hasan Çelik', subj: 'TAR', hours: 22, note: '', isNew: false },
+    { name: 'Zeynep Polat', subj: 'BED', hours: 14, note: 'Öğleden sonra', isNew: false },
+  ].filter(Boolean) as Array<{
+    name: string;
+    subj: string;
+    hours: number;
+    note: string;
+    isNew: boolean;
+  }>;
+
+  return (
+    <MockShell
+      active="teachers"
+      breadcrumb={
+        <>
+          Atatürk A.L. · <span style={{ color: defter.ink }}>Öğretmenler</span>
+        </>
+      }
+    >
+      <Header
+        title="Öğretmenler"
+        count={list.length}
+        sub="Öğretmenler, verdikleri branşlar ve haftalık ders saati."
+        actionLabel="Yeni Öğretmen"
+      />
+
+      <Card>
+        <TableHead
+          cols={[
+            { label: 'Öğretmen', flex: 1.4 },
+            { label: 'Branşlar', flex: 1.6 },
+            { label: 'Haftalık', w: 110 },
+            { label: 'Notlar', flex: 1.4 },
+            { label: 'İşlemler', w: 140, align: 'right' },
+          ]}
+        />
+        {list.map((t, i) => (
+          <div
+            key={t.name + i}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '12px 20px',
+              borderTop: `1px solid ${defter.line}`,
+              background: t.isNew
+                ? defter.primarySoft
+                : i % 2 === 0
+                  ? 'transparent'
+                  : defter.paper2 + '60',
+              borderLeft: t.isNew ? `3px solid ${defter.primary}` : '3px solid transparent',
+              transition: 'all 0.3s',
+            }}
+          >
+            <div style={{ flex: 1.4, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  background: defter.amber + '33',
+                  color: defter.amber,
+                  display: 'grid',
+                  placeItems: 'center',
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {t.name
+                  .split(' ')
+                  .map((p) => p[0])
+                  .slice(0, 2)
+                  .join('')}
+              </div>
+              <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                {t.name}
+                {t.isNew && (
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontSize: 10,
+                      padding: '2px 6px',
+                      borderRadius: 999,
+                      background: defter.primary,
+                      color: defter.primaryInk,
+                      letterSpacing: 1,
+                      fontWeight: 700,
+                    }}
+                  >
+                    YENİ
+                  </span>
+                )}
+              </div>
+            </div>
+            <div style={{ flex: 1.6, display: 'flex', gap: 6 }}>
+              <Pill color={defter.primary} bg={defter.primarySoft}>
+                {t.subj}
+              </Pill>
+            </div>
+            <div style={{ width: 110, display: 'flex', alignItems: 'baseline', gap: 4 }}>
+              <span style={{ fontFamily: fontSerif, fontSize: 20, lineHeight: 1 }}>{t.hours}</span>
+              <span style={{ fontSize: 11.5, color: defter.muted }}>saat</span>
+            </div>
+            <div
+              style={{
+                flex: 1.4,
+                fontSize: 12.5,
+                color: t.note ? defter.muted : defter.line2,
+                fontFamily: t.note ? fontSerif : fontSans,
+                fontStyle: t.note ? 'italic' : 'normal',
+              }}
+            >
+              {t.note || '—'}
+            </div>
+            <div style={{ width: 140, display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
+              <SmallGhost icon={<Pencil size={13} color={defter.muted} />} label="Düzenle" />
+              <SmallGhost icon={<Trash2 size={13} color={defter.red} />} />
+            </div>
+          </div>
+        ))}
+      </Card>
+    </MockShell>
+  );
+}
+
+function MockGenerate({
+  running,
+  progress,
+  done,
+}: {
+  running: boolean;
+  progress: number;
+  done: boolean;
+}) {
+  return (
+    <MockShell
+      active="generate"
+      breadcrumb={
+        <>
+          Atatürk A.L. · <span style={{ color: defter.ink }}>Program Üret</span>
+        </>
+      }
+    >
+      <div style={{ maxWidth: 760 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+          <Wand2 size={26} color={defter.primary} />
+          <div
+            style={{
+              fontFamily: fontSerif,
+              fontSize: 42,
+              lineHeight: 1,
+              letterSpacing: -0.8,
+              fontWeight: 400,
+            }}
+          >
+            Program <span style={{ fontStyle: 'italic', color: defter.primary }}>Üret</span>
+          </div>
+        </div>
+        <div style={{ fontSize: 14, color: defter.muted, marginBottom: 24, maxWidth: 560 }}>
+          FET çekirdeği üzerinden tüm sınıflar, öğretmenler ve kurallar için en uygun haftalık
+          programı arar.
+        </div>
+
+        <Card>
+          <div
+            style={{
+              padding: '14px 20px',
+              borderBottom: `1px solid ${defter.line}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ fontWeight: 600, fontSize: 14 }}>Çalıştır</div>
+            <div
+              style={{
+                fontSize: 12,
+                color: defter.muted,
+                fontFamily: fontSerif,
+                fontStyle: 'italic',
+              }}
+            >
+              {done ? 'tamamlandı' : running ? 'çalışıyor…' : 'hazır'}
+            </div>
+          </div>
+          <div style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'baseline',
+                  marginBottom: 6,
+                }}
+              >
+                <label style={{ fontSize: 13, fontWeight: 600, color: defter.mutedDeep }}>
+                  Süre limiti
+                </label>
+                <span style={{ fontFamily: fontSerif, fontSize: 16 }}>
+                  120<span style={{ fontSize: 11, color: defter.muted }}>s</span>
+                </span>
+              </div>
+              <Range value={(120 / 600) * 100} />
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginTop: 6,
+                  fontSize: 11,
+                  color: defter.muted,
+                }}
+              >
+                <span>30s</span>
+                <span>300s</span>
+                <span>600s</span>
+              </div>
+            </div>
+
+            <div
+              style={{
+                fontSize: 12.5,
+                color: defter.muted,
+                fontFamily: fontSerif,
+                fontStyle: 'italic',
+                paddingLeft: 12,
+                borderLeft: `2px solid ${defter.line2}`,
+              }}
+            >
+              FET kombinatoryal arama yapar. Genelde 60–180 saniye yeterlidir.
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                style={{
+                  background: running ? defter.muted : defter.primary,
+                  color: defter.primaryInk,
+                  border: 'none',
+                  padding: '12px 22px',
+                  borderRadius: 10,
+                  fontWeight: 600,
+                  fontSize: 14.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontFamily: fontSans,
+                }}
+              >
+                <Wand2 size={16} color={defter.primaryInk} />
+                {running ? 'Çalışıyor…' : 'Programı Üret'}
+              </button>
+              {!running && !done && (
+                <div style={{ fontSize: 12.5, color: defter.muted }}>
+                  Önkoşullar:{' '}
+                  <span style={{ color: defter.leaf, fontWeight: 600 }}>✓ tamam</span>
+                </div>
+              )}
+            </div>
+
+            {(running || done) && (
+              <div>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    marginBottom: 6,
+                    fontSize: 12,
+                    color: defter.muted,
+                  }}
+                >
+                  <span>{done ? 'Tamamlandı' : 'İlerleme'}</span>
+                  <span style={{ fontFamily: fontSerif, fontSize: 14, color: defter.ink }}>
+                    {Math.round(progress)}%
+                  </span>
+                </div>
+                <div
+                  style={{
+                    height: 8,
+                    background: defter.paper2,
+                    borderRadius: 999,
+                    border: `1px solid ${defter.line}`,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${progress}%`,
+                      height: '100%',
+                      background: done ? defter.leaf : defter.primary,
+                      borderRadius: 999,
+                      transition: 'width 0.3s',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          {done && (
+            <div
+              style={{
+                padding: '14px 20px',
+                borderTop: `1px solid ${defter.line}`,
+                background: defter.leaf + '15',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span
+                  style={{
+                    width: 22,
+                    height: 22,
+                    borderRadius: '50%',
+                    background: defter.leaf,
+                    display: 'grid',
+                    placeItems: 'center',
+                  }}
+                >
+                  <Check size={13} color="#fff" strokeWidth={3} />
+                </span>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>Program üretildi</div>
+                  <div style={{ fontSize: 12, color: defter.muted }}>
+                    455 slot · 0 çakışma · 1.2 saniye
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </Card>
+      </div>
+    </MockShell>
+  );
+}
+
+function MockTimetable({ fillProgress }: { fillProgress: number }) {
+  const days = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum'];
+  const hours = [
+    { n: 1, time: '08:30' },
+    { n: 2, time: '09:20' },
+    { n: 3, time: '10:10' },
+    { n: 4, time: '11:00' },
+    { n: 5, time: '12:40' },
+    { n: 6, time: '13:30' },
+    { n: 7, time: '14:20' },
+    { n: 8, time: '15:10' },
+  ];
+  const grid: string[][] = [
+    ['MAT', 'TÜR', 'TAR', 'FİZ', 'KİM', 'İNG', 'BİY', 'BED'],
+    ['MAT', 'TÜR', 'COĞ', 'FİZ', 'KİM', 'İNG', 'TAR', 'BED'],
+    ['TÜR', 'MAT', 'TAR', 'BİY', 'COĞ', 'İNG', 'FİZ', 'BED'],
+    ['FİZ', 'TÜR', 'MAT', 'KİM', 'TAR', 'İNG', 'BİY', 'BED'],
+    ['MAT', 'KİM', 'TÜR', 'FİZ', 'COĞ', 'İNG', 'TAR', 'BED'],
+  ];
+  const colors: Record<string, { bg: string; fg: string }> = {
+    MAT: { bg: '#E7ECFA', fg: '#1E3FAE' },
+    TÜR: { bg: '#FBEAE6', fg: '#C0392B' },
+    FİZ: { bg: '#FAEFD8', fg: '#A57614' },
+    KİM: { bg: '#E8F0E0', fg: '#5C7A4A' },
+    BİY: { bg: '#DDF0EE', fg: '#1F8C8C' },
+    TAR: { bg: '#EEE7FA', fg: '#7C5BD8' },
+    COĞ: { bg: '#DDF0EE', fg: '#1F8C8C' },
+    İNG: { bg: '#FAE6F0', fg: '#B83A7A' },
+    BED: { bg: '#FCE8D8', fg: '#C9621C' },
+  };
+  const teachers: Record<string, string> = {
+    MAT: 'Ahmet Y.',
+    TÜR: 'Fatma D.',
+    FİZ: 'Mehmet K.',
+    KİM: 'Ayşe Ş.',
+    BİY: 'Ayşe Ş.',
+    TAR: 'Hasan Ç.',
+    COĞ: 'Hasan Ç.',
+    İNG: 'Elif A.',
+    BED: 'Zeynep P.',
+  };
+  const total = days.length * hours.length;
+  const filled = Math.floor(fillProgress * total);
+
+  return (
+    <MockShell
+      active="timetable"
+      breadcrumb={
+        <>
+          Atatürk A.L. · <span style={{ color: defter.ink }}>Program</span>
+        </>
+      }
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          marginBottom: 14,
+        }}
+      >
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <CalendarCheck2 size={22} color={defter.primary} />
+            <div
+              style={{
+                fontFamily: fontSerif,
+                fontSize: 36,
+                lineHeight: 1,
+                letterSpacing: -0.5,
+              }}
+            >
+              Program
+            </div>
+          </div>
+          <div
+            style={{
+              fontSize: 12.5,
+              color: defter.muted,
+              marginTop: 6,
+              fontFamily: fontSerif,
+              fontStyle: 'italic',
+            }}
+          >
+            son üretim 14:32 · 455 slot · 0 çakışma · 9-A
+          </div>
+        </div>
+      </div>
+
+      <Card style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `100px repeat(${days.length}, 1fr)`,
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
+          <div
+            style={{
+              padding: '10px 12px',
+              background: defter.paper2,
+              borderRight: `1px solid ${defter.line}`,
+              borderBottom: `1px solid ${defter.line}`,
+              fontSize: 10,
+              letterSpacing: 1.5,
+              fontWeight: 700,
+              color: defter.muted,
+            }}
+          >
+            SAAT
+          </div>
+          {days.map((d, i) => (
+            <div
+              key={d}
+              style={{
+                padding: '10px 12px',
+                background: defter.paper2,
+                fontSize: 11,
+                fontWeight: 700,
+                color: defter.ink,
+                borderRight: i < days.length - 1 ? `1px solid ${defter.line}` : 'none',
+                borderBottom: `1px solid ${defter.line}`,
+                textAlign: 'center',
+                letterSpacing: 1.5,
+              }}
+            >
+              {d.toUpperCase()}
+            </div>
+          ))}
+          {hours.map((h, hi) => (
+            <Row
+              key={hi}
+              h={h}
+              hi={hi}
+              days={days}
+              grid={grid}
+              colors={colors}
+              teachers={teachers}
+              filled={filled}
+              total={hours.length}
+            />
+          ))}
+        </div>
+      </Card>
+    </MockShell>
+  );
+}
+
+function Row({
+  h,
+  hi,
+  days,
+  grid,
+  colors,
+  teachers,
+  filled,
+  total,
+}: {
+  h: { n: number; time: string };
+  hi: number;
+  days: string[];
+  grid: string[][];
+  colors: Record<string, { bg: string; fg: string }>;
+  teachers: Record<string, string>;
+  filled: number;
+  total: number;
+}) {
+  return (
+    <>
+      <div
+        style={{
+          padding: '6px 12px',
+          background: defter.paper,
+          borderRight: `1px solid ${defter.line}`,
+          borderBottom: hi < total - 1 ? `1px solid ${defter.line}` : 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 600 }}>{h.n}. ders</div>
+        <div style={{ fontSize: 10, color: defter.muted, fontFamily: fontMono }}>{h.time}</div>
+      </div>
+      {days.map((_d, di) => {
+        const idx = hi * days.length + di;
+        const isFilled = idx < filled;
+        const code = grid[di]![hi]!;
+        const c = colors[code] ?? { bg: defter.paper2, fg: defter.muted };
+        return (
+          <div
+            key={di}
+            style={{
+              borderRight: di < days.length - 1 ? `1px solid ${defter.line}` : 'none',
+              borderBottom: hi < total - 1 ? `1px solid ${defter.line}` : 'none',
+            }}
+          >
+            {isFilled ? (
+              <div
+                style={{
+                  height: '100%',
+                  background: c.bg,
+                  borderLeft: `3px solid ${c.fg}`,
+                  padding: '6px 10px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  transition: 'all 0.2s',
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 700,
+                    color: c.fg,
+                    fontSize: 12.5,
+                    letterSpacing: 0.3,
+                  }}
+                >
+                  {code}
+                </div>
+                <div style={{ fontSize: 10.5, color: defter.muted }}>{teachers[code]}</div>
+              </div>
+            ) : (
+              <div style={{ width: '100%', height: '100%', background: defter.paper2 + '40' }} />
+            )}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Mini UI helpers
+// ─────────────────────────────────────────────────────────────
+function Header({
+  title,
+  count,
+  sub,
+  actionLabel,
+}: {
+  title: string;
+  count?: number;
+  sub: string;
+  actionLabel?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        marginBottom: 18,
+      }}
+    >
+      <div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <div
+            style={{
+              fontFamily: fontSerif,
+              fontSize: 38,
+              lineHeight: 1,
+              letterSpacing: -0.6,
+              fontWeight: 400,
+            }}
+          >
+            {title}
+          </div>
+          {count != null && (
+            <div
+              style={{
+                fontFamily: fontSerif,
+                fontSize: 24,
+                color: defter.muted,
+                fontStyle: 'italic',
+              }}
+            >
+              ({count})
+            </div>
+          )}
+        </div>
+        <div
+          style={{
+            fontSize: 13,
+            color: defter.muted,
+            marginTop: 6,
+            maxWidth: 620,
+            lineHeight: 1.5,
+          }}
+        >
+          {sub}
+        </div>
+      </div>
+      {actionLabel && (
+        <button
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            padding: '8px 14px',
+            borderRadius: 9,
+            border: 'none',
+            background: defter.primary,
+            color: defter.primaryInk,
+            fontWeight: 600,
+            fontSize: 13,
+            fontFamily: fontSans,
+            boxShadow: `0 4px 12px -6px ${defter.primary}99`,
+          }}
+        >
+          <Plus size={14} color={defter.primaryInk} />
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Card({ children, style }: { children: ReactNode; style?: CSSProperties }) {
+  return (
+    <div
+      style={{
+        background: defter.paper,
+        border: `1px solid ${defter.line}`,
+        borderRadius: 14,
+        overflow: 'hidden',
+        boxShadow: '0 1px 0 rgba(0,0,0,0.02), 0 6px 18px -10px rgba(30,63,174,0.12)',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function TableHead({
+  cols,
+}: {
+  cols: { label: string; flex?: number; w?: number; align?: 'left' | 'right' }[];
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        padding: '11px 20px',
+        background: defter.paper2,
+        fontSize: 10.5,
+        fontWeight: 700,
+        color: defter.muted,
+        letterSpacing: 1.5,
+        textTransform: 'uppercase',
+      }}
+    >
+      {cols.map((c, i) => (
+        <div
+          key={i}
+          style={{
+            flex: c.flex || 'none',
+            width: c.w || 'auto',
+            textAlign: c.align || 'left',
+          }}
+        >
+          {c.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Pill({ children, color, bg }: { children: ReactNode; color: string; bg: string }) {
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        padding: '3px 9px',
+        borderRadius: 999,
+        fontWeight: 600,
+        background: bg,
+        color,
+        letterSpacing: 0.5,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function SmallGhost({ icon, label }: { icon: ReactNode; label?: string }) {
+  return (
+    <button
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: label ? '7px 11px' : '7px 8px',
+        borderRadius: 8,
+        border: 'none',
+        background: 'transparent',
+        color: defter.mutedDeep,
+        fontWeight: 500,
+        fontSize: 12.5,
+        fontFamily: fontSans,
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function Range({ value }: { value: number }) {
+  return (
+    <div
+      style={{
+        position: 'relative',
+        height: 6,
+        background: defter.paper2,
+        borderRadius: 999,
+        border: `1px solid ${defter.line}`,
+      }}
+    >
+      <div
+        style={{
+          width: `${value}%`,
+          height: '100%',
+          background: defter.primary,
+          borderRadius: 999,
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          left: `${value}%`,
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 16,
+          height: 16,
+          borderRadius: '50%',
+          background: defter.primary,
+          border: `3px solid ${defter.paper}`,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+        }}
+      />
+    </div>
+  );
+}
+
+const KEYFRAMES = `
+  @keyframes demo-pulse {
+    0%, 100% { opacity: 0.35; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.1); }
+  }
+  @keyframes demo-slide-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+`;

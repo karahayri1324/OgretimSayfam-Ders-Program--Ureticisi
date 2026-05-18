@@ -1,21 +1,6 @@
 import { z } from 'zod';
 import type { AIResponse } from '../../src/lib/types.js';
 
-/**
- * AI çıkış şeması — Plans/05_OUTPUT_SCHEMA.md "Zod Schema" bölümüyle uyumlu.
- * Burada tanımlanan şema, gerek mock yanıtları gerek gerçek HTTP yanıtlarını
- * DB'ye yazılmadan önce doğrulamak için tek "kontrat" noktasıdır.
- *
- * Discriminated union (agentic mode):
- *   - kind: "constraint"        (default — kind yoksa da bu kabul edilir)
- *   - kind: "query"             — doğal dil cevabı (info card)
- *   - kind: "tool_call"         — AI'nın iteratif tool çağrısı
- *   - kind: "schedule_update"   — kullanıcı onayı ile uygulanacak ayar değişikliği
- *   - kind: "data_mutation"     — CRUD işlem önerisi (her zaman kullanıcı onayı ister)
- *
- * validateAIResponse, "kind" alanı eksik gelirse legacy constraint formatı
- * olarak yorumlar (backward compat — eski fine-tuned modeller hâlâ çalışır).
- */
 
 export const ConstraintTypeEnum = z.enum([
   'TEACHER_NOT_AVAILABLE',
@@ -78,6 +63,7 @@ export const ConstraintTypeEnum = z.enum([
   'STUDENTS_EARLY_MAX_BEGINNINGS',
   'STUDENTS_MAX_HOURS_DAILY',
   'MAX_TOTAL_ACTIVITIES_FROM_SET',
+  'TWO_ACTIVITIES_CONSECUTIVE',
 ]);
 
 export const SlotSchema = z.object({
@@ -92,7 +78,6 @@ export const AIConstraintSchema = z.object({
   params: z.record(z.any()),
 });
 
-/** kind: "constraint" — mevcut davranış, kind yoksa da bu kabul edilir. */
 export const ConstraintResponseSchema = z.object({
   kind: z.literal('constraint').optional(),
   constraints: z.array(AIConstraintSchema),
@@ -102,7 +87,6 @@ export const ConstraintResponseSchema = z.object({
   unresolved: z.array(z.string()).default([]),
 });
 
-/** kind: "query" — doğal dil soruya cevap. data: opsiyonel ek bilgi (örn ders listesi). */
 export const QueryResponseSchema = z.object({
   kind: z.literal('query'),
   answer: z.string(),
@@ -111,7 +95,6 @@ export const QueryResponseSchema = z.object({
   explanation: z.string().optional(),
 });
 
-/** kind: "tool_call" — AI iteratif çalışıyor; tool sonucunu bekliyor. */
 export const ToolCallResponseSchema = z.object({
   kind: z.literal('tool_call'),
   tool: z.string().min(1),
@@ -119,7 +102,6 @@ export const ToolCallResponseSchema = z.object({
   reasoning: z.string().optional(),
 });
 
-/** kind: "schedule_update" — kullanıcı onayıyla uygulanacak program ayar değişikliği. */
 export const ScheduleUpdateResponseSchema = z.object({
   kind: z.literal('schedule_update'),
   action: z.string().min(1),
@@ -128,13 +110,6 @@ export const ScheduleUpdateResponseSchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
 });
 
-/**
- * kind: "run_solver" — kullanıcı onayıyla FET üretimini başlatır.
- * AI bu kindle dönerse UI bir onay kartı gösterir, onaylanınca
- * window.api.generate.run(timeLimitSec) tetiklenir.
- *
- * Manuel UI parity: "Programı Üret" sayfasındaki butonun AI eşdeğeri.
- */
 export const RunSolverResponseSchema = z.object({
   kind: z.literal('run_solver'),
   timeLimitSec: z.number().int().min(10).max(3600).optional(),
@@ -142,10 +117,6 @@ export const RunSolverResponseSchema = z.object({
   confidence: z.number().min(0).max(1).optional(),
 });
 
-/**
- * data_mutation tarafından desteklenen CRUD operasyon türleri.
- * Yeni op eklerken: bu enum + electron/ai/mutation-executor.ts + mock-server + UI etiketi.
- */
 export const DataMutationOpEnum = z.enum([
   'add_teacher',
   'update_teacher',
@@ -176,32 +147,24 @@ export const DataMutationOpEnum = z.enum([
   'delete_constraint',
   'add_activity_constraint',
   'set_setting',
-  // Paket 1 — split + slot editing + lock
   'add_split_activity',
   'set_timetable_slot',
   'lock_timetable_slot',
   'unlock_timetable_slot',
-  // Paket 2 — substitute + merge
   'substitute_teacher',
   'merge_activities',
-  // Paket 3 — export
   'export_timetable',
+  'swap_timetable_slots',
+  'pair_subjects_consecutive',
+  'navigate_to',
 ]);
 
 export const DataMutationActionSchema = z.object({
   op: DataMutationOpEnum,
   params: z.record(z.any()),
-  /** Türkçe — kullanıcının onaylayacağı insan-okunabilir özet. */
   description: z.string().min(1),
 });
 
-/**
- * kind: "data_mutation" — kullanıcı onayıyla uygulanacak CRUD işlem(ler)i.
- * Tek bir mesaj birden çok atomik action içerebilir (örn. "Ahmet hocaya 10F'ye
- * 2 saat sanat eğitimi ekle" → add_subject + link_teacher_subject + add_activity).
- *
- * requiresConfirmation **her zaman true**'dur — AI doğrudan apply edemez.
- */
 export const DataMutationResponseSchema = z.object({
   kind: z.literal('data_mutation'),
   actions: z.array(DataMutationActionSchema).min(1),
@@ -222,19 +185,12 @@ export const AIResponseSchema = z.union([
 export type AIResponseInput = z.input<typeof AIResponseSchema>;
 export type AIResponseParsed = z.output<typeof AIResponseSchema>;
 
-/**
- * AI yanıtını doğrular. Geçersizse Türkçe hata mesajıyla throw eder.
- * Caller, client.ts içinde bu hatayı yakalayıp AI_INVALID_RESPONSE koduna çevirir.
- *
- * "kind" alanı eksik gelirse legacy constraint formatı olarak yorumlanır.
- */
 export function validateAIResponse(raw: unknown): AIResponse {
   const kind =
     raw && typeof raw === 'object' && 'kind' in (raw as object)
       ? (raw as { kind?: unknown }).kind
       : undefined;
 
-  // kind yoksa veya "constraint" ise — legacy/constraint yol
   if (kind === undefined || kind === 'constraint') {
     const result = ConstraintResponseSchema.safeParse(raw);
     if (!result.success) {

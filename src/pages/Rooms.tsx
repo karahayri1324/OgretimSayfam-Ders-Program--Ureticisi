@@ -170,7 +170,6 @@ function RoomDialog({
     }
   }, [open, room]);
 
-  // Virgülle ayrılmış toplu giriş (create modunda)
   const parsedNames = room
     ? [name.trim()].filter(Boolean)
     : name

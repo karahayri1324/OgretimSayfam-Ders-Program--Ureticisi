@@ -2,24 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { mockParseSync, type AIContext } from '../electron/ai/mock-server.js';
 import type { AIResponse } from '../src/lib/types.js';
 
-/**
- * AI mock-server coverage testi — 50+ gerçek Türkçe prompt için parse
- * sonucunu beklenen kind/op/param'larla karşılaştırır.
- *
- * Kategoriler (toplam ≥ 50):
- *  - Tek constraint (5)
- *  - Çoklu constraint (5)
- *  - Query (10)
- *  - Tool call (5)
- *  - Data mutation simple (10)
- *  - Data mutation complex (5)
- *  - Schedule update (5)
- *  - Wizard (3)
- *  - Edge cases / ambiguous (5)
- *
- * Mock pattern-bazlı olduğu için %100 deterministik. Gerçek LLM bu sayıyı
- * %95+'a taşır; mock'ta beklenen ≥%80 hedef.
- */
 
 const CTX: AIContext = {
   teachers: [
@@ -49,12 +31,10 @@ type Expect = {
   prompt: string;
   category: string;
   kind: AIResponse['kind'];
-  // İsteğe bağlı: ek alan kontrolleri
   predicate?: (res: AIResponse) => boolean;
 };
 
 const CASES: Expect[] = [
-  // ── Tek constraint (5) ─────────────────────────────────────────────────
   {
     prompt: 'Ahmet hoca cuma yok',
     category: 'single_constraint',
@@ -96,7 +76,6 @@ const CASES: Expect[] = [
       r.constraints[0]?.type === 'TEACHER_MAX_HOURS_DAILY',
   },
 
-  // ── Çoklu constraint (5) — ek detector'lar ────────────────────────────
   {
     prompt: 'Matematik sabah olsun',
     category: 'extended_constraint',
@@ -138,7 +117,6 @@ const CASES: Expect[] = [
       r.constraints[0]?.type === 'SUBJECT_CONSECUTIVE_HOURS',
   },
 
-  // ── Query (10) ─────────────────────────────────────────────────────────
   {
     prompt: 'Tüm öğretmenleri listele',
     category: 'query',
@@ -190,7 +168,6 @@ const CASES: Expect[] = [
     kind: 'query',
   },
 
-  // ── Tool call (5) ──────────────────────────────────────────────────────
   {
     prompt: 'Hangi sınıfların matematik dersi var?',
     category: 'tool_call',
@@ -219,7 +196,6 @@ const CASES: Expect[] = [
     kind: 'query',
   },
 
-  // ── Data mutation simple (10) ──────────────────────────────────────────
   {
     prompt: 'Mehmet Kaya öğretmenini sil',
     category: 'dm_simple',
@@ -259,8 +235,6 @@ const CASES: Expect[] = [
     prompt: 'Pazar gününü sil',
     category: 'dm_simple',
     kind: 'data_mutation',
-    // Eğer Pazar context'te yoksa sil olmadan handlerdan çıkıp clarification döner;
-    // burada Pazar context'te yok → ya data_mutation ya da query.
     predicate: (r) => r.kind === 'data_mutation' || r.kind === 'query',
   },
   {
@@ -292,7 +266,6 @@ const CASES: Expect[] = [
       r.kind === 'data_mutation' && r.actions[0]?.op === 'add_teacher',
   },
 
-  // ── Data mutation complex (5) ──────────────────────────────────────────
   {
     prompt: "Ahmet Yılmaz hocaya 10F'ye 2 saat Sanat Eğitimi dersi ekle",
     category: 'dm_complex',
@@ -330,7 +303,7 @@ const CASES: Expect[] = [
     predicate: (r) => {
       if (r.kind !== 'data_mutation') return false;
       const activityOps = r.actions.filter((a) => a.op === 'add_activity');
-      return activityOps.length >= 3; // 9A, 9B, 9C
+      return activityOps.length >= 3;
     },
   },
   {
@@ -343,7 +316,6 @@ const CASES: Expect[] = [
       r.actions.every((a) => a.op === 'delete_teacher'),
   },
 
-  // ── Schedule update (5) ────────────────────────────────────────────────
   {
     prompt: 'Teneffüsleri 15 dakika uzat',
     category: 'schedule_update',
@@ -368,8 +340,6 @@ const CASES: Expect[] = [
   {
     prompt: 'Cumartesi günü ekle',
     category: 'schedule_update_or_data',
-    // Mock'ta "Cumartesi günü ekle" data_mutation:add_day olarak yakalanıyor;
-    // her ikisi de geçerli sayılır.
     kind: 'data_mutation',
     predicate: (r) =>
       (r.kind === 'data_mutation' && r.actions[0]?.op === 'add_day') ||
@@ -384,13 +354,10 @@ const CASES: Expect[] = [
       (r.kind === 'data_mutation' && r.actions[0]?.op === 'delete_day'),
   },
 
-  // ── Wizard (3) ─────────────────────────────────────────────────────────
   {
     prompt: 'Ders programı oluşturalım, nereden başlayalım?',
     category: 'wizard',
     kind: 'query',
-    // Yeni conversational wizard: tek adım, ya ders dağıtımı sorar (context dolu)
-    // ya da hangi/sınıf/programı üret/kısıtlama gibi anahtar kelimeler içerir.
     predicate: (r) =>
       r.kind === 'query' &&
       /(dağıtım|hangi|kısıtlama|programı\s+üret|sınıf|ders)/i.test(r.answer),
@@ -406,7 +373,6 @@ const CASES: Expect[] = [
     kind: 'query',
   },
 
-  // ── Edge cases / ambiguous (5) ─────────────────────────────────────────
   {
     prompt: 'Öğretmen ekle',
     category: 'ambiguous',

@@ -38,9 +38,6 @@ export const hoursRepo = {
     return rows.map(rowToHour);
   },
 
-  /**
-   * Tüm saat listesini ver(ilen) sıra ile değiştirir.
-   */
   replaceAll(hours: HourInput[]): Hour[] {
     const db = getDb();
     const schoolId = schoolsRepo.getActiveId();

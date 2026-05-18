@@ -22,44 +22,21 @@ import type {
   DataMutationApplyResult,
 } from '../../src/lib/types.js';
 
-/** Multi-turn için AI'a yollanan max geçmiş mesaj sayısı. */
 const HISTORY_LIMIT = 10;
 
-/**
- * ai_messages tablosundan son N mesajı okur, ConversationHistoryEntry
- * formatına çevirir. Sistem mesajları (tool çağrı kaydı) atlanır —
- * sadece kullanıcı/asistan turları multi-turn context'e gider.
- */
 function buildHistory(): ConversationHistoryEntry[] {
   const all = aiMessagesRepo.list();
-  // En son N tane (zamansal sıra korunur — listele ASC, son N alıyoruz)
   const slice = all.slice(-HISTORY_LIMIT);
   const out: ConversationHistoryEntry[] = [];
   for (const m of slice) {
     if (m.role === 'user') out.push({ role: 'user', text: m.text });
     else if (m.role === 'assistant') out.push({ role: 'assistant', text: m.text });
-    // system (tool çağrısı kaydı) atlanır — UI rezini bozmaz
   }
   return out;
 }
 
 const ApplyMutationsSchema = z.array(DataMutationActionSchema).min(1);
 
-/**
- * AI IPC handler'ları.
- *   ai:parse        — kullanıcı metnini AI'ya gönderir (agentic, tool desteği),
- *                     sonucu döndürür ve geçmişe yazar
- *   ai:history      — sohbet geçmişini döndürür
- *   ai:clearHistory — geçmişi temizler
- *
- * Tüm response'lar { ok, data } | { ok, error } şeklinde — preload kontrası bu.
- *
- * Agentic akış:
- *   1. user message → ai_messages (role='user')
- *   2. parseWithTools → AI iteratif çalışır; her tool çağrısı history'e
- *      JSON olarak (role='system') eklenir.
- *   3. final response → ai_messages (role='assistant', text=JSON.stringify)
- */
 export function registerAiHandlers(): void {
   ipcMain.handle('ai:parse', async (_evt, text: unknown): Promise<Result<AIResponse>> => {
     if (typeof text !== 'string' || !text.trim()) {
@@ -69,8 +46,6 @@ export function registerAiHandlers(): void {
       };
     }
 
-    // Multi-turn: kullanıcı mesajı kaydedilmeden ÖNCE geçmişi al,
-    // böylece history'de kendi tekrarımız yer almaz.
     let conversationHistory: ConversationHistoryEntry[] = [];
     try {
       conversationHistory = buildHistory();
@@ -103,7 +78,6 @@ export function registerAiHandlers(): void {
         history: conversationHistory,
       });
 
-      // Tool çağrılarını history'e işle (system role + JSON payload).
       for (const tc of toolCalls) {
         try {
           aiMessagesRepo.add({

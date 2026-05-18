@@ -12,13 +12,6 @@ import { registerSettingsHandlers } from './settings.js';
 import { registerAppHandlers } from './app.js';
 import { log } from '../utils/logger.js';
 
-/**
- * Tüm IPC handler'larını tek bir çağrıda kayıt eder.
- * main.ts uygulama hazır olduğunda bunu çağırır.
- *
- * @param getWindow Aktif BrowserWindow'u veren callback. Generate handler'ı
- *   ilerleme event'lerini bu pencereye gönderir.
- */
 export function registerAllHandlers(getWindow: () => BrowserWindow): void {
   log.info('IPC handler\'ları kayıt ediliyor');
   registerTeachersHandlers();

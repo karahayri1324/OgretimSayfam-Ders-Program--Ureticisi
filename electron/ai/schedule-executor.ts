@@ -4,38 +4,6 @@ import { dayHoursRepo } from '../db/repositories/day_hours.js';
 import { log } from '../utils/logger.js';
 import type { AIScheduleUpdateResponse, Hour } from '../../src/lib/types.js';
 
-/**
- * AI'nın "schedule_update" yanıtını gerçekten DB'ye uygular.
- *
- * Desteklenen action'lar:
- *   - extend_breaks         { minutes: number }
- *       Tüm global saatlerin SÜRESİNİ koruyarak teneffüsleri uzat. i. saatin
- *       start/end değerleri i*minutes kadar geriye kaydırılır (mode='break').
- *
- *   - add_hours_to_day      { day: string, count?: number }
- *       Belirli günün day_hours iskeletine N adet boş ders saati ekler.
- *       (day_hours yoksa global hours seed'lenir, sonra ekleme yapılır.)
- *       MAX 12 ders saatine kadar — daha fazlasını reddeder.
- *
- *   - set_hours_per_day     { hoursPerDay: number }
- *       Global hours tablosunu N satır olacak biçimde yeniden seed eder.
- *       Mevcut start/end'leri korumaya çalışır; yetmezse "1. Ders"…"N. Ders"
- *       isimleriyle boş saatler eklenir/kırpılır. day_hours override'lar
- *       temizlenir (global'e dönüş).
- *
- *   - remove_day            { day: string }
- *       Days tablosundan ilgili günü siler. DESTRUCTIVE. day_hours kayıtları
- *       ON DELETE CASCADE ile temizlenir (FK varsa); aksi takdirde manuel temizlik.
- *
- *   - add_day               { day: string }
- *       Days tablosuna yeni gün ekler (idempotent: zaten varsa skip).
- *
- * Davranış / kontratlar:
- *   - Her başarılı çağrı schedule:get'e eşdeğer bir snapshot döner
- *     ({ days, hours, dayHours }) — UI tek seferde reload edebilir.
- *   - Hata mesajları Türkçedir.
- *   - Mevcut repository'leri kullanır; yeni tablo veya migration YOK.
- */
 
 export type ScheduleUpdateApplyResult = {
   ok: true;
@@ -68,7 +36,6 @@ function snapshot(): ScheduleUpdateApplyResult['data'] {
   };
 }
 
-/** "HH:MM" formatındaki saati delta dakika kaydırır. Geçersizse aynı döner. */
 function shiftClock(time: string, deltaMinutes: number): string {
   const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
   if (!match) return time;

@@ -65,5 +65,4 @@ export const aiHistoryRepo = {
   },
 };
 
-// Alias for naming consistency with hyphenated import style
 export const aiMessagesRepo = aiHistoryRepo;

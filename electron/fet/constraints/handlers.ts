@@ -1,21 +1,3 @@
-/**
- * AI constraint tipinden (Plans/05) FET XML node'una çevirici fonksiyonlar.
- *
- * Her handler:
- *   - input: Constraint (DB satırı), BuilderContext
- *   - output: { section: 'time'|'space', node: object }[] | null
- *   - bilinmeyen referans (öğretmen/sınıf/derslik adı DB'de yoksa) → null döner
- *     ve ctx.skipped'a sebep ekler.
- *
- * Node formatı xmlbuilder2'ye uyumlu plain JS objesidir; her tag bir property.
- * "ConstraintTeacherNotAvailableTimes": {
- *   Weight_Percentage: 100, Teacher: "Ahmet", Number_of_Not_Available_Times: 2,
- *   Not_Available_Time: [ {Day:"Cuma", Hour:"2. Ders"}, ... ],
- *   Active: true, Comments: ""
- * }
- *
- * xmlbuilder2 array değerleri otomatik olarak aynı tag'i tekrarlayan child'lar üretir.
- */
 
 import type { Constraint, ConstraintType } from '../../../src/lib/types.js';
 import type { BuilderContext, SkippedConstraint } from '../types.js';
@@ -30,7 +12,6 @@ export type ConstraintNode = {
 
 export type HandlerResult = ConstraintNode[] | null;
 
-// ---------- yardımcılar ----------
 
 function skip(ctx: BuilderContext, c: Constraint, reason: string): null {
   ctx.skipped.push({ constraintId: c.id, type: c.type, reason });
@@ -59,14 +40,10 @@ function getArr(params: Record<string, unknown>, key: string): unknown[] {
 type FetSlot = { Day: string; Hour: string };
 type FetPreferredSlot = { Preferred_Day: string; Preferred_Hour: string };
 
-/** FET'in `ConstraintActivityPreferredTimeSlots` / `ConstraintSubjectPreferredTimeSlots`
- * child element'leri `Preferred_Day`/`Preferred_Hour` adı taşır
- * (NotAvailableTime'daki `Day`/`Hour` ile karıştırma). */
 function toPreferredSlots(slots: FetSlot[]): FetPreferredSlot[] {
   return slots.map((s) => ({ Preferred_Day: s.Day, Preferred_Hour: s.Hour }));
 }
 
-/** Plans/05 Slot tipini FET'in {Day, Hour} formatına çevirir (1-indexed hour). */
 function expandSlots(
   raw: unknown[],
   ctx: BuilderContext,
@@ -80,7 +57,6 @@ function expandSlots(
     const obj = item as { day?: unknown; hour?: unknown };
     const dayNames: string[] = [];
     if (obj.day === null || obj.day === undefined) {
-      // tüm günler
       for (const d of ctx.days) dayNames.push(d.name);
     } else if (typeof obj.day === 'string') {
       const dayObj = ctx.dayByName.get(obj.day);
@@ -121,7 +97,6 @@ function commonTail(c: Constraint): { Active: boolean; Comments: string } {
   return { Active: c.active, Comments: c.notes ?? '' };
 }
 
-// ---------- öğretmen handler'ları ----------
 
 function teacherNotAvailable(c: Constraint, ctx: BuilderContext): HandlerResult {
   const name = getStr(c.params, 'teacher');
@@ -1139,6 +1114,42 @@ function minGapsBetweenActivities(c: Constraint, ctx: BuilderContext): HandlerRe
   }];
 }
 
+/**
+ * İki aktiviteyi ardışık yapar — act2, act1'in HEMEN ardından gelmeli.
+ * FET ConstraintTwoActivitiesConsecutive. Tipik kullanım: "Fizik ve
+ * Matematik peş peşe olsun (lab-teorik)". Bir activityId split grubuna
+ * aitse her grup üyesi için ayrı constraint expand edilir.
+ */
+function twoActivitiesConsecutive(c: Constraint, ctx: BuilderContext): HandlerResult {
+  const firstId = getNum(c.params, 'firstActivityId');
+  const secondId = getNum(c.params, 'secondActivityId');
+  if (firstId === null || secondId === null) {
+    return skip(ctx, c, 'firstActivityId ve secondActivityId gerekli');
+  }
+  const firstFetIds = ctx.fetActivityIdsByActivity.get(firstId) ?? [];
+  const secondFetIds = ctx.fetActivityIdsByActivity.get(secondId) ?? [];
+  if (firstFetIds.length === 0 || secondFetIds.length === 0) {
+    return skip(ctx, c, `Aktivite bulunamadı: ${firstId} veya ${secondId}`);
+  }
+  // Her FET-id çifti için ayrı constraint
+  const out: ReturnType<typeof maxGapsBetweenActivities> = [];
+  for (const f of firstFetIds) {
+    for (const s of secondFetIds) {
+      out.push({
+        section: 'time',
+        tag: 'ConstraintTwoActivitiesConsecutive',
+        body: {
+          Weight_Percentage: c.weight,
+          First_Activity_Id: f,
+          Second_Activity_Id: s,
+          ...commonTail(c),
+        },
+      });
+    }
+  }
+  return out;
+}
+
 function maxGapsBetweenActivities(c: Constraint, ctx: BuilderContext): HandlerResult {
   const rawIds = getArr(c.params, 'activityIds');
   const ids: number[] = [];
@@ -1552,6 +1563,7 @@ export const HANDLERS: Record<ConstraintType, Handler> = {
   STUDENTS_EARLY_MAX_BEGINNINGS: studentsEarlyMaxBeginnings,
   STUDENTS_MAX_HOURS_DAILY: studentsMaxHoursDaily,
   MAX_TOTAL_ACTIVITIES_FROM_SET: maxTotalActivitiesFromSet,
+  TWO_ACTIVITIES_CONSECUTIVE: twoActivitiesConsecutive,
 };
 
 export function dispatchConstraint(

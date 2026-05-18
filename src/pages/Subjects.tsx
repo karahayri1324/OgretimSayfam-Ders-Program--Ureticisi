@@ -13,27 +13,25 @@ import type { Subject, SubjectInput } from '../lib/types';
 
 const DEFAULT_COLOR = '#3b82f6';
 
-// Tailwind paletinden seçilmiş okuyabilir renkler.
-// Her yeni ders eklenirken biri rastgele seçilir.
 const PALETTE = [
-  '#ef4444', // red-500
-  '#f97316', // orange-500
-  '#f59e0b', // amber-500
-  '#eab308', // yellow-500
-  '#84cc16', // lime-500
-  '#22c55e', // green-500
-  '#10b981', // emerald-500
-  '#14b8a6', // teal-500
-  '#06b6d4', // cyan-500
-  '#0ea5e9', // sky-500
-  '#3b82f6', // blue-500
-  '#6366f1', // indigo-500
-  '#8b5cf6', // violet-500
-  '#a855f7', // purple-500
-  '#d946ef', // fuchsia-500
-  '#ec4899', // pink-500
-  '#f43f5e', // rose-500
-  '#64748b', // slate-500
+  '#ef4444',
+  '#f97316',
+  '#f59e0b',
+  '#eab308',
+  '#84cc16',
+  '#22c55e',
+  '#10b981',
+  '#14b8a6',
+  '#06b6d4',
+  '#0ea5e9',
+  '#3b82f6',
+  '#6366f1',
+  '#8b5cf6',
+  '#a855f7',
+  '#d946ef',
+  '#ec4899',
+  '#f43f5e',
+  '#64748b',
 ];
 
 function randomColor(): string {
@@ -206,13 +204,11 @@ function SubjectDialog({
     if (open) {
       setName(subject?.name ?? '');
       setCode(subject?.shortCode ?? '');
-      // Yeni eklerken paletten rastgele bir renk seç; düzenlerken mevcut rengi kullan
       setColor(subject?.color ?? randomColor());
       setNotes(subject?.notes ?? '');
     }
   }, [open, subject]);
 
-  // Virgülle ayrılmış toplu giriş — sadece create modunda
   const parsedNames = subject
     ? [name.trim()].filter(Boolean)
     : name
@@ -227,7 +223,6 @@ function SubjectDialog({
       await onSubmit({
         name: n,
         shortCode: code.trim() || null,
-        // Toplu eklemede her dersi farklı renkle ayır
         color: parsedNames.length > 1 ? randomColor() : color,
         notes: notes.trim() || null,
       });

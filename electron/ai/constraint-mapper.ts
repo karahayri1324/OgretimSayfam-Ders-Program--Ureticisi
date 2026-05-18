@@ -8,11 +8,6 @@ import type {
   Room,
 } from '../../src/lib/types.js';
 
-/**
- * AppContext — buildAIContext'in döndürdüğü string listesinden farklı;
- * bu burada id'leriyle birlikte DB tarafından sağlanır. Mapper bunu kullanarak
- * AI'nın verdiği "isim" referanslarını "DB'de gerçekten var mı?" diye sağlar.
- */
 export type AppContext = {
   teachers: Pick<Teacher, 'id' | 'name'>[];
   classes: Pick<ClassRoom, 'id' | 'name'>[];
@@ -30,13 +25,11 @@ export type MapResult = {
   skipped: SkippedConstraint[];
 };
 
-/** Case-insensitive isim eşitliği. */
 function nameExists(name: string, list: { name: string }[]): boolean {
   const target = name.trim().toLocaleLowerCase('tr');
   return list.some((x) => x.name.trim().toLocaleLowerCase('tr') === target);
 }
 
-/** params içindeki string referansların DB'de gerçekten var olduğunu doğrular. */
 function validateRefs(
   type: ConstraintType,
   params: Record<string, unknown>,
@@ -59,7 +52,6 @@ function validateRefs(
     return `Derslik bulunamadı: '${room}'`;
   }
 
-  // Bazı tipler için zorunlu referans yokluğu da skip nedeni
   switch (type) {
     case 'TEACHER_NOT_AVAILABLE':
     case 'TEACHER_MAX_DAYS_PER_WEEK':
@@ -94,20 +86,12 @@ function validateRefs(
       }
       break;
     case 'TEACHERS_MAX_GAPS_PER_WEEK':
-      // referans gerektirmez
       break;
   }
 
   return null;
 }
 
-/**
- * AI tarafından üretilen constraint listesini DB'ye yazılabilir ConstraintInput'a çevirir.
- * Eksik/geçersiz referans varsa skipped'a atılır; UI bunu kullanıcıya gösterir.
- *
- * Not: Bu FET-aware değildir. FET'e gönderme aşaması ayrı bir mapper'da
- * (constraint-mapper'ın FET XML versiyonu) yapılacak.
- */
 export function mapAIConstraintsToInternal(
   aiConstraints: AIConstraint[],
   ctx: AppContext,

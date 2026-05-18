@@ -100,6 +100,27 @@ export default function Timetable() {
     return m;
   }, [subjects]);
 
+  const pendingExport = useAIChatStore((s) => s.pendingExport);
+  const consumePendingExport = useAIChatStore((s) => s.consumePendingExport);
+  useEffect(() => {
+    if (!pendingExport) return;
+    if (!result || entityList.length === 0) return;
+    if (pendingExport.class) {
+      const target = entityList.find(
+        (e) => e.name.toLocaleLowerCase('tr') === pendingExport.class!.toLocaleLowerCase('tr'),
+      );
+      if (target) setSelectedId(target.id);
+    }
+    consumePendingExport();
+    const fmt = pendingExport.format.toLowerCase();
+    setTimeout(() => {
+      if (fmt === 'pdf') void handleExportPdf();
+      else if (fmt === 'excel' || fmt === 'xlsx') void handleExportExcel();
+      else if (fmt === 'html') void handleExportHtml();
+    }, 80);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingExport, result, entityList]);
+
   if (!result) {
     return (
       <EmptyState
@@ -196,33 +217,6 @@ export default function Timetable() {
       setExporting(null);
     }
   }
-
-  // AI'nın export_timetable confirm'inden gelen pendingExport sinyalini tüket.
-  // Sayfa açıldığında veya selectedId değiştiğinde — data hazır olunca otomatik
-  // ilgili export handler'ı tetiklenir.
-  const pendingExport = useAIChatStore((s) => s.pendingExport);
-  const consumePendingExport = useAIChatStore((s) => s.consumePendingExport);
-  useEffect(() => {
-    if (!pendingExport) return;
-    if (!result || entityList.length === 0) return; // data daha hazır değil
-
-    // Sınıf scope verilmişse seç
-    if (pendingExport.class) {
-      const target = entityList.find(
-        (e) => e.name.toLocaleLowerCase('tr') === pendingExport.class!.toLocaleLowerCase('tr'),
-      );
-      if (target) setSelectedId(target.id);
-    }
-    consumePendingExport();
-    // Bir tick bekle ki selectedId güncellensin, sonra tetikle
-    const fmt = pendingExport.format.toLowerCase();
-    setTimeout(() => {
-      if (fmt === 'pdf') void handleExportPdf();
-      else if (fmt === 'excel' || fmt === 'xlsx') void handleExportExcel();
-      else if (fmt === 'html') void handleExportHtml();
-    }, 80);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingExport, result, entityList]);
 
   const exportDisabled = exporting !== null || selectedId == null;
 

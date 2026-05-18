@@ -26,10 +26,6 @@ export const daysRepo = {
     return rows.map(rowToDay);
   },
 
-  /**
-   * Tüm gün listesini ver(ilen) sıra ile değiştirir.
-   * Eski günler silinir, yeniler order_index ile ekleniyor.
-   */
   replaceAll(names: string[]): Day[] {
     const db = getDb();
     const schoolId = schoolsRepo.getActiveId();
