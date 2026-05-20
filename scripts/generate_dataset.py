@@ -148,11 +148,36 @@ def example(ctx: dict, request: str, payload: dict) -> dict:
     }
 
 HARD_PHRASES = ["olmasın", "yasak", "asla", "kesinlikle", "müsait değil", "yapmasın", "girmesin", "alamaz", "olmamalı"]
-SOFT_PHRASES = ["olsa iyi olur", "olmasa iyi olur", "tercih ederim", "tercih ederiz", "iyi olur"]
-WEAK_PHRASES = ["mümkünse", "imkân varsa", "olursa", "belki", "olabilir"]
+SOFT_PHRASES = ["olsa iyi olur", "olmasa iyi olur", "tercih ederim", "tercih ederiz", "iyi olur", "tercihen", "tercih olarak", "öncelikli olarak"]
+WEAK_PHRASES = ["mümkünse", "imkân varsa", "olabiliyorsa", "olabilirse", "belki", "olabilir", "olursa"]
 
 def weight_for(phrase: str) -> int:
-    return random.choice([100])  
+    """Cümlenin ifade gücüne göre weight: zayıf→60, yumuşak→80, sert→100."""
+    p = phrase.lower()
+    if any(w in p for w in WEAK_PHRASES):
+        return 60
+    if any(s in p for s in SOFT_PHRASES):
+        return 80
+    return 100
+
+# Yumuşak/zayıf ön-ekler — isteğin başına eklenir, weight buna göre belirlenir.
+SOFT_PREFIXES = ["Tercihen", "Tercih olarak", "Öncelikli olarak"]
+WEAK_PREFIXES = ["Mümkünse", "İmkân varsa", "Olabiliyorsa"]
+
+def apply_strength(request: str, base_weight: int = 100) -> tuple[str, int]:
+    """İsteğe rastgele 'kesinlik' (güç) katar ve eşleşen weight'i döndürür.
+
+    Dağılım: %62 sert (base_weight, çoğunlukla 100), %26 yumuşak (80),
+    %12 zayıf (60). Önek doğal Türkçe — isteğin fiili ne olursa olsun
+    dilbilgisel kalır: "Mümkünse Ahmet cuma olmasın", "Tercihen Fizik
+    sabah olsun". Böylece model 100/80/60 ayrımını ifadeden öğrenir.
+    """
+    r = random.random()
+    if r < 0.62:
+        return request, base_weight
+    if r < 0.88:
+        return f"{random.choice(SOFT_PREFIXES)} {request}", 80
+    return f"{random.choice(WEAK_PREFIXES)} {request}", 60
 
 def explanation_for_teacher_not_available(teacher: str, slots: list, hours_per_day: int = HOURS_PER_DAY) -> str:
     if len(slots) == hours_per_day:
@@ -270,12 +295,12 @@ def gen_subject_not_on_day(n: int) -> list[dict]:
                 f"{subj} {day_phrase(day)} yapılmasın",
                 f"Hiçbir sınıfta {day_phrase(day)} günü {subj} olmasın",
             ]
-        request = random.choice(templates)
+        request, _w = apply_strength(random.choice(templates), 100)
         params = {"subject": subj, "class": cls, "days": [day]}
         payload = {
             "constraints": [{
                 "type": "SUBJECT_NOT_ON_DAY",
-                "weight": 100,
+                "weight": _w,
                 "active": True,
                 "params": params,
             }],
@@ -302,11 +327,11 @@ def gen_teacher_max_hours_daily(n: int) -> list[dict]:
             f"{teacher_phrase(teacher)} bir günde {max_h} saatten fazla ders vermesin",
             f"{teacher_phrase(teacher)} günlük {max_h} dersten fazla olmasın",
         ]
-        request = random.choice(templates)
+        request, _w = apply_strength(random.choice(templates), 100)
         payload = {
             "constraints": [{
                 "type": "TEACHER_MAX_HOURS_DAILY",
-                "weight": 100,
+                "weight": _w,
                 "active": True,
                 "params": {"teacher": teacher, "maxHours": max_h},
             }],
@@ -330,11 +355,11 @@ def gen_teacher_max_days_per_week(n: int) -> list[dict]:
             f"{teacher_phrase(teacher)} haftada {max_d} günden fazla okula gelmesin",
             f"{teacher_phrase(teacher)} haftalık {max_d} gün ders versin",
         ]
-        request = random.choice(templates)
+        request, _w = apply_strength(random.choice(templates), 100)
         payload = {
             "constraints": [{
                 "type": "TEACHER_MAX_DAYS_PER_WEEK",
-                "weight": 100,
+                "weight": _w,
                 "active": True,
                 "params": {"teacher": teacher, "maxDays": max_d},
             }],
@@ -479,11 +504,11 @@ def gen_subject_preferred_hours(n: int) -> list[dict]:
                 f"{subj} {phrase} yapılsın",
                 f"{phrase} {subj} olsun",
             ]
-        request = random.choice(templates)
+        request, _w = apply_strength(random.choice(templates), 100)
         payload = {
             "constraints": [{
                 "type": "SUBJECT_PREFERRED_HOURS",
-                "weight": 80,
+                "weight": _w,
                 "active": True,
                 "params": {"subject": subj, "class": cls, "preferredHours": hours},
             }],
@@ -513,12 +538,12 @@ def gen_subject_last_hour(n: int) -> list[dict]:
                 f"{subj} günün son saatinde olsun",
                 f"{subj} her zaman son derste yapılsın",
             ]
-        request = random.choice(templates)
+        request, _w = apply_strength(random.choice(templates), 100)
         ctx = make_context(extra_classes=[cls] if cls else None)
         payload = {
             "constraints": [{
                 "type": "SUBJECT_LAST_HOUR_OF_DAY",
-                "weight": 100,
+                "weight": _w,
                 "active": True,
                 "params": {"subject": subj, "class": cls},
             }],
@@ -549,12 +574,12 @@ def gen_subject_max_hours_daily(n: int) -> list[dict]:
                 f"{subj} günde {max_h} saatten fazla yapılmasın",
                 f"{subj} aynı gün {max_h} saatten fazla olmasın",
             ]
-        request = random.choice(templates)
+        request, _w = apply_strength(random.choice(templates), 100)
         ctx = make_context(extra_classes=[cls] if cls else None)
         payload = {
             "constraints": [{
                 "type": "SUBJECT_MAX_HOURS_DAILY",
-                "weight": 100,
+                "weight": _w,
                 "active": True,
                 "params": {"subject": subj, "class": cls, "maxHours": max_h},
             }],
@@ -583,12 +608,12 @@ def gen_subject_consecutive(n: int) -> list[dict]:
             f"{subj} blok halinde yapılsın",
             f"{subj} iki saat peş peşe olsun",
         ]
-        request = random.choice(templates_cls if cls else templates_all)
+        request, _w = apply_strength(random.choice(templates_cls if cls else templates_all), 90)
         ctx = make_context(extra_classes=[cls] if cls else None)
         payload = {
             "constraints": [{
                 "type": "SUBJECT_CONSECUTIVE_HOURS",
-                "weight": 90,
+                "weight": _w,
                 "active": True,
                 "params": {"subject": subj, "class": cls, "blockDuration": 2},
             }],
@@ -660,7 +685,7 @@ def gen_subject_preferred_room(n: int) -> list[dict]:
             f"{subj} {room}'da yapılmalı",
             f"Tüm {subj} dersleri {room}'da olsun",
         ]
-        request = random.choice(templates)
+        request, _w = apply_strength(random.choice(templates), 100)
         ctx = make_context()
         if room not in ctx["rooms"]:
             ctx["rooms"].append(room)
@@ -669,7 +694,7 @@ def gen_subject_preferred_room(n: int) -> list[dict]:
         payload = {
             "constraints": [{
                 "type": "SUBJECT_PREFERRED_ROOM",
-                "weight": 100,
+                "weight": _w,
                 "active": True,
                 "params": {"subject": subj, "room": room},
             }],
@@ -741,25 +766,97 @@ def gen_class_home_room(n: int) -> list[dict]:
     return out
 
 def gen_combinations(n: int) -> list[dict]:
+    """Tek mesajda 2-5 KARIŞIK tip kısıtlama (bileşik istek).
+
+    Eski sürüm hep tam 2x TEACHER_NOT_AVAILABLE üretiyordu (çeşitlilik sıfır).
+    Artık öğretmen/sınıf/branş/derslik karışık tiplerden 2-5 tanesi rastgele
+    seçilir; istek doğal bağlaçlarla birleştirilir; weight'ler hard/soft karışık.
+    """
     out = []
     for _ in range(n):
-
-        t1 = random.choice(TEACHERS)
-        t2 = random.choice([t for t in TEACHERS if t != t1])
-        ctx = make_context(extra_teachers=[t1, t2])
+        ctx = make_context()
         D, H = ctx["days"], ctx["hoursPerDay"]
-        day = random.choice(D)
-        request = f"{first_name(t1)} ve {first_name(t2)} {day_phrase(day)} günü yok"
-        slots = [{"day": day, "hour": h} for h in range(1, H + 1)]
+        teachers, classes = ctx["teachers"], ctx["classes"]
+        subjects, rooms = ctx["subjects"], ctx["rooms"]
+
+        def f_teacher_day():
+            t = random.choice(teachers); d = random.choice(D)
+            slots = [{"day": d, "hour": h} for h in range(1, H + 1)]
+            return (f"{first_name(t)} {day_phrase(d)} günü yok",
+                    {"type": "TEACHER_NOT_AVAILABLE", "weight": 100, "active": True,
+                     "params": {"teacher": t, "slots": slots}})
+
+        def f_teacher_maxh():
+            t = random.choice(teachers); mh = random.randint(4, max(4, H - 1))
+            return (f"{first_name(t)} günde en fazla {mh} ders versin",
+                    {"type": "TEACHER_MAX_HOURS_DAILY", "weight": 100, "active": True,
+                     "params": {"teacher": t, "maxHours": mh}})
+
+        def f_teacher_maxdays():
+            t = random.choice(teachers); md = random.randint(3, max(3, len(D) - 1))
+            return (f"{first_name(t)} haftada en fazla {md} gün gelsin",
+                    {"type": "TEACHER_MAX_DAYS_PER_WEEK", "weight": 100, "active": True,
+                     "params": {"teacher": t, "maxDays": md}})
+
+        def f_teacher_not_last():
+            t = random.choice(teachers)
+            return (f"{first_name(t)} son derste olmasın",
+                    {"type": "TEACHER_NOT_LAST_HOUR", "weight": 100, "active": True,
+                     "params": {"teacher": t}})
+
+        def f_subj_not_day():
+            s = random.choice(subjects); d = random.choice(D)
+            return (f"{s} {day_phrase(d)} olmasın",
+                    {"type": "SUBJECT_NOT_ON_DAY", "weight": 100, "active": True,
+                     "params": {"subject": s, "class": None, "days": [d]}})
+
+        def f_subj_pref_hours():
+            s = random.choice(subjects)
+            return (f"{s} sabah saatlerinde olsa iyi olur",
+                    {"type": "SUBJECT_PREFERRED_HOURS", "weight": 80, "active": True,
+                     "params": {"subject": s, "class": None, "preferredHours": [1, 2, 3]}})
+
+        def f_subj_last():
+            s = random.choice(subjects)
+            return (f"{s} günün son dersi olsa iyi olur",
+                    {"type": "SUBJECT_LAST_HOUR_OF_DAY", "weight": 80, "active": True,
+                     "params": {"subject": s, "class": None}})
+
+        def f_subj_room():
+            s = random.choice(subjects); r = random.choice(rooms)
+            return (f"{s} dersi {r} dersliğinde yapılsın",
+                    {"type": "SUBJECT_PREFERRED_ROOM", "weight": 80, "active": True,
+                     "params": {"subject": s, "room": r}})
+
+        def f_class_maxh():
+            c = random.choice(classes); mh = random.randint(min(5, H), H)
+            return (f"{c} günde en fazla {mh} ders alsın",
+                    {"type": "CLASS_MAX_HOURS_DAILY", "weight": 100, "active": True,
+                     "params": {"class": c, "maxHours": mh}})
+
+        def f_class_not_first():
+            c = random.choice(classes)
+            return (f"{c} ilk derse girmesin",
+                    {"type": "CLASS_NOT_FIRST_HOUR", "weight": 100, "active": True,
+                     "params": {"class": c}})
+
+        factories = [f_teacher_day, f_teacher_maxh, f_teacher_maxdays, f_teacher_not_last,
+                     f_subj_not_day, f_subj_pref_hours, f_subj_last, f_subj_room,
+                     f_class_maxh, f_class_not_first]
+        k = random.randint(2, 5)
+        chosen = random.sample(factories, k)
+        parts, constraints = [], []
+        for fac in chosen:
+            phrase, c = fac()
+            parts.append(phrase)
+            constraints.append(c)
+        request = parts[0]
+        for p in parts[1:]:
+            request += random.choice([", ", " ve ", "; ", ". Ayrıca "]) + p
         payload = {
-            "constraints": [
-                {"type": "TEACHER_NOT_AVAILABLE", "weight": 100, "active": True,
-                 "params": {"teacher": t1, "slots": slots}},
-                {"type": "TEACHER_NOT_AVAILABLE", "weight": 100, "active": True,
-                 "params": {"teacher": t2, "slots": slots}},
-            ],
-            "confidence": round(random.uniform(0.85, 0.93), 2),
-            "explanation": f"{t1} ve {t2} öğretmenlerinin {day} günü mevcut olmaması kısıtlamaları eklendi.",
+            "constraints": constraints,
+            "confidence": round(random.uniform(0.80, 0.92), 2),
+            "explanation": f"{len(constraints)} kısıtlama eklendi: " + ", ".join(c["type"] for c in constraints) + ".",
             "warnings": [],
             "unresolved": [],
         }
@@ -774,7 +871,8 @@ def gen_ambiguous(n: int) -> list[dict]:
 
             full = random.choice(TEACHERS)
             same_first = first_name(full)
-            other = f"{same_first} Karaca"
+            _surnames = [t.split()[-1] for t in TEACHERS if t.split()[-1] != full.split()[-1]]
+            other = f"{same_first} {random.choice(_surnames)}"
             ctx = make_context()
             ctx["teachers"] = list(set(ctx["teachers"] + [full, other]))
             day = random.choice(ctx["days"])
@@ -832,6 +930,106 @@ def gen_ambiguous(n: int) -> list[dict]:
             }
             out.append(example(ctx, request, payload))
     return out
+
+def _typo(word: str) -> str:
+    """Basit yazım hatası üret (harf çiftleme / yer değiştirme / düşürme)."""
+    if len(word) < 4:
+        return word + word[-1]
+    i = random.randint(1, len(word) - 2)
+    mode = random.choice(["double", "swap", "drop"])
+    if mode == "double":
+        return word[:i] + word[i] + word[i:]
+    if mode == "swap":
+        return word[:i] + word[i + 1] + word[i] + word[i + 2:]
+    return word[:i] + word[i + 1:]
+
+
+def gen_edge_cases(n: int) -> list[dict]:
+    """Gerçekçi zor kenar durumlar: yazım hatası, çelişki, imkânsız kısıt, kısmi-geçersiz.
+
+    Eski 'ambiguous' generatörü sadece dar belirsizlikleri kapsıyordu. Bu generatör
+    production'da sık görülen 4 senaryoyu öğretir:
+    - typo: ada yakın yazım hatası → en yakın gerçek ada düzelt + uyarı
+    - contradiction: 'en az X ama en fazla Y' (X>Y) → netleştirme sorusu
+    - infeasible: aşırı kısıtlayıcı istek → uygula ama güçlü uyar
+    - partial: biri context'te biri olmayan iki referans → geçerliyi üret, diğerini unresolved
+    """
+    out = []
+    for i in range(n):
+        kind = i % 4
+        if kind == 0:
+            teacher = random.choice(TEACHERS)
+            ctx = make_context(extra_teachers=[teacher])
+            D, H = ctx["days"], ctx["hoursPerDay"]
+            day = random.choice(D)
+            typo = _typo(first_name(teacher))
+            request = f"{typo} hoca {day_phrase(day)} günü yok"
+            slots = [{"day": day, "hour": h} for h in range(1, H + 1)]
+            payload = {
+                "constraints": [{
+                    "type": "TEACHER_NOT_AVAILABLE", "weight": 100, "active": True,
+                    "params": {"teacher": teacher, "slots": slots},
+                }],
+                "confidence": 0.72,
+                "explanation": f"'{typo}' muhtemelen '{teacher}' öğretmeni — ona göre kısıtlama eklendi.",
+                "warnings": [f"'{typo}' tam eşleşmedi; '{teacher}' varsayıldı. Yanlışsa düzeltin."],
+                "unresolved": [],
+            }
+            out.append(example(ctx, request, payload))
+        elif kind == 1:
+            teacher = random.choice(TEACHERS)
+            ctx = make_context(extra_teachers=[teacher])
+            lo = random.randint(5, 7)
+            hi = random.randint(2, 4)
+            request = f"{first_name(teacher)} günde en az {lo} ders versin ama en fazla {hi} ders versin"
+            payload = {
+                "kind": "query",
+                "answer": f"Bu istek çelişkili: {first_name(teacher)} için günde 'en az {lo}' ile 'en fazla {hi}' aynı anda olamaz ({lo} > {hi}). Hangisi geçerli olsun?",
+                "data": [{"option": f"Günde en az {lo} ders"}, {"option": f"Günde en fazla {hi} ders"}],
+                "needsClarification": True,
+                "confidence": 0.3,
+            }
+            out.append(example(ctx, request, payload))
+        elif kind == 2:
+            ctx = make_context()
+            if random.random() < 0.5:
+                request = "Tüm öğretmenler haftada en fazla 1 gün gelsin"
+                c = {"type": "ALL_TEACHERS_MAX_DAYS_PER_WEEK", "weight": 100, "active": True, "params": {"maxDays": 1}}
+            else:
+                request = "Bütün sınıflar günde en fazla 1 ders alsın"
+                c = {"type": "STUDENTS_MAX_HOURS_DAILY", "weight": 100, "active": True, "params": {"maxHours": 1}}
+            payload = {
+                "constraints": [c],
+                "confidence": 0.55,
+                "explanation": "Kısıtlama eklendi, ancak çok kısıtlayıcı.",
+                "warnings": ["Bu kısıtlama programı ÇÖZÜLEMEZ hale getirebilir — gerçekten istiyor musunuz?"],
+                "unresolved": [],
+            }
+            out.append(example(ctx, request, payload))
+        else:
+            known = random.choice(TEACHERS)
+            ctx = make_context(extra_teachers=[known])
+            unknown = random.choice(["Zühtü Pamukkale", "Nurettin Aladağ", "Cevahir Tekin", "Müjgan Soysal"])
+            while first_name(unknown) == first_name(known):
+                unknown = random.choice(["Zühtü Pamukkale", "Nurettin Aladağ", "Cevahir Tekin", "Müjgan Soysal"])
+            ctx["teachers"] = [t for t in ctx["teachers"] if first_name(t) != first_name(unknown)]
+            D, H = ctx["days"], ctx["hoursPerDay"]
+            d1, d2 = random.sample(D, 2)
+            request = f"{first_name(known)} {day_phrase(d1)} yok, {first_name(unknown)} {day_phrase(d2)} yok"
+            slots = [{"day": d1, "hour": h} for h in range(1, H + 1)]
+            payload = {
+                "constraints": [{
+                    "type": "TEACHER_NOT_AVAILABLE", "weight": 100, "active": True,
+                    "params": {"teacher": known, "slots": slots},
+                }],
+                "confidence": 0.6,
+                "explanation": f"{known} için kısıtlama eklendi. '{first_name(unknown)}' sistemde bulunamadı, o kısıtlama eklenmedi.",
+                "warnings": [],
+                "unresolved": [f"'{first_name(unknown)}' adlı öğretmen CONTEXT'te yok — bu kısıtlama atlandı."],
+            }
+            out.append(example(ctx, request, payload))
+    return out
+
 
 def gen_teacher_min_hours_daily(n: int) -> list[dict]:
     out = []
@@ -1039,12 +1237,12 @@ def gen_teacher_not_first_hour(n: int) -> list[dict]:
             f"{teacher_phrase(teacher)} 1. derste olmasın",
             f"{teacher_phrase(teacher)} günün ilk saatinde olmasın",
         ]
-        request = random.choice(templates)
+        request, _w = apply_strength(random.choice(templates), 95)
         ctx = make_context(extra_teachers=[teacher])
         payload = {
             "constraints": [{
                 "type": "TEACHER_NOT_FIRST_HOUR",
-                "weight": 95,
+                "weight": _w,
                 "active": True,
                 "params": {"teacher": teacher},
             }],
@@ -4462,6 +4660,67 @@ def gen_disambiguation(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
+def gen_schedule_update(n: int) -> list[dict]:
+    """Program İSKELETİ değişiklikleri (kind: schedule_update).
+
+    Önceden hiç örnek yoktu — model 'teneffüsleri uzat', 'cumaya saat ekle',
+    'günde 8 ders olsun' gibi iskelet taleplerini öğrenemiyordu. Buradaki 3
+    aksiyon data_mutation op'larıyla çakışmaz (saat/teneffüs iskeleti).
+    """
+    out = []
+    for i in range(n):
+        ctx = make_context()
+        D = ctx["days"]
+        choice = i % 3
+        if choice == 0:
+            mins = random.choice([5, 10, 15, 5, 10, 20])
+            request = random.choice([
+                f"Teneffüsleri {mins} dakika uzat",
+                f"Aralara {mins} dakika ekle",
+                f"Teneffüs sürelerini {mins} dakika artır",
+                f"Molalar {mins} dakika daha uzun olsun",
+            ])
+            payload = {
+                "kind": "schedule_update",
+                "action": "extend_breaks",
+                "params": {"minutes": mins},
+                "explanation": f"Teneffüs süreleri {mins} dakika uzatılacak. Onaylıyor musunuz?",
+                "confidence": round(random.uniform(0.85, 0.95), 2),
+            }
+        elif choice == 1:
+            day = random.choice(D)
+            cnt = random.choice([1, 1, 2])
+            request = random.choice([
+                f"{day_phrase(day)} gününe {cnt} saat ekle",
+                f"{day_phrase(day)} günü {cnt} ders saati daha olsun",
+                f"{day_phrase(day)} biraz uzasın, {cnt} saat ekle",
+            ])
+            payload = {
+                "kind": "schedule_update",
+                "action": "add_hours_to_day",
+                "params": {"day": day, "count": cnt},
+                "explanation": f"{day} gününe {cnt} ders saati eklenecek. Onaylıyor musunuz?",
+                "confidence": round(random.uniform(0.82, 0.93), 2),
+            }
+        else:
+            hpd = random.choice([6, 7, 8, 9])
+            request = random.choice([
+                f"Günde {hpd} ders olsun",
+                f"Her gün {hpd} saat olsun",
+                f"Günlük ders saatini {hpd} yap",
+                f"Tüm günler {hpd} saatlik olsun",
+            ])
+            payload = {
+                "kind": "schedule_update",
+                "action": "set_hours_per_day",
+                "params": {"hoursPerDay": hpd},
+                "explanation": f"Günlük ders saati {hpd} olarak ayarlanacak. Onaylıyor musunuz?",
+                "confidence": round(random.uniform(0.85, 0.94), 2),
+            }
+        out.append(example(ctx, request, payload))
+    return out
+
+
 GENERATORS = {
     "teacher_not_available":      (gen_teacher_not_available, 250),
     "class_not_available":        (gen_class_not_available, 150),
@@ -4482,6 +4741,8 @@ GENERATORS = {
     "class_home_room":            (gen_class_home_room, 60),
     "combinations":               (gen_combinations, 200),
     "ambiguous":                  (gen_ambiguous, 150),
+    "edge_cases":                 (gen_edge_cases, 150),
+    "schedule_update":            (gen_schedule_update, 120),
     "teacher_min_hours_daily":                    (gen_teacher_min_hours_daily, 60),
     "teacher_not_available_interval":             (gen_teacher_not_available_interval, 80),
     "teacher_min_days_per_week":                  (gen_teacher_min_days_per_week, 60),
@@ -4581,6 +4842,11 @@ def compute_count(base_count: int) -> int:
 
 def main():
     total = 0
+    # Bayat (artık üretilmeyen) .jsonl dosyalarını temizle — dataset birikmesin.
+    for old in DS.glob("*.jsonl"):
+        if old.stem not in GENERATORS:
+            old.unlink()
+            print(f"  ✗ bayat dosya silindi: {old.name}")
     for name, (gen, n) in GENERATORS.items():
         examples = gen(compute_count(n))
         path = DS / f"{name}.jsonl"

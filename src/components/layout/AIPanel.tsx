@@ -169,6 +169,17 @@ export default function AIPanel() {
   const toastWarn = useToastStore((s) => s.warn);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [mockMode, setMockMode] = useState(false);
+
+  useEffect(() => {
+    window.api.settings.get().then((res) => {
+      if (res.ok) {
+        const s = res.data as Record<string, string>;
+        const ep = s.aiEndpoint;
+        setMockMode(!ep || ep === 'mock://local');
+      }
+    });
+  }, [panelOpenSignal]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -353,6 +364,13 @@ export default function AIPanel() {
               `${data.applied} işlem uygulandı`,
               otherActions.map((a) => a.description).join('; '),
             );
+          } else if (data.rolledBack) {
+            toastError(
+              'Hiçbir işlem uygulanmadı (geri alındı)',
+              `Bir adım başarısız olduğu için tümü iptal edildi: ${data.errors
+                .map((e) => e.message)
+                .join('; ')}`,
+            );
           } else if (data.errors.length > 0) {
             toastWarn(
               `${data.applied}/${otherActions.length} işlem uygulandı`,
@@ -497,6 +515,15 @@ export default function AIPanel() {
       </header>
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-4">
+        {mockMode && (
+          <button
+            onClick={() => navigate('/settings')}
+            className="flex w-full items-start gap-2 rounded-lg border border-accent-warn/40 bg-accent-warn/10 p-3 text-left text-xs text-ink-700 hover:bg-accent-warn/20"
+          >
+            <Info size={14} className="mt-0.5 shrink-0 text-accent-warn" />
+            <span>{tr.ai.mockNotice}</span>
+          </button>
+        )}
         {messages.length === 0 && (
           <>
             <div className="rounded-lg bg-primary-50 p-3 text-sm text-ink-700">

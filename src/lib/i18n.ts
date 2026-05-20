@@ -226,6 +226,8 @@ export const tr = {
     discard: 'Vazgeç',
     edit: 'Düzenle',
     thinking: 'Düşünüyor...',
+    mockNotice:
+      'AI uç noktası bağlı değil — şu an sınırlı "mock" modu çalışıyor. Tam yapay zekâ yetenekleri için Ayarlar’dan AI Uç Noktası (URL) girin.',
     helloMessage:
       'Merhaba! Ders programı kısıtlamalarınızı buraya Türkçe yazabilirsiniz. Örnek: "Beden eğitimi son derste olsun"',
     clearChat: 'Mesajları temizle',

@@ -9,6 +9,7 @@ import { hoursRepo } from '../db/repositories/hours.js';
 import { constraintsRepo } from '../db/repositories/constraints.js';
 import { settingsRepo } from '../db/repositories/settings.js';
 import { timetablesRepo } from '../db/repositories/timetables.js';
+import { getDb } from '../db/connection.js';
 import type { ConstraintType, TimetableSlot } from '../../src/lib/types.js';
 import { log } from '../utils/logger.js';
 import type {
@@ -1151,33 +1152,65 @@ function nameMatches(name: string, target: string): boolean {
   return false;
 }
 
+/** Hata yokken commit, en az bir hata varsa tüm transaction'ı geri almak için fırlatılan sentinel. */
+class MutationRollback extends Error {}
+
 export function applyMutations(actions: DataMutationAction[]): DataMutationApplyResult {
   const result: DataMutationApplyResult = {
     applied: 0,
     errors: [],
     results: [],
   };
-  for (let i = 0; i < actions.length; i++) {
-    const action = actions[i]!;
-    const handler = handlers[action.op];
-    if (!handler) {
-      const msg = `Bilinmeyen operasyon: '${action.op}'`;
-      result.errors.push({ index: i, op: action.op, message: msg });
-      result.results.push({ index: i, op: action.op, ok: false, message: msg });
-      continue;
+
+  const runAll = getDb().transaction(() => {
+    for (let i = 0; i < actions.length; i++) {
+      const action = actions[i]!;
+      const handler = handlers[action.op];
+      if (!handler) {
+        const msg = `Bilinmeyen operasyon: '${action.op}'`;
+        result.errors.push({ index: i, op: action.op, message: msg });
+        result.results.push({ index: i, op: action.op, ok: false, message: msg });
+        continue;
+      }
+      try {
+        const msg = handler(action.params);
+        result.applied++;
+        result.results.push({ index: i, op: action.op, ok: true, message: msg });
+        log.info('AI mutation uygulandı', { op: action.op, msg });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        result.errors.push({ index: i, op: action.op, message: msg });
+        result.results.push({ index: i, op: action.op, ok: false, message: msg });
+        log.warn('AI mutation hatası', { op: action.op, error: msg });
+      }
     }
-    try {
-      const msg = handler(action.params);
-      result.applied++;
-      result.results.push({ index: i, op: action.op, ok: true, message: msg });
-      log.info('AI mutation uygulandı', { op: action.op, msg });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      result.errors.push({ index: i, op: action.op, message: msg });
-      result.results.push({ index: i, op: action.op, ok: false, message: msg });
-      log.warn('AI mutation hatası', { op: action.op, error: msg });
+    // Atomik garanti: tek bir action bile başarısızsa, hepsini geri al.
+    // Böylece "branş ekle → öğretmene bağla → aktivite ekle" gibi bağımlı
+    // adımlar yarım kalıp orphan/tutarsız veri bırakmaz.
+    if (result.errors.length > 0) {
+      throw new MutationRollback();
+    }
+  });
+
+  try {
+    runAll();
+  } catch (e) {
+    if (e instanceof MutationRollback) {
+      result.applied = 0;
+      result.rolledBack = true;
+      for (const r of result.results) {
+        if (r.ok) {
+          r.message = r.message ? `${r.message} (geri alındı)` : '(geri alındı)';
+        }
+      }
+      log.warn('AI mutations geri alındı (atomik rollback)', {
+        errorCount: result.errors.length,
+      });
+    } else {
+      throw e;
     }
   }
+
   return result;
 }
 

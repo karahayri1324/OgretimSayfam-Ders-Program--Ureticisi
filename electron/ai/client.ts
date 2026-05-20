@@ -40,7 +40,19 @@ export class AIError extends Error {
   }
 }
 
+/** Varsayılan tool iterasyon limiti. `aiMaxToolIterations` ayarı ile [1,10] aralığında geçersiz kılınabilir. */
 export const MAX_TOOL_ITERATIONS = 3;
+
+function readMaxToolIterations(): number {
+  try {
+    const raw = settingsRepo.get('aiMaxToolIterations');
+    const n = parseInt(String(raw ?? ''), 10);
+    if (Number.isFinite(n) && n >= 1 && n <= 10) return n;
+  } catch {
+    // ayar okunamadı — varsayılana düş
+  }
+  return MAX_TOOL_ITERATIONS;
+}
 
 function readTimeoutMs(): number {
   try {
@@ -128,8 +140,9 @@ export const aiClient = {
     history = [],
   }: ParseRequest): Promise<ParseWithToolsResult> {
     const toolHistory: ToolHistoryEntry[] = [];
+    const maxIterations = readMaxToolIterations();
 
-    for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+    for (let i = 0; i < maxIterations; i++) {
       const response = await singleRoundtrip(text, context, toolHistory, history);
 
       if (response.kind !== 'tool_call') {
@@ -148,7 +161,7 @@ export const aiClient = {
       toolHistory.push({ role: 'tool', tool: toolName, args, result });
     }
 
-    log.warn('AI tool iterasyon limiti aşıldı', { max: MAX_TOOL_ITERATIONS });
+    log.warn('AI tool iterasyon limiti aşıldı', { max: maxIterations });
     const fallback: AIResponse = {
       kind: 'query',
       answer:

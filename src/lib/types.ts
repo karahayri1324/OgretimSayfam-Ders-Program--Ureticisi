@@ -320,6 +320,8 @@ export type DataMutationApplyResult = {
   applied: number;
   errors: Array<{ index: number; op: DataMutationOp; message: string }>;
   results: Array<{ index: number; op: DataMutationOp; ok: boolean; message?: string }>;
+  /** true ise: en az bir action başarısız olduğu için TÜM işlemler geri alındı (atomik). */
+  rolledBack?: boolean;
 };
 
 export type AIResponse =
