@@ -37,7 +37,7 @@ export default function Advanced() {
           <Link
             key={to}
             to={to}
-            className="flex items-start gap-4 rounded-xl border border-surface-200 bg-white p-4 transition-all hover:border-primary-300 hover:shadow-soft"
+            className="flex items-start gap-4 rounded-xl border border-surface-200 bg-card p-4 transition-all hover:border-primary-300 hover:shadow-soft"
           >
             <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary-50">
               <Icon size={18} className="text-primary-500" />

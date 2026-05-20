@@ -1,14 +1,18 @@
 import { create } from 'zustand';
 
 export type AppSettings = {
-  aiEndpoint: string;
+  aiMode: 'local' | 'server';
+  aiLocalEndpoint: string;
+  aiServerEndpoint: string;
   aiTimeoutSec: number;
   fetTimeLimitSec: number;
   theme: 'light' | 'dark';
 } & Record<string, unknown>;
 
 const DEFAULTS: AppSettings = {
-  aiEndpoint: 'mock://local',
+  aiMode: 'local',
+  aiLocalEndpoint: 'http://localhost:8000',
+  aiServerEndpoint: '',
   aiTimeoutSec: 30,
   fetTimeLimitSec: 120,
   theme: 'light',
@@ -27,6 +31,7 @@ function coerce(raw: Record<string, unknown>): AppSettings {
     next.aiTimeoutSec = Number(next.aiTimeoutSec) || DEFAULTS.aiTimeoutSec;
   if (typeof next.fetTimeLimitSec === 'string')
     next.fetTimeLimitSec = Number(next.fetTimeLimitSec) || DEFAULTS.fetTimeLimitSec;
+  if (next.aiMode !== 'local' && next.aiMode !== 'server') next.aiMode = 'local';
   if (next.theme !== 'light' && next.theme !== 'dark') next.theme = 'light';
   return next;
 }

@@ -70,7 +70,7 @@ export function Dialog({
       <div
         ref={dialogRef}
         className={cn(
-          'flex max-h-[calc(100vh-4rem)] w-full flex-col rounded-2xl bg-white shadow-elevated',
+          'flex max-h-[calc(100vh-4rem)] w-full flex-col rounded-2xl bg-card shadow-elevated',
           sizeClasses[size],
         )}
       >

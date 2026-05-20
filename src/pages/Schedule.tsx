@@ -197,7 +197,7 @@ export default function Schedule() {
                   className={
                     checked
                       ? 'flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-primary-300 bg-primary-50 px-3 py-3 text-sm font-medium text-primary-700'
-                      : 'flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-surface-200 bg-white px-3 py-3 text-sm text-ink-700 hover:bg-surface-50'
+                      : 'flex cursor-pointer flex-col items-center gap-1 rounded-lg border border-surface-200 bg-card px-3 py-3 text-sm text-ink-700 hover:bg-surface-50'
                   }
                 >
                   <input
@@ -224,7 +224,7 @@ export default function Schedule() {
           className={
             tab === 'global'
               ? 'rounded-lg border border-primary-300 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700'
-              : 'rounded-lg border border-surface-200 bg-white px-4 py-2 text-sm text-ink-700 hover:bg-surface-50'
+              : 'rounded-lg border border-surface-200 bg-card px-4 py-2 text-sm text-ink-700 hover:bg-surface-50'
           }
         >
           {tr.schedule.tabGlobal}
@@ -235,7 +235,7 @@ export default function Schedule() {
           className={
             tab === 'perDay'
               ? 'rounded-lg border border-primary-300 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700'
-              : 'rounded-lg border border-surface-200 bg-white px-4 py-2 text-sm text-ink-700 hover:bg-surface-50'
+              : 'rounded-lg border border-surface-200 bg-card px-4 py-2 text-sm text-ink-700 hover:bg-surface-50'
           }
         >
           {tr.schedule.tabPerDay}

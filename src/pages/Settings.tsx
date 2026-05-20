@@ -11,36 +11,28 @@ import { useSettingsStore } from '../store/settings';
 import { useToastStore } from '../store/toast';
 import { Button } from '../components/ui/Button';
 import { Input, Label } from '../components/ui/Input';
-import { Switch } from '../components/ui/Switch';
 import { Card, CardBody, CardHeader } from '../components/ui/Card';
-
-const MOCK = 'mock://local';
+import { applyTheme } from '../lib/theme';
 
 export default function Settings() {
   const { settings, load, update } = useSettingsStore();
   const toast = useToastStore();
 
-  const [endpoint, setEndpoint] = useState('');
-  const [mock, setMock] = useState(true);
+  const [aiMode, setAiMode] = useState<'local' | 'server'>('local');
+  const [localEndpoint, setLocalEndpoint] = useState('http://localhost:8000');
+  const [serverEndpoint, setServerEndpoint] = useState('');
   const [aiTimeout, setAiTimeout] = useState(30);
   const [fetTimeLimit, setFetTimeLimit] = useState(120);
-  const [version, setVersion] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     load();
-    window.api.app.version().then((res) => {
-      if (res.ok) {
-        const v = res.data as { version?: string } | string;
-        setVersion(typeof v === 'string' ? v : (v.version ?? ''));
-      }
-    });
   }, [load]);
 
   useEffect(() => {
-    const isMock = !settings.aiEndpoint || settings.aiEndpoint === MOCK;
-    setMock(isMock);
-    setEndpoint(isMock ? '' : settings.aiEndpoint);
+    setAiMode(settings.aiMode === 'server' ? 'server' : 'local');
+    setLocalEndpoint(settings.aiLocalEndpoint || 'http://localhost:8000');
+    setServerEndpoint(settings.aiServerEndpoint || '');
     setAiTimeout(settings.aiTimeoutSec);
     setFetTimeLimit(settings.fetTimeLimitSec);
   }, [settings]);
@@ -48,13 +40,20 @@ export default function Settings() {
   async function handleSave() {
     setSaving(true);
     const ok = await update({
-      aiEndpoint: mock ? MOCK : endpoint.trim() || MOCK,
+      aiMode,
+      aiLocalEndpoint: localEndpoint.trim() || 'http://localhost:8000',
+      aiServerEndpoint: serverEndpoint.trim(),
       aiTimeoutSec: Math.max(1, Math.floor(aiTimeout)),
       fetTimeLimitSec: Math.max(10, Math.floor(fetTimeLimit)),
     });
     setSaving(false);
     if (ok) toast.success(tr.common.saved);
     else toast.error(tr.common.error);
+  }
+
+  async function changeTheme(t: 'light' | 'dark') {
+    applyTheme(t); // anında geri bildirim
+    await update({ theme: t });
   }
 
   async function openFETSource() {
@@ -77,34 +76,52 @@ export default function Settings() {
       <Card>
         <CardHeader title="AI" description="AI parse uç noktası ve zaman aşımı" />
         <CardBody className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-ink-900">
-                {tr.settings.useMock}
-              </p>
-              <p className="text-xs text-ink-500">
-                Mock kullanılırsa istekler uygulama içinde yanıtlanır.
-              </p>
-            </div>
-            <Switch
-              checked={mock}
-              onChange={setMock}
-              ariaLabel={tr.settings.useMock}
-            />
-          </div>
           <div>
-            <Label htmlFor="ai-endpoint">{tr.settings.aiEndpoint}</Label>
-            <Input
-              id="ai-endpoint"
-              value={endpoint}
-              onChange={(e) => setEndpoint(e.target.value)}
-              placeholder="http://localhost:8000/parse"
-              disabled={mock}
-            />
-            <p className="mt-1 text-xs text-ink-500">
-              {tr.settings.aiEndpointHint}
-            </p>
+            <Label>{tr.settings.aiSource}</Label>
+            <div className="mt-1 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setAiMode('local')}
+                aria-pressed={aiMode === 'local'}
+                className={
+                  aiMode === 'local'
+                    ? 'rounded-lg border border-primary-300 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700'
+                    : 'rounded-lg border border-surface-200 bg-surface-50 px-4 py-2 text-sm text-ink-600 hover:bg-surface-100'
+                }
+              >
+                {tr.settings.aiLocal}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAiMode('server')}
+                aria-pressed={aiMode === 'server'}
+                className={
+                  aiMode === 'server'
+                    ? 'rounded-lg border border-primary-300 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700'
+                    : 'rounded-lg border border-surface-200 bg-surface-50 px-4 py-2 text-sm text-ink-600 hover:bg-surface-100'
+                }
+              >
+                {tr.settings.aiServer}
+              </button>
+            </div>
           </div>
+          {aiMode === 'local' ? (
+            <div>
+              <Label htmlFor="ai-local">{tr.settings.aiLocalEndpoint}</Label>
+              <Input
+                id="ai-local"
+                value={localEndpoint}
+                onChange={(e) => setLocalEndpoint(e.target.value)}
+                placeholder="http://localhost:8000"
+              />
+              <p className="mt-1 text-xs text-ink-500">{tr.settings.aiLocalHint}</p>
+            </div>
+          ) : (
+            <div>
+              <Label>{tr.settings.aiServerEndpoint}</Label>
+              <p className="mt-1 text-xs text-ink-500">{tr.settings.aiServerHint}</p>
+            </div>
+          )}
           <div className="w-48">
             <Label htmlFor="ai-timeout">{tr.settings.aiTimeout}</Label>
             <Input
@@ -140,15 +157,25 @@ export default function Settings() {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              className="rounded-lg border border-primary-300 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700"
-              aria-pressed="true"
+              onClick={() => changeTheme('light')}
+              aria-pressed={settings.theme === 'light'}
+              className={
+                settings.theme === 'light'
+                  ? 'rounded-lg border border-primary-300 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700'
+                  : 'rounded-lg border border-surface-200 bg-surface-50 px-4 py-2 text-sm text-ink-600 hover:bg-surface-100'
+              }
             >
               {tr.settings.themeLight}
             </button>
             <button
               type="button"
-              disabled
-              className="cursor-not-allowed rounded-lg border border-surface-200 bg-surface-50 px-4 py-2 text-sm text-ink-400"
+              onClick={() => changeTheme('dark')}
+              aria-pressed={settings.theme === 'dark'}
+              className={
+                settings.theme === 'dark'
+                  ? 'rounded-lg border border-primary-300 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700'
+                  : 'rounded-lg border border-surface-200 bg-surface-50 px-4 py-2 text-sm text-ink-600 hover:bg-surface-100'
+              }
             >
               {tr.settings.themeDark}
             </button>
@@ -176,9 +203,6 @@ export default function Settings() {
               {tr.settings.openLogs}
             </Button>
           </div>
-          <p className="pt-2 text-xs text-ink-500">
-            {tr.settings.version}: {version || '—'}
-          </p>
         </CardBody>
       </Card>
 

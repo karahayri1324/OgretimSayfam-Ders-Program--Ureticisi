@@ -277,7 +277,7 @@ export default function Timetable() {
       </header>
 
       <div className="flex flex-wrap items-end gap-3 print:hidden">
-        <div className="inline-flex rounded-lg border border-surface-200 bg-white p-0.5">
+        <div className="inline-flex rounded-lg border border-surface-200 bg-card p-0.5">
           <TabButton active={view === 'class'} onClick={() => setView('class')}>
             {tr.timetable.viewClass}
           </TabButton>
@@ -331,7 +331,7 @@ export default function Timetable() {
             <tbody>
               {hours.map((h, hi) => (
                 <tr key={h.id ?? hi}>
-                  <th className="border-b border-r border-surface-200 bg-white px-3 py-2 text-left text-xs font-medium text-ink-700">
+                  <th className="border-b border-r border-surface-200 bg-card px-3 py-2 text-left text-xs font-medium text-ink-700">
                     <div className="flex flex-col">
                       <span>{h.name || `${hi + 1}. ${tr.schedule.hourLabel}`}</span>
                       {h.startTime && (
@@ -348,7 +348,7 @@ export default function Timetable() {
                       return (
                         <td
                           key={di}
-                          className="border-b border-r border-surface-200 bg-white px-2 py-1.5 text-center text-xs text-ink-300"
+                          className="border-b border-r border-surface-200 bg-card px-2 py-1.5 text-center text-xs text-ink-300"
                         >
                           —
                         </td>

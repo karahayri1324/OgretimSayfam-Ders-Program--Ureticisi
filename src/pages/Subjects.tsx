@@ -292,7 +292,7 @@ function SubjectDialog({
                 type="color"
                 value={color}
                 onChange={(e) => setColor(e.target.value)}
-                className="h-9 w-12 cursor-pointer rounded-md border border-surface-200 bg-white"
+                className="h-9 w-12 cursor-pointer rounded-md border border-surface-200 bg-card"
               />
               <Input
                 value={color}

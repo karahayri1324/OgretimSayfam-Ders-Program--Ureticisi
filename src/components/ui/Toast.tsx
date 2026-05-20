@@ -10,10 +10,10 @@ const iconMap: Record<ToastKind, typeof CheckCircle2> = {
 };
 
 const kindClasses: Record<ToastKind, string> = {
-  success: 'border-emerald-200 bg-white text-emerald-900',
-  error: 'border-red-200 bg-white text-red-900',
-  info: 'border-primary-200 bg-white text-primary-900',
-  warn: 'border-amber-200 bg-white text-amber-900',
+  success: 'border-emerald-200 bg-card text-emerald-900',
+  error: 'border-red-200 bg-card text-red-900',
+  info: 'border-primary-200 bg-card text-primary-900',
+  warn: 'border-amber-200 bg-card text-amber-900',
 };
 
 const iconClasses: Record<ToastKind, string> = {

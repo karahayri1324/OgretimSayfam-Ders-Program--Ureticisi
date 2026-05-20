@@ -127,7 +127,7 @@ export default function Login() {
                 marginTop: 4,
               }}
             >
-              DERS PROGRAMI OLUŞTURUCU · v0.1.0
+              DERS PROGRAMI OLUŞTURUCU
             </div>
           </div>
         </div>
@@ -319,25 +319,6 @@ export default function Login() {
             required
             minLength={mode === 'register' ? 8 : undefined}
             autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            trailingHint={
-              mode === 'login' ? (
-                <button
-                  type="button"
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    padding: 0,
-                    color: defter.primary,
-                    fontWeight: 600,
-                    fontSize: 11.5,
-                    cursor: 'pointer',
-                    fontFamily: fontSans,
-                  }}
-                >
-                  Unuttum
-                </button>
-              ) : null
-            }
             rightAdornment={
               <button
                 type="button"
@@ -454,8 +435,6 @@ export default function Login() {
           >
             <Sparkles size={13} color={defter.amber} />
             Misafir Devam Et
-            <span style={{ color: defter.muted }}>·</span>
-            <span style={{ fontSize: 12, color: defter.muted }}>test için</span>
           </button>
 
           {mode === 'register' && (

@@ -26,7 +26,7 @@ export function Table<T>({
     return <>{empty}</>;
   }
   return (
-    <div className={cn('overflow-x-auto rounded-xl border border-surface-200 bg-white shadow-soft', className)}>
+    <div className={cn('overflow-x-auto rounded-xl border border-surface-200 bg-card shadow-soft', className)}>
       <table className="min-w-full text-sm">
         <thead className="border-b border-surface-200 bg-surface-50">
           <tr>

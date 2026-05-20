@@ -141,7 +141,7 @@ export default function Activities() {
         </div>
       </header>
 
-      <div className="overflow-x-auto rounded-xl border border-surface-200 bg-white shadow-soft">
+      <div className="overflow-x-auto rounded-xl border border-surface-200 bg-card shadow-soft">
         <table className="min-w-full border-collapse text-sm">
           <thead>
             <tr>
@@ -169,7 +169,7 @@ export default function Activities() {
           <tbody>
             {filteredClasses.map((c) => (
               <tr key={c.id}>
-                <th className="sticky left-0 z-10 border-b border-r border-surface-200 bg-white px-3 py-2 text-left text-sm font-medium text-ink-900">
+                <th className="sticky left-0 z-10 border-b border-r border-surface-200 bg-card px-3 py-2 text-left text-sm font-medium text-ink-900">
                   {c.name}
                 </th>
                 {filteredSubjects.map((s) => {
@@ -193,7 +193,7 @@ export default function Activities() {
                             ? isSplit
                               ? 'flex h-full min-h-[56px] w-full flex-col items-center justify-center gap-0.5 bg-amber-50 px-1 py-1.5 text-amber-900 ring-1 ring-inset ring-amber-300 transition-colors hover:bg-amber-100'
                               : 'flex h-full min-h-[56px] w-full flex-col items-center justify-center gap-0.5 bg-primary-50 px-1 py-1.5 text-primary-900 transition-colors hover:bg-primary-100'
-                            : 'flex h-full min-h-[56px] w-full items-center justify-center bg-white text-ink-300 transition-colors hover:bg-surface-50'
+                            : 'flex h-full min-h-[56px] w-full items-center justify-center bg-card text-ink-300 transition-colors hover:bg-surface-50'
                         }
                       >
                         {activity ? (
@@ -499,7 +499,7 @@ function BulkAddDialog({
                     'rounded-md border px-2 py-1.5 text-sm font-medium transition-colors ' +
                     (selected
                       ? 'border-primary-500 bg-primary-50 text-primary-700'
-                      : 'border-surface-200 bg-white text-ink-700 hover:bg-surface-100')
+                      : 'border-surface-200 bg-card text-ink-700 hover:bg-surface-100')
                   }
                 >
                   {c.name}
@@ -675,7 +675,7 @@ function ActivityEditorDialog({
                 className={
                   blockDuration === n
                     ? 'flex-1 rounded-lg border border-primary-300 bg-primary-50 px-3 py-2 text-sm font-medium text-primary-700'
-                    : 'flex-1 rounded-lg border border-surface-200 bg-white px-3 py-2 text-sm text-ink-700 hover:bg-surface-50'
+                    : 'flex-1 rounded-lg border border-surface-200 bg-card px-3 py-2 text-sm text-ink-700 hover:bg-surface-50'
                 }
               >
                 {n === 1
@@ -799,7 +799,7 @@ function PairChooserDialog({
               className={
                 active
                   ? 'flex w-full items-center justify-between gap-2 rounded-lg border border-primary-300 bg-primary-50 px-3 py-2 text-left text-sm text-primary-900'
-                  : 'flex w-full items-center justify-between gap-2 rounded-lg border border-surface-200 bg-white px-3 py-2 text-left text-sm text-ink-700 hover:bg-surface-50'
+                  : 'flex w-full items-center justify-between gap-2 rounded-lg border border-surface-200 bg-card px-3 py-2 text-left text-sm text-ink-700 hover:bg-surface-50'
               }
             >
               <span className="flex items-center gap-2">

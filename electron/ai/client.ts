@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import type { AIResponse } from '../../src/lib/types.js';
 import { validateAIResponse } from './schema.js';
-import { mockParse, type AIContext } from './mock-server.js';
+import type { AIContext } from './mock-server.js';
 import { settingsRepo } from '../db/repositories/settings.js';
 import { executeTool, type ToolResult } from './tools.js';
 import { log } from '../utils/logger.js';
@@ -65,12 +65,30 @@ function readTimeoutMs(): number {
   return 30_000;
 }
 
+const LOCAL_DEFAULT_ENDPOINT = 'http://localhost:8000';
+// Sunucu modu uç noktası — sunucu adresi burada/uygulama tarafında ayarlanır.
+// (Ayarlar'da artık URL alanı yok; kullanıcı sunucu adresini kendi yönetir.)
+const SERVER_ENDPOINT = '';
+
+/**
+ * Aktif AI uç noktası. İki mod var:
+ * - 'server' → kullanıcının uzak sunucu uç noktası (henüz boş olabilir)
+ * - 'local'  (varsayılan) → localhost'taki yerel LLM
+ * Mock kaldırıldı; uç nokta boşsa istek anlamlı bir hata ile başarısız olur.
+ */
 function readEndpoint(): string {
   try {
-    const v = settingsRepo.get('aiEndpoint');
-    return typeof v === 'string' ? v : '';
+    const mode = settingsRepo.get('aiMode');
+    if (mode === 'server') {
+      const v = settingsRepo.get('aiServerEndpoint');
+      const ep = typeof v === 'string' ? v.trim() : '';
+      return ep || SERVER_ENDPOINT;
+    }
+    const v = settingsRepo.get('aiLocalEndpoint');
+    const ep = typeof v === 'string' ? v.trim() : '';
+    return ep || LOCAL_DEFAULT_ENDPOINT;
   } catch {
-    return '';
+    return LOCAL_DEFAULT_ENDPOINT;
   }
 }
 
@@ -81,44 +99,37 @@ async function singleRoundtrip(
   conversationHistory: ConversationHistoryEntry[],
 ): Promise<AIResponse> {
   const endpoint = readEndpoint();
-  const useMock = !endpoint || endpoint === 'mock://local';
+  if (!endpoint) {
+    throw new AIError(
+      'AI_ERROR',
+      'AI uç noktası ayarlı değil. Ayarlar → AI bölümünden Yerel veya Sunucu uç noktasını girin.',
+    );
+  }
 
   let raw: unknown;
-  if (useMock) {
-    raw = await mockParse(text, context, [
-      ...conversationHistory,
-      ...toolHistory.map(
-        (t): ConversationHistoryEntry => ({
-          role: 'system' as const,
-          text: `tool:${t.tool} ${JSON.stringify(t.result)}`,
-        }),
-      ),
-    ]);
-  } else {
-    try {
-      const res = await axios.post(
-        endpoint,
-        {
-          text,
-          context,
-          history: conversationHistory,
-          toolHistory,
-        },
-        {
-          timeout: readTimeoutMs(),
-          headers: { 'Content-Type': 'application/json' },
-        },
-      );
-      raw = res.data;
-    } catch (e) {
-      const ax = e as AxiosError;
-      if (ax.code === 'ECONNABORTED' || ax.message?.toLowerCase().includes('timeout')) {
-        throw new AIError('AI_TIMEOUT', 'AI sunucusu yanıt vermedi (zaman aşımı).', e);
-      }
-      const status = ax.response?.status;
-      const detail = status ? `HTTP ${status}` : ax.message;
-      throw new AIError('AI_ERROR', `AI sunucusuna ulaşılamadı: ${detail}`, e);
+  try {
+    const res = await axios.post(
+      endpoint,
+      {
+        text,
+        context,
+        history: conversationHistory,
+        toolHistory,
+      },
+      {
+        timeout: readTimeoutMs(),
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+    raw = res.data;
+  } catch (e) {
+    const ax = e as AxiosError;
+    if (ax.code === 'ECONNABORTED' || ax.message?.toLowerCase().includes('timeout')) {
+      throw new AIError('AI_TIMEOUT', 'AI sunucusu yanıt vermedi (zaman aşımı).', e);
     }
+    const status = ax.response?.status;
+    const detail = status ? `HTTP ${status}` : ax.message;
+    throw new AIError('AI_ERROR', `AI sunucusuna ulaşılamadı: ${detail}`, e);
   }
 
   try {

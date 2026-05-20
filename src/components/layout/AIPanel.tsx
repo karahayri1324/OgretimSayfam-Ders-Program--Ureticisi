@@ -10,9 +10,6 @@ import {
   Trash2,
   Copy,
   Eraser,
-  Wand2,
-  UserPlus,
-  GraduationCap,
   PlayCircle,
 } from 'lucide-react';
 import { tr } from '../../lib/i18n';
@@ -28,6 +25,7 @@ import { useRoomsStore } from '../../store/rooms';
 import { useActivitiesStore } from '../../store/activities';
 import { useScheduleStore } from '../../store/schedule';
 import { useGenerateStore } from '../../store/generate';
+import { useSettingsStore } from '../../store/settings';
 import { useToastStore } from '../../store/toast';
 import { useNavigate } from 'react-router-dom';
 import type {
@@ -163,23 +161,13 @@ export default function AIPanel() {
   const loadRooms = useRoomsStore((s) => s.load);
   const loadActivities = useActivitiesStore((s) => s.load);
   const loadSchedule = useScheduleStore((s) => s.load);
+  const loadSettings = useSettingsStore((s) => s.load);
   const toastSuccess = useToastStore((s) => s.success);
   const toastError = useToastStore((s) => s.error);
   const toastInfo = useToastStore((s) => s.info);
   const toastWarn = useToastStore((s) => s.warn);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [mockMode, setMockMode] = useState(false);
-
-  useEffect(() => {
-    window.api.settings.get().then((res) => {
-      if (res.ok) {
-        const s = res.data as Record<string, string>;
-        const ep = s.aiEndpoint;
-        setMockMode(!ep || ep === 'mock://local');
-      }
-    });
-  }, [panelOpenSignal]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -239,6 +227,10 @@ export default function AIPanel() {
     if ([...ops].some((o) => o.includes('day') || o.includes('hour'))) {
       promises.push(loadSchedule());
     }
+    // set_setting → ayarları yeniden yükle (tema/AI kaynağı/FET süresi canlı yansır)
+    if ([...ops].some((o) => o.includes('setting'))) {
+      promises.push(loadSettings());
+    }
     await Promise.all(promises);
   }
 
@@ -292,14 +284,6 @@ export default function AIPanel() {
     } catch (e) {
       toastError(tr.common.error, String(e));
     }
-  }
-
-  function handleQuickStart(prompt: string): void {
-    setInput(prompt);
-    setTimeout(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(prompt.length, prompt.length);
-    }, 30);
   }
 
   async function handleConfirm(msg: Message) {
@@ -441,7 +425,7 @@ export default function AIPanel() {
     return (
       <button
         onClick={() => setCollapsed(false)}
-        className="flex h-full w-12 flex-col items-center justify-start gap-2 border-l border-surface-200 bg-white py-4 text-ink-600 hover:bg-surface-100"
+        className="flex h-full w-12 flex-col items-center justify-start gap-2 border-l border-surface-200 bg-card py-4 text-ink-600 hover:bg-surface-100"
       >
         <Logo size={24} />
         <span
@@ -456,7 +440,7 @@ export default function AIPanel() {
 
   return (
     <aside
-      className="relative flex h-full flex-col border-l border-surface-200 bg-white shadow-lg"
+      className="relative flex h-full flex-col border-l border-surface-200 bg-card shadow-lg"
       style={{ width: panelWidth }}
     >
       {/* Sol kenar — drag handle ile resize */}
@@ -515,22 +499,10 @@ export default function AIPanel() {
       </header>
 
       <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-4">
-        {mockMode && (
-          <button
-            onClick={() => navigate('/settings')}
-            className="flex w-full items-start gap-2 rounded-lg border border-accent-warn/40 bg-accent-warn/10 p-3 text-left text-xs text-ink-700 hover:bg-accent-warn/20"
-          >
-            <Info size={14} className="mt-0.5 shrink-0 text-accent-warn" />
-            <span>{tr.ai.mockNotice}</span>
-          </button>
-        )}
         {messages.length === 0 && (
-          <>
-            <div className="rounded-lg bg-primary-50 p-3 text-sm text-ink-700">
-              {tr.ai.helloMessage}
-            </div>
-            <QuickStartGrid onPick={handleQuickStart} />
-          </>
+          <div className="rounded-lg bg-primary-50 p-3 text-sm text-ink-700">
+            {tr.ai.helloMessage}
+          </div>
         )}
         {messages.map((msg) => (
           <MessageBubble
@@ -584,42 +556,6 @@ export default function AIPanel() {
   );
 }
 
-function QuickStartGrid({ onPick }: { onPick: (prompt: string) => void }) {
-  const items: Array<{
-    key: keyof typeof tr.ai.quickStarts;
-    icon: typeof Wand2;
-    promptKey: keyof typeof tr.ai.quickStartPrompts;
-  }> = [
-    { key: 'wizard', icon: Wand2, promptKey: 'wizard' },
-    { key: 'addTeacher', icon: UserPlus, promptKey: 'addTeacher' },
-    { key: 'addClass', icon: GraduationCap, promptKey: 'addClass' },
-    { key: 'generate', icon: PlayCircle, promptKey: 'generate' },
-  ];
-  return (
-    <div className="space-y-2">
-      <p className="px-1 text-xs font-medium uppercase tracking-wide text-ink-500">
-        {tr.ai.quickStartTitle}
-      </p>
-      <div className="grid grid-cols-2 gap-2">
-        {items.map((it) => {
-          const Icon = it.icon;
-          return (
-            <button
-              key={it.key}
-              type="button"
-              onClick={() => onPick(tr.ai.quickStartPrompts[it.promptKey])}
-              className="flex items-start gap-2 rounded-lg border border-surface-200 bg-white px-3 py-2 text-left text-xs text-ink-700 transition-colors hover:border-primary-300 hover:bg-primary-50 focus:outline-none focus:ring-2 focus:ring-primary-200"
-            >
-              <Icon size={14} className="mt-0.5 shrink-0 text-primary-500" />
-              <span className="font-medium">{tr.ai.quickStarts[it.key]}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function constraintCategoryStyle(type: string): {
   badgeClass: string;
   label: string;
@@ -639,7 +575,7 @@ function constraintCategoryStyle(type: string): {
     type.startsWith('MAX_')
   )
     return { badgeClass: 'bg-indigo-100 text-indigo-800', label: 'Aktivite' };
-  return { badgeClass: 'bg-slate-100 text-slate-700', label: 'Genel' };
+  return { badgeClass: 'bg-surface-100 text-slate-700', label: 'Genel' };
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -660,7 +596,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={copy}
-      className="rounded-md p-1 text-ink-400 transition-colors hover:bg-white hover:text-ink-700"
+      className="rounded-md p-1 text-ink-400 transition-colors hover:bg-card hover:text-ink-700"
       aria-label={tr.ai.copyMessage}
       title={tr.ai.copyMessage}
     >
@@ -702,7 +638,7 @@ function MessageBubble({
             <CopyButton text={q.answer} />
           </div>
           {q.data && q.data.length > 0 && (
-            <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto rounded-md bg-white p-2 text-[11px] text-ink-700">
+            <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto rounded-md bg-card p-2 text-[11px] text-ink-700">
               {q.data.slice(0, 20).map((item, i) => (
                 <li key={i} className="flex items-start gap-1.5">
                   <span className="mt-0.5 size-1 shrink-0 rounded-full bg-primary-500" />
@@ -816,7 +752,7 @@ function MessageBubble({
             {dm.actions.map((a, i) => (
               <li
                 key={i}
-                className="flex items-start gap-2 rounded-md bg-white px-2 py-1.5 text-xs"
+                className="flex items-start gap-2 rounded-md bg-card px-2 py-1.5 text-xs"
               >
                 {a.op.startsWith('delete_') ? (
                   <Trash2 size={12} className="mt-0.5 shrink-0 text-red-500" />
@@ -1005,7 +941,7 @@ function ConstraintCard({ c }: { c: AIConstraint }) {
   return (
     <div
       className={cn(
-        'rounded-md border bg-white px-2 py-1.5 text-xs',
+        'rounded-md border bg-card px-2 py-1.5 text-xs',
         c.weight >= 100 ? 'border-primary-200' : 'border-surface-200',
       )}
     >

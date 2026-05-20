@@ -137,7 +137,7 @@ export function SubjectCombobox({
     <div ref={containerRef} className="relative">
       <div
         className={cn(
-          'flex min-h-[42px] w-full flex-wrap items-center gap-1.5 rounded-lg border border-surface-200 bg-white px-2 py-1.5 transition-colors focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-100',
+          'flex min-h-[42px] w-full flex-wrap items-center gap-1.5 rounded-lg border border-surface-200 bg-card px-2 py-1.5 transition-colors focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-100',
           disabled && 'opacity-60',
         )}
         onClick={() => inputRef.current?.focus()}
@@ -191,7 +191,7 @@ export function SubjectCombobox({
         <ul
           id={id ? `${id}-listbox` : undefined}
           role="listbox"
-          className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-surface-200 bg-white py-1 shadow-lg"
+          className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-lg border border-surface-200 bg-card py-1 shadow-lg"
         >
           {suggestions.map((s, i) => {
             const active = i === highlight;
@@ -249,7 +249,7 @@ export function SubjectCombobox({
         normQuery.length > 0 && (
           <ul
             role="listbox"
-            className="absolute z-20 mt-1 w-full rounded-lg border border-surface-200 bg-white py-1 shadow-lg"
+            className="absolute z-20 mt-1 w-full rounded-lg border border-surface-200 bg-card py-1 shadow-lg"
           >
             <li className="px-3 py-1.5 text-sm text-ink-400">
               {tr.teachers.subjectComboEmpty}

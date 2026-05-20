@@ -2,6 +2,54 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Renk paleti — CSS değişkenleri (RGB üçlü, Tailwind <alpha-value> uyumlu).
+   Açık tema :root'ta; koyu tema .dark sınıfı <html>'e eklenince devreye girer. */
+:root {
+  --paper: 250 246 236;
+  --paper2: 244 239 226;
+  --card: 255 253 248;
+  --ink: 26 26 26;
+  --ink-400: 107 98 88;
+  --ink-700: 63 58 51;
+  --muted: 107 98 88;
+  --mutedDeep: 63 58 51;
+  --line: 217 209 188;
+  --rule: 230 223 206;
+  --cardBorder: 232 224 203;
+  --surface-0: 255 255 255;
+  --surface-50: 250 246 236;
+  --surface-100: 244 239 226;
+  --surface-200: 232 224 203;
+  --surface-300: 217 209 188;
+  --primary-50: 231 236 250;
+  --primary-100: 219 227 245;
+  --primary-soft: 231 236 250;
+  --scrollbar-thumb: 184 174 148;
+}
+
+.dark {
+  --paper: 24 26 30;
+  --paper2: 31 34 40;
+  --card: 35 38 46;
+  --ink: 237 235 228;
+  --ink-400: 156 151 141;
+  --ink-700: 203 200 192;
+  --muted: 156 151 141;
+  --mutedDeep: 203 200 192;
+  --line: 58 62 70;
+  --rule: 44 47 54;
+  --cardBorder: 58 62 70;
+  --surface-0: 35 38 46;
+  --surface-50: 26 28 33;
+  --surface-100: 42 46 55;
+  --surface-200: 58 62 70;
+  --surface-300: 78 82 92;
+  --primary-50: 30 44 82;
+  --primary-100: 38 54 99;
+  --primary-soft: 30 44 82;
+  --scrollbar-thumb: 78 82 92;
+}
+
 @layer base {
   html, body, #root {
     height: 100%;
@@ -9,8 +57,8 @@
 
   body {
     font-family: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
-    background-color: #FAF6EC;
-    color: #1A1A1A;
+    background-color: rgb(var(--paper));
+    color: rgb(var(--ink));
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -20,27 +68,27 @@
     height: 10px;
   }
   ::-webkit-scrollbar-track {
-    background: #F4EFE2;
+    background: rgb(var(--paper2));
   }
   ::-webkit-scrollbar-thumb {
-    background: #D9D1BC;
+    background: rgb(var(--scrollbar-thumb));
     border-radius: 6px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #B8AE94;
+    background: rgb(var(--mutedDeep));
   }
 }
 
 @layer components {
   /* Defter — paper line texture utility */
   .paper-bg {
-    background-color: #FAF6EC;
+    background-color: rgb(var(--paper));
     background-image: repeating-linear-gradient(
       to bottom,
       transparent 0,
       transparent 31px,
-      rgba(230, 223, 206, 0.55) 31px,
-      rgba(230, 223, 206, 0.55) 32px
+      rgb(var(--rule) / 0.55) 31px,
+      rgb(var(--rule) / 0.55) 32px
     );
     background-position: 0 64px;
   }
@@ -70,8 +118,8 @@
 
   /* Defter kartı — kağıt tonu, sıcak kenarlık, yumuşak gölge */
   .card-defter {
-    background-color: #FFFDF8;
-    border: 1px solid #E8E0CB;
+    background-color: rgb(var(--card));
+    border: 1px solid rgb(var(--cardBorder));
     border-radius: 1rem;
     box-shadow:
       0 1px 0 rgba(0, 0, 0, 0.02),

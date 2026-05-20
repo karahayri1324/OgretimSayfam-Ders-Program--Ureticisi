@@ -4,30 +4,31 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Yeni "Defter" palette — düz anahtarlar (yeni sayfa kodları için)
-        paper: '#FAF6EC',
-        paper2: '#F4EFE2',
-        card: '#FFFDF8',
+        // "Defter" palette — CSS değişkenlerine bağlı (açık/koyu tema otomatik).
+        paper: 'rgb(var(--paper) / <alpha-value>)',
+        paper2: 'rgb(var(--paper2) / <alpha-value>)',
+        card: 'rgb(var(--card) / <alpha-value>)',
         ink: {
-          DEFAULT: '#1A1A1A',
-          400: '#6B6258',
-          500: '#6B6258',
-          600: '#6B6258',
-          700: '#3F3A33',
-          800: '#1A1A1A',
-          900: '#1A1A1A',
+          DEFAULT: 'rgb(var(--ink) / <alpha-value>)',
+          400: 'rgb(var(--ink-400) / <alpha-value>)',
+          500: 'rgb(var(--ink-400) / <alpha-value>)',
+          600: 'rgb(var(--ink-400) / <alpha-value>)',
+          700: 'rgb(var(--ink-700) / <alpha-value>)',
+          800: 'rgb(var(--ink) / <alpha-value>)',
+          900: 'rgb(var(--ink) / <alpha-value>)',
         },
-        muted: '#6B6258',
-        mutedDeep: '#3F3A33',
-        line: '#D9D1BC',
-        rule: '#E6DFCE',
-        cardBorder: '#E8E0CB',
+        muted: 'rgb(var(--muted) / <alpha-value>)',
+        mutedDeep: 'rgb(var(--mutedDeep) / <alpha-value>)',
+        line: 'rgb(var(--line) / <alpha-value>)',
+        rule: 'rgb(var(--rule) / <alpha-value>)',
+        cardBorder: 'rgb(var(--cardBorder) / <alpha-value>)',
 
-        // Eski "primary" scale — defter mavisine remap edildi (geriye uyum için)
+        // "primary" — marka mavisi. Açık-tonlu (50/100/soft) değişkene bağlı,
+        // gerisi sabit (mavi her iki temada da çalışır).
         primary: {
           DEFAULT: '#1E3FAE',
-          50: '#E7ECFA',
-          100: '#DBE3F5',
+          50: 'rgb(var(--primary-50) / <alpha-value>)',
+          100: 'rgb(var(--primary-100) / <alpha-value>)',
           200: '#BDCBED',
           300: '#8FA4DD',
           400: '#5072C8',
@@ -36,17 +37,17 @@ export default {
           700: '#173292',
           800: '#142A80',
           900: '#0F2266',
-          soft: '#E7ECFA',
+          soft: 'rgb(var(--primary-soft) / <alpha-value>)',
           ink: '#FFFFFF',
         },
 
-        // Eski "surface" scale — defter kağıt tonlarına remap (geriye uyum için)
+        // "surface" — kağıt/yüzey tonları (değişkene bağlı).
         surface: {
-          0: '#FFFFFF',
-          50: '#FAF6EC',
-          100: '#F4EFE2',
-          200: '#E8E0CB',
-          300: '#D9D1BC',
+          0: 'rgb(var(--surface-0) / <alpha-value>)',
+          50: 'rgb(var(--surface-50) / <alpha-value>)',
+          100: 'rgb(var(--surface-100) / <alpha-value>)',
+          200: 'rgb(var(--surface-200) / <alpha-value>)',
+          300: 'rgb(var(--surface-300) / <alpha-value>)',
         },
 
         // Accent renkleri — defter sıcak tonları

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import AppShell from './components/layout/AppShell';
 import Login from './pages/Login';
@@ -14,9 +15,21 @@ import Timetable from './pages/Timetable';
 import Settings from './pages/Settings';
 import Advanced from './pages/Advanced';
 import { useAuthStore } from './store/auth';
+import { useSettingsStore } from './store/settings';
+import { applyTheme } from './lib/theme';
 
 export default function App() {
   const allowed = useAuthStore((s) => s.authed || s.guest);
+  const theme = useSettingsStore((s) => s.settings.theme);
+  const loadSettings = useSettingsStore((s) => s.load);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   if (!allowed) {
     return (

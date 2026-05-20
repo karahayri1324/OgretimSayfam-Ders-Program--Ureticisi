@@ -83,19 +83,24 @@ export default function Welcome() {
   const percent = Math.round((completed / total) * 100);
   const greetingName = guest ? 'Misafir' : name || 'Müdür Bey';
 
+  const now = new Date();
+  const weekday = now.toLocaleDateString('tr-TR', { weekday: 'long' });
+  const dateStr = now.toLocaleDateString('tr-TR', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+  // Eğitim yılı: Eylül (ay indeksi 8) ve sonrası yeni öğretim yılını başlatır.
+  const acStart = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  const academicYear = `${acStart}–${acStart + 1}`;
+
   return (
     <div className="mx-auto max-w-3xl space-y-10 py-4">
       {}
-      <div className="flex items-center justify-between text-xs text-muted">
+      <div className="flex items-center text-xs text-muted">
         <span>
-          <span className="serif-italic mr-2 text-ink">Pazartesi</span>
-          17 Mayıs 2026 · 2025–2026 Eğitim Yılı
-        </span>
-        <span>
-          Atatürk Anadolu Lisesi ·{' '}
-          <span className="cursor-pointer font-semibold text-primary">
-            okul değiştir
-          </span>
+          <span className="serif-italic mr-2 text-ink capitalize">{weekday}</span>
+          {dateStr} · {academicYear} Eğitim Yılı
         </span>
       </div>
 
@@ -119,7 +124,7 @@ export default function Welcome() {
       >
         <span className="tape" />
         <div className="flex items-start gap-5">
-          <div className="grid size-14 shrink-0 place-items-center rounded-2xl bg-white shadow-primary ring-1 ring-line">
+          <div className="grid size-14 shrink-0 place-items-center rounded-2xl bg-card shadow-primary ring-1 ring-line">
             <Logo size={44} />
           </div>
           <div className="flex-1">
