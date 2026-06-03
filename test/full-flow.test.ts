@@ -182,7 +182,7 @@ describe('Full-flow E2E: boş veri → XML → FET → doğrulama', () => {
         expect(placedCount).toBe(a.weeklyHours);
       }
 
-      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* ignore */ }
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
     },
     120_000,
   );

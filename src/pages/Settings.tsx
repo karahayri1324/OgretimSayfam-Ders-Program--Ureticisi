@@ -52,7 +52,7 @@ export default function Settings() {
   }
 
   async function changeTheme(t: 'light' | 'dark') {
-    applyTheme(t); // anında geri bildirim
+    applyTheme(t);
     await update({ theme: t });
   }
 

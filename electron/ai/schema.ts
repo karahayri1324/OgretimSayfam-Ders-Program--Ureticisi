@@ -156,6 +156,8 @@ export const DataMutationOpEnum = z.enum([
   'export_timetable',
   'swap_timetable_slots',
   'pair_subjects_consecutive',
+  'clear_split',
+  'cancel_generation',
   'navigate_to',
 ]);
 

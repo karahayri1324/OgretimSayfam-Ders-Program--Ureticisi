@@ -99,8 +99,15 @@ def hour_phrase(h: int, max_h: int | None = None) -> str:
 def class_phrase(c: str) -> str:
     return c
 
-def make_context(extra_teachers=None, extra_classes=None) -> dict:
-    """Her örnek için context block (okul verisi)."""
+def make_context(extra_teachers=None, extra_classes=None, existing_constraints=None) -> dict:
+    """Her örnek için context block (okul verisi).
+
+    `constraints`: uygulamanın buildAIContext()'i context'e MEVCUT aktif
+    kısıtlamaları da koyar (id/type/weight/active/description). Eğitim
+    formatı bununla BİREBİR olmalı; aksi halde model dağıtım-dışı (OOD)
+    input alır. Çoğu örnek için boş liste, kısıtlama-yönetimi (sil/gevşet/
+    aktif-pasif/say) senaryolarında dolu gelir.
+    """
     teacher_pool = random.sample(TEACHERS, random.randint(8, 16))
     if extra_teachers:
         for t in extra_teachers:
@@ -118,9 +125,11 @@ def make_context(extra_teachers=None, extra_classes=None) -> dict:
         "rooms": random.sample(ROOMS, random.randint(5, 8)),
         "days": random_days(),
         "hoursPerDay": random_hours_per_day(),
+        "constraints": existing_constraints or [],
     }
 
 def format_context(ctx: dict) -> str:
+    constraints = ctx.get("constraints", [])
     return (
         f"[CONTEXT]\n"
         f"TEACHERS: {json.dumps(ctx['teachers'], ensure_ascii=False)}\n"
@@ -129,6 +138,7 @@ def format_context(ctx: dict) -> str:
         f"ROOMS: {json.dumps(ctx['rooms'], ensure_ascii=False)}\n"
         f"DAYS: {json.dumps(ctx['days'], ensure_ascii=False)}\n"
         f"HOURS_PER_DAY: {ctx['hoursPerDay']}\n"
+        f"CONSTRAINTS: {json.dumps(constraints, ensure_ascii=False)}\n"
         f"[/CONTEXT]"
     )
 
@@ -160,7 +170,6 @@ def weight_for(phrase: str) -> int:
         return 80
     return 100
 
-# Yumuşak/zayıf ön-ekler — isteğin başına eklenir, weight buna göre belirlenir.
 SOFT_PREFIXES = ["Tercihen", "Tercih olarak", "Öncelikli olarak"]
 WEAK_PREFIXES = ["Mümkünse", "İmkân varsa", "Olabiliyorsa"]
 
@@ -4735,6 +4744,447 @@ def gen_schedule_update(n: int) -> list[dict]:
     return out
 
 
+
+def format_tool_result(tool: str, args: dict, result) -> str:
+    return (
+        f"[TOOL_RESULT]\n"
+        f"tool: {tool}\n"
+        f"args: {json.dumps(args, ensure_ascii=False)}\n"
+        f"result: {json.dumps(result, ensure_ascii=False)}\n"
+        f"[/TOOL_RESULT]"
+    )
+
+def example_multiturn(ctx: dict, request: str, steps: list) -> dict:
+    """steps: [(assistant_payload, tool_result | None), ...]
+    Her adım bir assistant turu; tool_result None değilse araya bir
+    [TOOL_RESULT] user mesajı girer. Son adımın tool_result'ı None olmalı
+    (modelin nihai cevabı). En az 1 tool turu + 1 final tur içerir."""
+    msgs = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": make_user_msg(ctx, request)},
+    ]
+    for payload, tool_result in steps:
+        msgs.append({"role": "assistant", "content": make_assistant_msg(payload)})
+        if tool_result is not None:
+            msgs.append({
+                "role": "user",
+                "content": format_tool_result(payload["tool"], payload.get("args", {}), tool_result),
+            })
+    return {"messages": msgs}
+
+
+def _sim_slot(ctx, cls, day, hour):
+    """getTimetableSlot sonucu — %25 boş, gerisi dolu."""
+    if random.random() < 0.25:
+        return {"class": cls, "day": day, "hour": hour, "empty": True}
+    return {
+        "class": cls, "day": day, "hour": hour,
+        "subject": random.choice(ctx["subjects"]),
+        "teacher": random.choice(ctx["teachers"]),
+        "room": random.choice(ctx["rooms"]),
+    }
+
+def _sim_teacher_tt(ctx, teacher):
+    slots = []
+    for d in ctx["days"]:
+        for h in range(1, ctx["hoursPerDay"] + 1):
+            if random.random() < 0.30:
+                slots.append({"day": d, "hour": h, "class": random.choice(ctx["classes"]), "subject": random.choice(ctx["subjects"])})
+    return {"teacher": teacher, "slots": slots, "totalHours": len(slots)}
+
+def _sim_free_slots(ctx, who_key, who_val, k=None):
+    free = []
+    for d in ctx["days"]:
+        for h in range(1, ctx["hoursPerDay"] + 1):
+            if random.random() < 0.35:
+                free.append({"day": d, "hour": h})
+    if k:
+        free = free[:k]
+    return {who_key: who_val, "freeSlots": free}
+
+def _sim_day_tt(ctx, day):
+    rows = []
+    for c in ctx["classes"]:
+        for h in range(1, ctx["hoursPerDay"] + 1):
+            if random.random() < 0.5:
+                rows.append({"class": c, "hour": h, "subject": random.choice(ctx["subjects"]), "teacher": random.choice(ctx["teachers"])})
+    return {"day": day, "rows": rows}
+
+def _sim_who_teaching(ctx, day, hour):
+    rows = []
+    for c in random.sample(ctx["classes"], min(len(ctx["classes"]), random.randint(2, 5))):
+        rows.append({"class": c, "subject": random.choice(ctx["subjects"]), "teacher": random.choice(ctx["teachers"])})
+    return {"day": day, "hour": hour, "teaching": rows}
+
+def _sim_teachers_by_subject(ctx, subject, n=2):
+    pool = random.sample(ctx["teachers"], min(len(ctx["teachers"]), n))
+    return {"subject": subject, "teachers": [{"teacher": t, "weeklyHours": random.randint(4, 26)} for t in pool]}
+
+def _sim_count_constraints(ctx):
+    active = len([c for c in ctx.get("constraints", []) if c.get("active", True)]) or random.randint(8, 40)
+    return {"total": active + random.randint(0, 6), "active": active}
+
+def _sim_validate(ctx, cls):
+    missing = []
+    if random.random() < 0.6:
+        for _ in range(random.randint(1, 3)):
+            missing.append({"class": cls, "subject": random.choice(ctx["subjects"]), "missingHours": random.randint(1, 3)})
+    return {"class": cls, "complete": not missing, "missing": missing}
+
+
+def _describe_constraint(c: dict) -> str:
+    p = c.get("params", {})
+    who = p.get("teacher") or p.get("class") or p.get("subject") or p.get("room") or ""
+    base = c["type"].lower().replace("_", " ")
+    mx = p.get("maxHours", p.get("maxDays"))
+    parts = [who, base, f"({mx})" if mx is not None else ""]
+    return " ".join(x for x in parts if x)
+
+def make_existing_constraints(ctx: dict, k: int) -> list:
+    """Context'e konacak MEVCUT kısıtlamalar — id/type/weight/active/description
+    (app'in gönderdiği obje şekliyle aynı)."""
+    out = []
+    pool = [
+        ("TEACHER_NOT_AVAILABLE", lambda: {"teacher": random.choice(ctx["teachers"]), "slots": [{"day": random.choice(ctx["days"]), "hour": random.randint(1, ctx["hoursPerDay"])}]}),
+        ("TEACHER_MAX_HOURS_DAILY", lambda: {"teacher": random.choice(ctx["teachers"]), "maxHours": random.randint(4, 7)}),
+        ("CLASS_NOT_FIRST_HOUR", lambda: {"class": random.choice(ctx["classes"])}),
+        ("SUBJECT_NOT_ON_DAY", lambda: {"subject": random.choice(ctx["subjects"]), "class": None, "days": [random.choice(ctx["days"])]}),
+        ("SUBJECT_LAST_HOUR_OF_DAY", lambda: {"subject": random.choice(ctx["subjects"]), "class": None}),
+        ("TEACHER_MAX_DAYS_PER_WEEK", lambda: {"teacher": random.choice(ctx["teachers"]), "maxDays": random.randint(3, 5)}),
+    ]
+    for i in range(k):
+        ctype, mk = random.choice(pool)
+        params = mk()
+        c = {
+            "id": i + 1,
+            "type": ctype,
+            "weight": random.choice([60, 80, 100]),
+            "active": random.random() > 0.2,
+            "params": params,
+        }
+        c_ctx = {"id": c["id"], "type": ctype, "weight": c["weight"], "active": c["active"], "description": _describe_constraint(c)}
+        out.append((c, c_ctx))
+    return out
+
+
+def gen_multi_turn_query(n: int) -> list[dict]:
+    """Çok-turlu sorgu: tool_call → [TOOL_RESULT] → final query cevabı.
+    Modele "tool sonucu geldikten sonra Türkçe cevap üret" davranışını öğretir."""
+    out = []
+    for _ in range(n):
+        kind = random.random()
+        if kind < 0.34:
+            cls = f"{random.choice(['9','10','11','12'])}{random.choice('ABCDEF')}"
+            ctx = make_context(extra_classes=[cls])
+            day = random.choice(ctx["days"]); hour = random.randint(1, ctx["hoursPerDay"])
+            request = random.choice([
+                f"{cls} {day} {hour}. ders kim?",
+                f"{cls} {day} {hour}. saat hangi öğretmen?",
+                f"{cls}'nın {day} {hour}. dersi ne?",
+            ])
+            res = _sim_slot(ctx, cls, day, hour)
+            tc = _tool_call("getTimetableSlot", {"class": cls, "day": day, "hour": hour}, f"{cls} {day} {hour}. ders bilgisini çiziyorum.")
+            if res.get("empty"):
+                ans = f"{cls} sınıfının {day} günü {hour}. dersi boş görünüyor."
+            else:
+                ans = f"{cls} {day} {hour}. ders: {res['subject']} — {res['teacher']} ({res['room']})."
+            final = {"kind": "query", "answer": ans, "data": [res], "confidence": round(random.uniform(0.9, 0.99), 2)}
+        elif kind < 0.6:
+            teacher = random.choice(TEACHERS)
+            ctx = make_context(extra_teachers=[teacher])
+            request = random.choice([
+                f"{teacher} ne zaman ders veriyor?",
+                f"{teacher.split()[0]} hocanın programını göster",
+                f"{teacher} haftada kaç saat derse giriyor?",
+            ])
+            res = _sim_teacher_tt(ctx, teacher)
+            tc = _tool_call("getTeacherTimetable", {"teacher": teacher}, f"{teacher} öğretmenin haftalık programını çekiyorum.")
+            if res["slots"]:
+                gunler = sorted({s["day"] for s in res["slots"]}, key=lambda d: ctx["days"].index(d))
+                ans = f"{teacher} haftada toplam {res['totalHours']} saat derse giriyor ({', '.join(gunler)})."
+            else:
+                ans = f"{teacher} için programda henüz ders görünmüyor."
+            final = {"kind": "query", "answer": ans, "data": res["slots"], "confidence": round(random.uniform(0.88, 0.98), 2)}
+        elif kind < 0.8:
+            ctx = make_context()
+            day = random.choice(ctx["days"]); hour = random.randint(1, ctx["hoursPerDay"])
+            request = random.choice([
+                f"{day} {hour}. derste kimler ders veriyor?",
+                f"{day} {hour}. saat kim nerede?",
+            ])
+            res = _sim_who_teaching(ctx, day, hour)
+            tc = _tool_call("whoIsTeaching", {"day": day, "hour": hour}, f"{day} {hour}. derste kimin ders verdiğine bakıyorum.")
+            ozet = "; ".join(f"{r['teacher']}→{r['class']} ({r['subject']})" for r in res["teaching"])
+            final = {"kind": "query", "answer": f"{day} {hour}. derste: {ozet}.", "data": res["teaching"], "confidence": round(random.uniform(0.9, 0.98), 2)}
+        else:
+            ec = []
+            ctx0 = make_context()
+            pairs = make_existing_constraints(ctx0, random.randint(3, 8))
+            ctx0["constraints"] = [p[1] for p in pairs]
+            ctx = ctx0
+            request = random.choice([
+                "Kaç kısıtlama var?",
+                "Sistemde toplam kaç kural tanımlı?",
+                "Aktif kısıtlama sayısı nedir?",
+            ])
+            res = _sim_count_constraints(ctx)
+            tc = _tool_call("countConstraints", {}, "Aktif kısıtlama sayısını çekiyorum.")
+            final = {"kind": "query", "answer": f"Toplam {res['total']} kısıtlama var, {res['active']} tanesi aktif.", "data": [res], "confidence": round(random.uniform(0.92, 0.99), 2)}
+        out.append(example_multiturn(ctx, request, [(tc, res), (final, None)]))
+    return out
+
+
+def gen_multi_turn_planning(n: int) -> list[dict]:
+    """Çok-turlu planlama: keşif tool_call → [TOOL_RESULT] → data_mutation.
+    Bazı senaryolar 2 tool turu (3 turlu) — MAX_TOOL_ITERATIONS=3 davranışı."""
+    out = []
+    for _ in range(n):
+        branch = random.random()
+        if branch < 0.4:
+            teacher = random.choice(TEACHERS); subject = random.choice(SUBJECTS)
+            cls = f"{random.choice(['9','10','11','12'])}{random.choice('ABCDEF')}"
+            ctx = make_context(extra_teachers=[teacher], extra_classes=[cls])
+            if subject not in ctx["subjects"]:
+                ctx["subjects"].append(subject)
+            request = random.choice([
+                f"{teacher} hocanın boş saatlerine {cls}'da {subject} dersi ekle",
+                f"{teacher}'in müsait saatine {cls} {subject} koy",
+            ])
+            res = _sim_free_slots(ctx, "teacher", teacher)
+            tc = _tool_call("getFreeSlots", {"teacher": teacher}, f"Önce {teacher} hocasının boş saatlerini bulmam gerek.")
+            hrs = random.randint(1, 2)
+            final = {
+                "kind": "data_mutation",
+                "actions": [{"op": "add_activity", "params": {"class": cls, "subject": subject, "teacher": teacher, "weeklyHours": hrs}, "description": f"{cls} sınıfına {subject} dersi ({hrs} saat, {teacher}) eklenecek."}],
+                "explanation": f"{teacher} hocasının boş saatleri bulundu; {cls} {subject} dersi eklenecek.",
+                "requiresConfirmation": True,
+                "confidence": round(random.uniform(0.8, 0.93), 2),
+            }
+        elif branch < 0.7:
+            subject = random.choice(SUBJECTS); cls = f"{random.choice(['9','10','11','12'])}{random.choice('ABCDEF')}"
+            ctx = make_context(extra_classes=[cls])
+            if subject not in ctx["subjects"]:
+                ctx["subjects"].append(subject)
+            request = random.choice([
+                f"{subject} branşında iki hoca var, az ders alanına {cls}'da {subject} ver",
+                f"{subject} öğretmenlerinden yükü düşük olana {cls} {subject} dersi ekle",
+            ])
+            res = _sim_teachers_by_subject(ctx, subject, 2)
+            for t in [x["teacher"] for x in res["teachers"]]:
+                if t not in ctx["teachers"]:
+                    ctx["teachers"].append(t)
+            tc = _tool_call("getTeachersBySubject", {"subject": subject}, f"{subject} öğretmenlerini ve yüklerini görmem gerek.")
+            az = min(res["teachers"], key=lambda x: x["weeklyHours"])["teacher"]
+            final = {
+                "kind": "data_mutation",
+                "actions": [{"op": "add_activity", "params": {"class": cls, "subject": subject, "teacher": az, "weeklyHours": 2}, "description": f"{cls} sınıfına {subject} dersi (2 saat, {az}) eklenecek."}],
+                "explanation": f"Yükü en düşük {subject} öğretmeni {az}; ders ona atanacak.",
+                "requiresConfirmation": True,
+                "confidence": round(random.uniform(0.78, 0.9), 2),
+            }
+        else:
+            cls = f"{random.choice(['9','10','11','12'])}{random.choice('ABCDEF')}"
+            ctx = make_context(extra_classes=[cls])
+            request = random.choice([
+                f"{cls}'nın programı tam mı? Eksikse tamamla",
+                f"{cls} çizelgesi bitmiş mi kontrol et, eksik dersleri ekle",
+            ])
+            res = _sim_validate(ctx, cls)
+            for m in res["missing"]:
+                if m["subject"] not in ctx["subjects"]:
+                    ctx["subjects"].append(m["subject"])
+            tc = _tool_call("validateSchedule", {"class": cls}, f"Önce {cls} programının tamlığını doğrulamam gerek.")
+            if res["complete"]:
+                final = {"kind": "query", "answer": f"{cls} sınıfının programı tam görünüyor, eksik ders yok.", "confidence": round(random.uniform(0.9, 0.98), 2)}
+            else:
+                actions = [{"op": "add_activity", "params": {"class": cls, "subject": m["subject"], "weeklyHours": m["missingHours"]}, "description": f"{cls} sınıfına {m['subject']} dersi ({m['missingHours']} saat) eklenecek."} for m in res["missing"]]
+                final = {"kind": "data_mutation", "actions": actions, "explanation": f"{cls} sınıfında {len(actions)} eksik ders tespit edildi; tamamlanacak.", "requiresConfirmation": True, "confidence": round(random.uniform(0.75, 0.88), 2)}
+        out.append(example_multiturn(ctx, request, [(tc, res), (final, None)]))
+    return out
+
+
+
+def _data_mut(ctx, request, actions, explanation, conf=(0.85, 0.96)):
+    payload = {
+        "kind": "data_mutation",
+        "actions": actions,
+        "explanation": explanation,
+        "requiresConfirmation": True,
+        "confidence": round(random.uniform(*conf), 2),
+    }
+    return example(ctx, request, payload)
+
+def gen_update_entities(n: int) -> list[dict]:
+    """update_class / update_room / update_subject — mevcut kayıt güncelleme."""
+    out = []
+    for _ in range(n):
+        r = random.random()
+        ctx = make_context()
+        if r < 0.4:
+            cls = random.choice(ctx["classes"]); cnt = random.choice([24, 28, 30, 32, 36])
+            request = random.choice([
+                f"{cls}'nın mevcudunu {cnt} yap",
+                f"{cls} sınıfının öğrenci sayısını {cnt} olarak güncelle",
+                f"{cls}'da {cnt} öğrenci var, güncelle",
+            ])
+            actions = [{"op": "update_class", "params": {"name": cls, "studentCount": cnt}, "description": f"{cls} sınıfının mevcudu {cnt} yapılacak."}]
+        elif r < 0.75:
+            room = random.choice(ctx["rooms"]); cap = random.choice([20, 25, 30, 40]); bld = random.choice(["A Blok", "B Blok", "Ana Bina", "Ek Bina"])
+            if random.random() < 0.5:
+                request = random.choice([f"{room} dersliğinin kapasitesini {cap} yap", f"{room} kapasitesi {cap} olsun"])
+                actions = [{"op": "update_room", "params": {"name": room, "capacity": cap}, "description": f"{room} dersliğinin kapasitesi {cap} yapılacak."}]
+            else:
+                request = random.choice([f"{room} dersliğini {bld}'a taşı", f"{room} {bld}'da olsun"])
+                actions = [{"op": "update_room", "params": {"name": room, "building": bld}, "description": f"{room} dersliği {bld} olarak güncellenecek."}]
+        else:
+            subj = random.choice(ctx["subjects"]); code = "".join(w[0] for w in subj.split()[:3]).upper()
+            request = random.choice([
+                f"{subj} dersinin kısa kodunu {code} yap",
+                f"{subj} branşının kodunu {code} olarak güncelle",
+            ])
+            actions = [{"op": "update_subject", "params": {"name": subj, "shortCode": code}, "description": f"{subj} dersinin kısa kodu {code} yapılacak."}]
+        out.append(_data_mut(ctx, request, actions, actions[0]["description"]))
+    return out
+
+def gen_delete_activity(n: int) -> list[dict]:
+    out = []
+    for _ in range(n):
+        cls = random.choice(CLASSES); subj = random.choice(SUBJECTS)
+        ctx = make_context(extra_classes=[cls])
+        if subj not in ctx["subjects"]:
+            ctx["subjects"].append(subj)
+        request = random.choice([
+            f"{cls}'dan {subj} dersini kaldır",
+            f"{cls} sınıfının {subj} dersini sil",
+            f"{cls}'da {subj} olmasın, dersi sil",
+        ])
+        actions = [{"op": "delete_activity", "params": {"class": cls, "subject": subj}, "description": f"{cls} sınıfının {subj} dersi (aktivitesi) silinecek. Onaylıyor musunuz?"}]
+        out.append(_data_mut(ctx, request, actions, f"{cls} {subj} aktivitesi silinecek."))
+    return out
+
+def gen_class_year(n: int) -> list[dict]:
+    """add_class_year / delete_class_year — kademe ekle/sil."""
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        yr = random.choice(["9. Sınıf", "10. Sınıf", "11. Sınıf", "12. Sınıf", "Hazırlık", "Anaokulu", "5. Sınıf", "6. Sınıf"])
+        if random.random() < 0.6:
+            request = random.choice([f"{yr} kademesi ekle", f"{yr} diye bir kademe oluştur", f"Yeni kademe: {yr}"])
+            actions = [{"op": "add_class_year", "params": {"name": yr}, "description": f"'{yr}' kademesi eklenecek."}]
+            expl = f"'{yr}' kademesi eklenecek."
+        else:
+            request = random.choice([f"{yr} kademesini sil", f"{yr} kademesini kaldır"])
+            actions = [{"op": "delete_class_year", "params": {"name": yr}, "description": f"'{yr}' kademesi silinecek. Bağlı sınıflar etkilenebilir. Onaylıyor musunuz?"}]
+            expl = f"'{yr}' kademesi silinecek."
+        out.append(_data_mut(ctx, request, actions, expl))
+    return out
+
+def gen_hour_count(n: int) -> list[dict]:
+    """add_hour / delete_hour — günlük ders saati sayısını değiştir."""
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        if random.random() < 0.55:
+            request = random.choice([
+                "Bir ders saati ekle", "Günlük saat sayısını 1 artır", "Bir saat daha ekle", "Ders saati ekle",
+            ])
+            actions = [{"op": "add_hour", "params": {}, "description": "Programa bir ders saati eklenecek."}]
+            expl = "Bir ders saati eklenecek."
+        else:
+            request = random.choice([
+                "Son ders saatini kaldır", "Bir ders saati sil", "Günlük saat sayısını 1 azalt", "Son saati çıkar",
+            ])
+            actions = [{"op": "delete_hour", "params": {}, "description": "Son ders saati silinecek."}]
+            expl = "Bir ders saati silinecek."
+        out.append(_data_mut(ctx, request, actions, expl))
+    return out
+
+def gen_constraint_manage(n: int) -> list[dict]:
+    """delete_constraint / set_constraint_active — MEVCUT kısıtlama yönetimi.
+    Context'e id'li kısıtlamalar konur; model id ile referans verir."""
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        pairs = make_existing_constraints(ctx, random.randint(3, 7))
+        ctx["constraints"] = [p[1] for p in pairs]
+        target = random.choice(ctx["constraints"])
+        tid = target["id"]; desc = target["description"]
+        r = random.random()
+        if r < 0.45:
+            request = random.choice([
+                f"{tid} numaralı kısıtlamayı sil",
+                f"{tid}. kuralı kaldır",
+                f"'{desc}' kısıtlamasını sil",
+            ])
+            actions = [{"op": "delete_constraint", "params": {"constraintId": tid}, "description": f"{tid} numaralı kısıtlama ('{desc}') silinecek. Onaylıyor musunuz?"}]
+            expl = f"{tid} numaralı kısıtlama silinecek."
+        elif r < 0.75:
+            request = random.choice([
+                f"{tid} numaralı kısıtlamayı pasifleştir",
+                f"{tid}. kuralı geçici kapat",
+                f"'{desc}' kısıtlamasını devre dışı bırak",
+            ])
+            actions = [{"op": "set_constraint_active", "params": {"constraintId": tid, "active": False}, "description": f"{tid} numaralı kısıtlama ('{desc}') pasifleştirilecek."}]
+            expl = f"{tid} numaralı kısıtlama pasifleştirilecek."
+        else:
+            request = random.choice([
+                f"{tid} numaralı kısıtlamayı tekrar aktifleştir",
+                f"{tid}. kuralı yeniden aç",
+            ])
+            actions = [{"op": "set_constraint_active", "params": {"constraintId": tid, "active": True}, "description": f"{tid} numaralı kısıtlama ('{desc}') aktifleştirilecek."}]
+            expl = f"{tid} numaralı kısıtlama aktifleştirilecek."
+        out.append(_data_mut(ctx, request, actions, expl))
+    return out
+
+def gen_two_activities_consecutive(n: int) -> list[dict]:
+    """TWO_ACTIVITIES_CONSECUTIVE constraint — iki aktivite arka arkaya."""
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        a1 = random.randint(1, 60); a2 = a1 + random.randint(1, 20)
+        request, w = apply_strength(random.choice([
+            f"{a1} ve {a2} numaralı aktiviteler arka arkaya olsun",
+            f"{a1}. aktivite ile {a2}. aktivite ardışık olsun",
+            f"{a1} nolu ders bittikten hemen sonra {a2} nolu ders gelsin",
+        ]), 80)
+        payload = {
+            "constraints": [{"type": "TWO_ACTIVITIES_CONSECUTIVE", "weight": w, "active": True, "params": {"firstActivityId": a1, "secondActivityId": a2}}],
+            "confidence": round(random.uniform(0.8, 0.92), 2),
+            "explanation": f"{a1} ve {a2} numaralı aktiviteler ardışık olacak şekilde kısıtlama eklendi.",
+            "warnings": [], "unresolved": [],
+        }
+        out.append(example(ctx, request, payload))
+    return out
+
+def gen_clear_split(n: int) -> list[dict]:
+    """clear_split — mevcut bölünmüş/birleşik grubu çöz."""
+    out = []
+    for _ in range(n):
+        cls = random.choice(CLASSES)
+        ctx = make_context(extra_classes=[cls])
+        request = random.choice([
+            f"{cls}'nın seçmeli grubunu ayır",
+            f"{cls} bölünmüş dersini tek derse çevir",
+            f"{cls}'daki grup dersini çöz, normale döndür",
+            f"{cls}'nın split aktivitesini kaldır",
+        ])
+        actions = [{"op": "clear_split", "params": {"class": cls}, "description": f"{cls} sınıfının bölünmüş/grup aktivitesi çözülecek (normale dönecek)."}]
+        out.append(_data_mut(ctx, request, actions, f"{cls} split grubu çözülecek."))
+    return out
+
+def gen_cancel_generation(n: int) -> list[dict]:
+    """cancel_generation — süren program üretimini iptal et."""
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        request = random.choice([
+            "Üretimi durdur", "Üretimi iptal et", "Çözümü durdur", "Programı üretmeyi bırak", "Dur, iptal et", "Solver'ı durdur",
+        ])
+        actions = [{"op": "cancel_generation", "params": {}, "description": "Süren program üretimi iptal edilecek."}]
+        out.append(_data_mut(ctx, request, actions, "Program üretimi iptal edilecek.", conf=(0.9, 0.98)))
+    return out
+
+
 GENERATORS = {
     "teacher_not_available":      (gen_teacher_not_available, 250),
     "class_not_available":        (gen_class_not_available, 150),
@@ -4801,7 +5251,6 @@ GENERATORS = {
     "students_max_hours_daily":                   (gen_students_max_hours_daily, 60),
     "max_total_activities_from_set":              (gen_max_total_activities_from_set, 50),
     "data_mutations":                             (gen_data_mutations, 200),
-    "conversational_wizard":                      (gen_conversational_wizard, 300),
 
     "run_solver":                                 (gen_run_solver, 250),
     "per_class_subject_room":                     (gen_per_class_subject_room, 250),
@@ -4830,6 +5279,18 @@ GENERATORS = {
     "multi_step_planning":                        (gen_multi_step_planning, 100),
     "out_of_scope":                               (gen_out_of_scope, 120),
     "disambiguation":                             (gen_disambiguation, 100),
+
+    "multi_turn_query":                           (gen_multi_turn_query, 220),
+    "multi_turn_planning":                        (gen_multi_turn_planning, 180),
+
+    "update_entities":                            (gen_update_entities, 150),
+    "delete_activity":                            (gen_delete_activity, 90),
+    "class_year":                                 (gen_class_year, 90),
+    "hour_count":                                 (gen_hour_count, 80),
+    "constraint_manage":                          (gen_constraint_manage, 150),
+    "two_activities_consecutive":                 (gen_two_activities_consecutive, 70),
+    "clear_split":                                (gen_clear_split, 70),
+    "cancel_generation":                          (gen_cancel_generation, 60),
 }
 
 SCALE = int(os.environ.get("DPO_DATASET_SCALE", "22"))
@@ -4854,9 +5315,39 @@ def compute_count(base_count: int) -> int:
         return TARGET_MAX
     return naive
 
+_NAME_TOKENS = None
+def _name_tokens():
+    global _NAME_TOKENS
+    if _NAME_TOKENS is None:
+        toks = set()
+        for pool in (TEACHERS, CLASSES, SUBJECTS, ROOMS):
+            for x in pool:
+                toks.add(x)
+                if " " in x:
+                    toks.add(x.split()[0])
+        _NAME_TOKENS = sorted(toks, key=len, reverse=True)
+    return _NAME_TOKENS
+
+def request_signature(line: str) -> tuple:
+    """(kind, maskelenmiş_ilk_user_request) — leakage-free gruplama anahtarı."""
+    obj = json.loads(line)
+    user = next((m["content"] for m in obj["messages"] if m["role"] == "user"), "")
+    m = re.search(r"\[USER_REQUEST\]\s*(.*?)\s*\[/USER_REQUEST\]", user, re.S)
+    sig = m.group(1) if m else user
+    for name in _name_tokens():
+        if name in sig:
+            sig = sig.replace(name, "§")
+    sig = re.sub(r"\d+", "#", sig)
+    sig = re.sub(r"\s+", " ", sig).strip().lower()
+    asst = [mm["content"] for mm in obj["messages"] if mm["role"] == "assistant"]
+    try:
+        kind = json.loads(asst[-1]).get("kind", "constraint") if asst else "?"
+    except Exception:
+        kind = "?"
+    return (kind, sig)
+
 def main():
     total = 0
-    # Bayat (artık üretilmeyen) .jsonl dosyalarını temizle — dataset birikmesin.
     for old in DS.glob("*.jsonl"):
         if old.stem not in GENERATORS:
             old.unlink()
@@ -4872,28 +5363,54 @@ def main():
 
     print(f"\nToplam: {total} örnek üretildi.")
 
-    all_examples = []
+    from collections import defaultdict
+
+    seen_full = set()
+    cat_groups = defaultdict(lambda: defaultdict(list))
+    dup = 0
     for name in GENERATORS:
         with (DS / f"{name}.jsonl").open(encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
-                if line:
-                    all_examples.append((name, line))
+                if not line:
+                    continue
+                if line in seen_full:
+                    dup += 1
+                    continue
+                seen_full.add(line)
+                sig = request_signature(line)
+                cat_groups[name][sig].append(line)
 
-    random.shuffle(all_examples)
-    split_idx = int(len(all_examples) * 0.85)
-    train, evals = all_examples[:split_idx], all_examples[split_idx:]
+    train, evals = [], []
+    EVAL_FRAC = 0.12
+    for name, groups in cat_groups.items():
+        sigs = list(groups.keys())
+        random.shuffle(sigs)
+        n_eval = int(len(sigs) * EVAL_FRAC) if len(sigs) > 1 else 0
+        eval_sigs = set(sigs[:n_eval])
+        for sig, lines in groups.items():
+            (evals if sig in eval_sigs else train).extend(lines)
+
+    random.shuffle(train)
+    random.shuffle(evals)
 
     split_dir = DS / "train_test_split"
     split_dir.mkdir(exist_ok=True)
     with (split_dir / "train.jsonl").open("w", encoding="utf-8") as f:
-        for _, line in train:
+        for line in train:
             f.write(line + "\n")
     with (split_dir / "eval.jsonl").open("w", encoding="utf-8") as f:
-        for _, line in evals:
+        for line in evals:
             f.write(line + "\n")
-    print(f"\nTrain: {len(train)} örnek → {split_dir / 'train.jsonl'}")
+    print(f"\nDedup ile atılan exact-duplicate: {dup}")
+    print(f"Train: {len(train)} örnek → {split_dir / 'train.jsonl'}")
     print(f"Eval:  {len(evals)} örnek → {split_dir / 'eval.jsonl'}")
+
+    train_sigs = {request_signature(l) for l in train}
+    eval_sigs = {request_signature(l) for l in evals}
+    overlap = train_sigs & eval_sigs
+    leak = len(overlap) / max(len(eval_sigs), 1) * 100
+    print(f"İmza sızıntısı (eval∩train / eval): {len(overlap)}/{len(eval_sigs)} = %{leak:.2f}")
 
 if __name__ == "__main__":
     main()

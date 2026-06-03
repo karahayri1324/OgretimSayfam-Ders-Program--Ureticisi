@@ -66,9 +66,9 @@ export async function runFet(
 
     const onAbort = () => {
       cancelled = true;
-      try { proc.kill('SIGTERM'); } catch { /* ignore */ }
+      try { proc.kill('SIGTERM'); } catch { }
       setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch { /* ignore */ }
+        try { proc.kill('SIGKILL'); } catch { }
       }, 5000).unref?.();
     };
     if (opts.signal) {
@@ -249,7 +249,7 @@ async function readErrorFiles(outputDir: string): Promise<string> {
       try {
         const content = await fs.promises.readFile(path.join(logsDir, f), 'utf-8');
         parts.push(`--- ${f} ---\n${content}`);
-      } catch { /* ignore */ }
+      } catch { }
     }
     return parts.join('\n\n');
   } catch {

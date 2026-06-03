@@ -91,7 +91,6 @@ export default function Login() {
         backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent 31px, ${defter.line} 31px, ${defter.line}88 32px)`,
       }}
     >
-      {/* ─── LEFT — Animated demo + pitch ───────────────────── */}
       <div
         style={{
           flex: 1,
@@ -103,7 +102,6 @@ export default function Login() {
           overflow: 'hidden',
         }}
       >
-        {/* Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
           <Logo size={40} />
           <div>
@@ -132,7 +130,6 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Headline */}
         <div
           style={{
             fontFamily: fontSerif,
@@ -155,8 +152,6 @@ export default function Login() {
           çıkartır ve haftalık programı saniyeler içinde üretir.
         </div>
 
-        {/* Demo — büyük ekranda gerçek viewport center'a oturur,
-             küçük ekranda headline'ın altına itelenir (overlap önlenir). */}
         <div
           style={{
             position: 'absolute',
@@ -178,7 +173,6 @@ export default function Login() {
         </div>
       </div>
 
-      {/* ─── RIGHT — Auth form ──────────────────────────────── */}
       <div
         style={{
           width: 460,
@@ -190,7 +184,6 @@ export default function Login() {
           flexDirection: 'column',
         }}
       >
-        {/* Lang switcher */}
         <div
           style={{
             display: 'flex',
@@ -207,7 +200,6 @@ export default function Login() {
           <span style={{ opacity: 0.5 }}>EN</span>
         </div>
 
-        {/* Tab switcher */}
         <div
           role="tablist"
           aria-label="Giriş veya Kayıt"
@@ -252,7 +244,6 @@ export default function Login() {
           })}
         </div>
 
-        {/* Heading */}
         <h1
           style={{
             fontFamily: fontSerif,
@@ -284,7 +275,6 @@ export default function Login() {
             : 'Birkaç bilgi yeter — hesabınız hemen kullanıma hazır olur.'}
         </p>
 
-        {/* Form */}
         <form
           onSubmit={handleSubmit}
           style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
@@ -397,7 +387,6 @@ export default function Login() {
             {!submitting && <ArrowRight size={14} />}
           </button>
 
-          {/* Misafir Devam Et */}
           <div
             style={{
               display: 'flex',

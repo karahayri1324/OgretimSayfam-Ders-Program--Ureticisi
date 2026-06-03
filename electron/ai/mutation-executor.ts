@@ -6,6 +6,7 @@ import { roomsRepo } from '../db/repositories/rooms.js';
 import { activitiesRepo } from '../db/repositories/activities.js';
 import { daysRepo } from '../db/repositories/days.js';
 import { hoursRepo } from '../db/repositories/hours.js';
+import { dayHoursRepo } from '../db/repositories/day_hours.js';
 import { constraintsRepo } from '../db/repositories/constraints.js';
 import { settingsRepo } from '../db/repositories/settings.js';
 import { timetablesRepo } from '../db/repositories/timetables.js';
@@ -99,6 +100,74 @@ function ensureClass(name: string, yearName?: string | null): number {
 }
 
 
+function pruneConstraintsByName(field: 'teacher' | 'class' | 'subject' | 'room', name: string): number {
+  const target = deburr(name);
+  let removed = 0;
+  for (const c of constraintsRepo.list()) {
+    const p = c.params as Record<string, unknown>;
+    let hit = typeof p[field] === 'string' && deburr(p[field] as string) === target;
+    if (!hit && field === 'room' && Array.isArray(p['rooms'])) {
+      hit = (p['rooms'] as unknown[]).some((r) => typeof r === 'string' && deburr(r) === target);
+    }
+    if (hit) {
+      constraintsRepo.delete(c.id);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+function pruneConstraintsByActivityIds(ids: number[]): number {
+  if (ids.length === 0) return 0;
+  const idset = new Set(ids);
+  let removed = 0;
+  for (const c of constraintsRepo.list()) {
+    const p = c.params as Record<string, unknown>;
+    const single = typeof p['activityId'] === 'number' && idset.has(p['activityId'] as number);
+    const many =
+      Array.isArray(p['activityIds']) &&
+      (p['activityIds'] as unknown[]).some((x) => typeof x === 'number' && idset.has(x as number));
+    const pair =
+      (typeof p['firstActivityId'] === 'number' && idset.has(p['firstActivityId'] as number)) ||
+      (typeof p['secondActivityId'] === 'number' && idset.has(p['secondActivityId'] as number));
+    if (single || many || pair) {
+      constraintsRepo.delete(c.id);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+function activityIdsForClass(classId: number): number[] {
+  return activitiesRepo.list().filter((a) => a.classId === classId).map((a) => a.id);
+}
+
+function activityIdsForSubject(subjectId: number): number[] {
+  return activitiesRepo.list().filter((a) => a.subjectId === subjectId).map((a) => a.id);
+}
+
+function clearDayHourOverrides(): string {
+  try {
+    const had = dayHoursRepo.list().length > 0;
+    if (had) {
+      dayHoursRepo.clearAll();
+      return ' (güne özel saat ayarları sıfırlandı)';
+    }
+  } catch {
+  }
+  return '';
+}
+
+function resolveHomeRoomId(params: Record<string, unknown>): number | null {
+  const idVal = optInt(params, 'homeRoomId');
+  if (idVal && idVal > 0) return idVal;
+  const roomName = optString(params, 'homeRoom');
+  if (!roomName) return null;
+  const room = findByName(roomName, roomsRepo.list());
+  if (!room) throw new Error(`Ana derslik bulunamadı: '${roomName}'`);
+  return room.id;
+}
+
 type Handler = (params: Record<string, unknown>) => string;
 
 const handlers: Record<DataMutationOp, Handler> = {
@@ -137,7 +206,9 @@ const handlers: Record<DataMutationOp, Handler> = {
     const teacher = findByName(name, teachersRepo.list());
     if (!teacher) throw new Error(`Öğretmen bulunamadı: '${name}'`);
     teachersRepo.delete(teacher.id);
-    return `'${teacher.name}' öğretmeni silindi.`;
+    const pruned = pruneConstraintsByName('teacher', teacher.name);
+    const extra = pruned > 0 ? ` ${pruned} ilgili kısıtlama temizlendi.` : '';
+    return `'${teacher.name}' öğretmeni silindi; dersleri öğretmensiz kaldı.${extra}`;
   },
 
   add_subject(params) {
@@ -175,8 +246,13 @@ const handlers: Record<DataMutationOp, Handler> = {
     const name = requireString(params, 'name');
     const subject = findByName(name, subjectsRepo.list());
     if (!subject) throw new Error(`Branş bulunamadı: '${name}'`);
+    const affectedActs = activityIdsForSubject(subject.id);
     subjectsRepo.delete(subject.id);
-    return `'${subject.name}' branşı silindi.`;
+    const prunedName = pruneConstraintsByName('subject', subject.name);
+    const prunedAct = pruneConstraintsByActivityIds(affectedActs);
+    const total = prunedName + prunedAct;
+    const extra = total > 0 ? ` ${total} ilgili kısıtlama temizlendi.` : '';
+    return `'${subject.name}' branşı silindi.${extra}`;
   },
 
   add_class(params) {
@@ -190,8 +266,10 @@ const handlers: Record<DataMutationOp, Handler> = {
       yearId = y ? y.id : classYearsRepo.create(yearName);
     }
     const studentCount = optInt(params, 'studentCount') ?? 0;
-    const id = classesRepo.create({ name, yearId, studentCount });
-    return `'${name}' sınıfı eklendi (id=${id})${yearName ? `, kademe: ${yearName}.` : '.'}`;
+    const homeRoomId = resolveHomeRoomId(params);
+    const id = classesRepo.create({ name, yearId, studentCount, homeRoomId });
+    const roomPart = homeRoomId ? ', ana derslik atandı' : '';
+    return `'${name}' sınıfı eklendi (id=${id})${yearName ? `, kademe: ${yearName}` : ''}${roomPart}.`;
   },
 
   update_class(params) {
@@ -207,6 +285,9 @@ const handlers: Record<DataMutationOp, Handler> = {
       const y = findByName(yearName, classYearsRepo.list());
       patch['yearId'] = y ? y.id : classYearsRepo.create(yearName);
     }
+    if ('homeRoom' in params || 'homeRoomId' in params) {
+      patch['homeRoomId'] = resolveHomeRoomId(params);
+    }
     classesRepo.update(klass.id, patch);
     return `'${klass.name}' sınıfı güncellendi.`;
   },
@@ -215,8 +296,13 @@ const handlers: Record<DataMutationOp, Handler> = {
     const name = requireString(params, 'name');
     const klass = findByName(name, classesRepo.list());
     if (!klass) throw new Error(`Sınıf bulunamadı: '${name}'`);
+    const affectedActs = activityIdsForClass(klass.id);
     classesRepo.delete(klass.id);
-    return `'${klass.name}' sınıfı silindi.`;
+    const prunedName = pruneConstraintsByName('class', klass.name);
+    const prunedAct = pruneConstraintsByActivityIds(affectedActs);
+    const total = prunedName + prunedAct;
+    const extra = total > 0 ? ` ${total} ilgili kısıtlama temizlendi.` : '';
+    return `'${klass.name}' sınıfı silindi.${extra}`;
   },
 
   add_class_year(params) {
@@ -266,7 +352,9 @@ const handlers: Record<DataMutationOp, Handler> = {
     const room = findByName(name, roomsRepo.list());
     if (!room) throw new Error(`Derslik bulunamadı: '${name}'`);
     roomsRepo.delete(room.id);
-    return `'${room.name}' dersliği silindi.`;
+    const pruned = pruneConstraintsByName('room', room.name);
+    const extra = pruned > 0 ? ` ${pruned} ilgili kısıtlama temizlendi.` : '';
+    return `'${room.name}' dersliği silindi.${extra}`;
   },
 
   add_activity(params) {
@@ -348,7 +436,9 @@ const handlers: Record<DataMutationOp, Handler> = {
       throw new Error(`${className} × ${subjectName} aktivitesi bulunamadı.`);
     }
     activitiesRepo.delete(existing.id);
-    return `${className} × '${subjectName}' aktivitesi silindi.`;
+    const pruned = pruneConstraintsByActivityIds([existing.id]);
+    const extra = pruned > 0 ? ` ${pruned} ilgili kısıtlama temizlendi.` : '';
+    return `${className} × '${subjectName}' aktivitesi silindi.${extra}`;
   },
 
   add_day(params) {
@@ -373,39 +463,42 @@ const handlers: Record<DataMutationOp, Handler> = {
   },
 
   add_hour(params) {
-    const name = requireString(params, 'name');
+    const current = hoursRepo.list();
+    const name = optString(params, 'name') ?? `${current.length + 1}. Ders`;
     const startTime = optString(params, 'startTime') ?? null;
     const endTime = optString(params, 'endTime') ?? null;
-    const current = hoursRepo.list();
     if (current.some((h) => deburr(h.name) === deburr(name))) {
       return `Ders saati zaten var: ${name}. Atlandı.`;
     }
     hoursRepo.replaceAll([
-      ...current.map((h) => ({
-        name: h.name,
-        startTime: h.startTime,
-        endTime: h.endTime,
-      })),
+      ...current.map((h) => ({ name: h.name, startTime: h.startTime, endTime: h.endTime })),
       { name, startTime, endTime },
     ]);
-    return `'${name}' ders saati eklendi.`;
+    const cleared = clearDayHourOverrides();
+    return `'${name}' ders saati eklendi.${cleared}`;
   },
 
   delete_hour(params) {
-    const name = requireString(params, 'name');
     const current = hoursRepo.list();
-    const next = current.filter((h) => deburr(h.name) !== deburr(name));
-    if (next.length === current.length) {
-      throw new Error(`Ders saati bulunamadı: '${name}'`);
+    const name = optString(params, 'name');
+    let next: typeof current;
+    let removedName: string;
+    if (name) {
+      next = current.filter((h) => deburr(h.name) !== deburr(name));
+      if (next.length === current.length) {
+        throw new Error(`Ders saati bulunamadı: '${name}'`);
+      }
+      removedName = name;
+    } else {
+      if (current.length === 0) throw new Error('Silinecek ders saati yok.');
+      removedName = current[current.length - 1]!.name;
+      next = current.slice(0, -1);
     }
     hoursRepo.replaceAll(
-      next.map((h) => ({
-        name: h.name,
-        startTime: h.startTime,
-        endTime: h.endTime,
-      })),
+      next.map((h) => ({ name: h.name, startTime: h.startTime, endTime: h.endTime })),
     );
-    return `'${name}' ders saati kaldırıldı.`;
+    const cleared = clearDayHourOverrides();
+    return `'${removedName}' ders saati kaldırıldı.${cleared}`;
   },
 
   link_teacher_subject(params) {
@@ -1142,6 +1235,24 @@ const handlers: Record<DataMutationOp, Handler> = {
     }
     return `/${page} sayfasına yönlendiriliyor.`;
   },
+
+  clear_split(params) {
+    const className = requireString(params, 'class');
+    const klass = findByName(className, classesRepo.list());
+    if (!klass) throw new Error(`Sınıf bulunamadı: '${className}'`);
+    const split = activitiesRepo
+      .list()
+      .filter((a) => a.classId === klass.id && a.splitGroupId != null);
+    if (split.length === 0) {
+      return `${klass.name} sınıfında bölünmüş/grup aktivite yok. Atlandı.`;
+    }
+    for (const a of split) activitiesRepo.clearSplitGroup(a.id);
+    return `${klass.name} sınıfının bölünmüş grubu çözüldü (${split.length} aktivite normale döndü).`;
+  },
+
+  cancel_generation() {
+    return 'Program üretimi iptal ediliyor.';
+  },
 };
 
 function nameMatches(name: string, target: string): boolean {
@@ -1152,7 +1263,6 @@ function nameMatches(name: string, target: string): boolean {
   return false;
 }
 
-/** Hata yokken commit, en az bir hata varsa tüm transaction'ı geri almak için fırlatılan sentinel. */
 class MutationRollback extends Error {}
 
 export function applyMutations(actions: DataMutationAction[]): DataMutationApplyResult {
@@ -1184,9 +1294,6 @@ export function applyMutations(actions: DataMutationAction[]): DataMutationApply
         log.warn('AI mutation hatası', { op: action.op, error: msg });
       }
     }
-    // Atomik garanti: tek bir action bile başarısızsa, hepsini geri al.
-    // Böylece "branş ekle → öğretmene bağla → aktivite ekle" gibi bağımlı
-    // adımlar yarım kalıp orphan/tutarsız veri bırakmaz.
     if (result.errors.length > 0) {
       throw new MutationRollback();
     }

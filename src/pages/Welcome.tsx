@@ -90,13 +90,11 @@ export default function Welcome() {
     month: 'long',
     year: 'numeric',
   });
-  // Eğitim yılı: Eylül (ay indeksi 8) ve sonrası yeni öğretim yılını başlatır.
   const acStart = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
   const academicYear = `${acStart}–${acStart + 1}`;
 
   return (
     <div className="mx-auto max-w-3xl space-y-10 py-4">
-      {}
       <div className="flex items-center text-xs text-muted">
         <span>
           <span className="serif-italic mr-2 text-ink capitalize">{weekday}</span>
@@ -104,7 +102,6 @@ export default function Welcome() {
         </span>
       </div>
 
-      {}
       <header>
         <h1 className="serif text-[44px] leading-[1.02] tracking-tight">
           Hoş geldin,
@@ -117,7 +114,6 @@ export default function Welcome() {
         </p>
       </header>
 
-      {}
       <section
         className="card-defter relative p-7"
         aria-labelledby="welcome-hero-title"
@@ -167,12 +163,6 @@ export default function Welcome() {
                   className="transition-transform group-hover:translate-x-0.5"
                 />
               </button>
-              <span className="text-xs text-muted">
-                veya{' '}
-                <span className="cursor-pointer border-b border-muted text-ink">
-                  wizard'la adım adım gir
-                </span>
-              </span>
             </div>
           </div>
         </div>

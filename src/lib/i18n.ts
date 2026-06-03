@@ -234,14 +234,11 @@ export const tr = {
     fetchingInfo: 'AI bilgi çekiyor',
     quickStartTitle: 'Hızlı başlangıç',
     quickStarts: {
-      wizard: 'Wizard ile başla',
       addTeacher: 'Öğretmen ekle',
       addClass: 'Sınıf ekle',
       generate: 'Programı üret',
     },
     quickStartPrompts: {
-      wizard:
-        'Yeni bir ders programı oluşturalım. Bana adım adım yardım eder misin? Önce nereden başlamalıyım?',
       addTeacher:
         'Yeni bir öğretmen eklemek istiyorum. Adı, branşı ve haftalık ders saatini sorar mısın?',
       addClass:

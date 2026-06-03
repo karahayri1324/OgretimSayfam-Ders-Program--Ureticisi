@@ -1,10 +1,8 @@
-/** @type {import('tailwindcss').Config} */
 export default {
   content: ['./src/**/*.{ts,tsx,html}'],
   theme: {
     extend: {
       colors: {
-        // "Defter" palette — CSS değişkenlerine bağlı (açık/koyu tema otomatik).
         paper: 'rgb(var(--paper) / <alpha-value>)',
         paper2: 'rgb(var(--paper2) / <alpha-value>)',
         card: 'rgb(var(--card) / <alpha-value>)',
@@ -23,8 +21,6 @@ export default {
         rule: 'rgb(var(--rule) / <alpha-value>)',
         cardBorder: 'rgb(var(--cardBorder) / <alpha-value>)',
 
-        // "primary" — marka mavisi. Açık-tonlu (50/100/soft) değişkene bağlı,
-        // gerisi sabit (mavi her iki temada da çalışır).
         primary: {
           DEFAULT: '#1E3FAE',
           50: 'rgb(var(--primary-50) / <alpha-value>)',
@@ -41,7 +37,6 @@ export default {
           ink: '#FFFFFF',
         },
 
-        // "surface" — kağıt/yüzey tonları (değişkene bağlı).
         surface: {
           0: 'rgb(var(--surface-0) / <alpha-value>)',
           50: 'rgb(var(--surface-50) / <alpha-value>)',
@@ -50,7 +45,6 @@ export default {
           300: 'rgb(var(--surface-300) / <alpha-value>)',
         },
 
-        // Accent renkleri — defter sıcak tonları
         accent: {
           ok: '#5C7A4A',
           warn: '#D89B2A',

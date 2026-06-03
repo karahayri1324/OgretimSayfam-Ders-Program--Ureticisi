@@ -470,7 +470,6 @@ describe('Conversational wizard — adım adım dialog', () => {
     expect(res.kind).toBe('query');
     if (res.kind === 'query') {
       expect(res.answer.toLowerCase()).toMatch(/sınıf|sinif/);
-      // History'siz olduğu için ack olmayabilir, ama hangi sınıflar sorusu olmalı
     }
   });
 

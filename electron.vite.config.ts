@@ -25,8 +25,6 @@ export default defineConfig({
       rollupOptions: {
         input: { index: resolve(__dirname, 'electron/preload.ts') },
         output: {
-          // .cjs extension — package.json "type": "module" altında preload
-          // CommonJS require() ile yükleniyor; .js olursa ERR_REQUIRE_ESM olur.
           entryFileNames: '[name].cjs',
           format: 'cjs',
         },

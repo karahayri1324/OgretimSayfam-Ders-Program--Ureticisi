@@ -1,19 +1,6 @@
-/**
- * Dataset validator — Plans/dataset_samples/*.jsonl içindeki örnekleri kontrol eder.
- *
- * Kontroller:
- *  1. Satır geçerli JSON mı
- *  2. messages dizisi 3 elemanlı mı (system + user + assistant)
- *  3. Assistant content geçerli JSON mı
- *  4. AIResponseSchema'ya uyuyor mu (Zod)
- *  5. Constraint type ConstraintTypeEnum'da mı
- *  6. user content [CONTEXT]...[/CONTEXT] ve [USER_REQUEST]...[/USER_REQUEST] içeriyor mu
- *
- * Çalıştırma:
- *   npx tsx scripts/validate_dataset.ts
- */
 import fs from 'node:fs';
 import path from 'node:path';
+import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { AIResponseSchema } from '../electron/ai/schema.js';
 
@@ -26,11 +13,14 @@ const issues: Issue[] = [];
 let total = 0;
 let valid = 0;
 
-function checkFile(file: string) {
+async function checkFile(file: string): Promise<void> {
   const full = path.join(DS, file);
-  const lines = fs.readFileSync(full, 'utf-8').split('\n');
+  const rl = readline.createInterface({
+    input: fs.createReadStream(full, 'utf-8'),
+    crlfDelay: Infinity,
+  });
   let lineNo = 0;
-  for (const line of lines) {
+  for await (const line of rl) {
     lineNo++;
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -44,72 +34,90 @@ function checkFile(file: string) {
       continue;
     }
 
-    if (!Array.isArray(row.messages) || row.messages.length !== 3) {
-      issues.push({ file, line: lineNo, reason: 'messages 3 elemanlı dizi olmalı' });
+    const msgs = row.messages;
+    if (!Array.isArray(msgs) || msgs.length < 3 || msgs.length % 2 === 0) {
+      issues.push({ file, line: lineNo, reason: `messages yapısı geçersiz (uzunluk=${msgs?.length})` });
+      continue;
+    }
+    if (msgs[0].role !== 'system') {
+      issues.push({ file, line: lineNo, reason: 'ilk mesaj system olmalı' });
+      continue;
+    }
+    let roleOk = true;
+    for (let i = 1; i < msgs.length; i++) {
+      const expected = i % 2 === 1 ? 'user' : 'assistant';
+      if (msgs[i].role !== expected) { roleOk = false; break; }
+    }
+    if (!roleOk) {
+      issues.push({ file, line: lineNo, reason: 'multi-turn rol sırası system,(user,assistant)+ olmalı' });
       continue;
     }
 
-    const [sys, user, asst] = row.messages;
-    if (sys.role !== 'system' || user.role !== 'user' || asst.role !== 'assistant') {
-      issues.push({ file, line: lineNo, reason: 'role sırası system/user/assistant olmalı' });
+    const firstUser = msgs[1].content as string;
+    if (!firstUser.includes('[CONTEXT]') || !firstUser.includes('[/CONTEXT]')) {
+      issues.push({ file, line: lineNo, reason: 'ilk user mesajında [CONTEXT] bloğu yok' });
+      continue;
+    }
+    if (!firstUser.includes('[USER_REQUEST]') || !firstUser.includes('[/USER_REQUEST]')) {
+      issues.push({ file, line: lineNo, reason: 'ilk user mesajında [USER_REQUEST] bloğu yok' });
       continue;
     }
 
-    if (!user.content.includes('[CONTEXT]') || !user.content.includes('[/CONTEXT]')) {
-      issues.push({ file, line: lineNo, reason: 'user mesajında [CONTEXT] bloğu yok' });
-      continue;
+    let asstOk = true;
+    for (let i = 2; i < msgs.length; i += 2) {
+      let asstJson: any;
+      try {
+        asstJson = JSON.parse(msgs[i].content);
+      } catch (e) {
+        issues.push({ file, line: lineNo, reason: `assistant[${i}] JSON değil: ${(e as Error).message}` });
+        asstOk = false;
+        break;
+      }
+      const parsed = AIResponseSchema.safeParse(asstJson);
+      if (!parsed.success) {
+        issues.push({
+          file,
+          line: lineNo,
+          reason: `assistant[${i}] schema fail: ${parsed.error.issues
+            .slice(0, 2)
+            .map((i2) => `${i2.path.join('.')}: ${i2.message}`)
+            .join('; ')}`,
+        });
+        asstOk = false;
+        break;
+      }
     }
-    if (!user.content.includes('[USER_REQUEST]') || !user.content.includes('[/USER_REQUEST]')) {
-      issues.push({ file, line: lineNo, reason: 'user mesajında [USER_REQUEST] bloğu yok' });
-      continue;
-    }
-
-    let asstJson: any;
-    try {
-      asstJson = JSON.parse(asst.content);
-    } catch (e) {
-      issues.push({ file, line: lineNo, reason: `assistant içeriği JSON değil: ${(e as Error).message}` });
-      continue;
-    }
-
-    const parsed = AIResponseSchema.safeParse(asstJson);
-    if (!parsed.success) {
-      issues.push({
-        file,
-        line: lineNo,
-        reason: `Schema fail: ${parsed.error.issues
-          .slice(0, 2)
-          .map((i) => `${i.path.join('.')}: ${i.message}`)
-          .join('; ')}`,
-      });
-      continue;
-    }
+    if (!asstOk) continue;
 
     valid++;
   }
 }
 
-const targetFiles = fs.readdirSync(DS).filter((f) => f.endsWith('.jsonl'));
-for (const f of targetFiles) {
-  checkFile(f);
-}
-
-const splitDir = path.join(DS, 'train_test_split');
-if (fs.existsSync(splitDir)) {
-  for (const f of fs.readdirSync(splitDir).filter((f) => f.endsWith('.jsonl'))) {
-    checkFile(path.join('train_test_split', f));
+async function main(): Promise<void> {
+  const targetFiles = fs.readdirSync(DS).filter((f) => f.endsWith('.jsonl'));
+  for (const f of targetFiles) {
+    await checkFile(f);
   }
-}
 
-console.log(`\nKontrol edilen: ${total}`);
-console.log(`Geçerli       : ${valid}`);
-console.log(`Sorunlu       : ${issues.length}`);
-
-if (issues.length > 0) {
-  console.log('\nİlk 20 sorun:');
-  for (const i of issues.slice(0, 20)) {
-    console.log(`  ${i.file}:${i.line}  ${i.reason}`);
+  const splitDir = path.join(DS, 'train_test_split');
+  if (fs.existsSync(splitDir)) {
+    for (const f of fs.readdirSync(splitDir).filter((f) => f.endsWith('.jsonl'))) {
+      await checkFile(path.join('train_test_split', f));
+    }
   }
-  process.exit(1);
+
+  console.log(`\nKontrol edilen: ${total}`);
+  console.log(`Geçerli       : ${valid}`);
+  console.log(`Sorunlu       : ${issues.length}`);
+
+  if (issues.length > 0) {
+    console.log('\nİlk 20 sorun:');
+    for (const i of issues.slice(0, 20)) {
+      console.log(`  ${i.file}:${i.line}  ${i.reason}`);
+    }
+    process.exit(1);
+  }
+  console.log('\n✓ Tüm dataset örnekleri geçerli.');
 }
-console.log('\n✓ Tüm dataset örnekleri geçerli.');
+
+void main();

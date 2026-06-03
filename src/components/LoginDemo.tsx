@@ -202,7 +202,6 @@ export default function LoginDemo() {
     <>
       <style>{KEYFRAMES}</style>
       <div style={{ display: 'flex', height: '100%', width: '100%', minHeight: 0 }}>
-        {}
         <div
           ref={leftRef}
           style={{
@@ -230,7 +229,6 @@ export default function LoginDemo() {
           </div>
         </div>
 
-        {/* Sağ — AI sohbet paneli */}
         <div style={{ width: 360, flexShrink: 0, display: 'flex', minHeight: 0 }}>
           <DemoChatPanel st={st} />
         </div>

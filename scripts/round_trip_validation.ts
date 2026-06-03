@@ -1,15 +1,3 @@
-/**
- * Round-trip validation — Dataset JSONL → buildFetXml() → valid XML?
- *
- * Her constraint-kind örnek için:
- *   1) user content'inden [CONTEXT] bloğunu parse et (TEACHERS, CLASSES, SUBJECTS, ROOMS, DAYS, HOURS_PER_DAY)
- *   2) assistant content'inden constraint listesini al
- *   3) Context'ten minimal bir SchoolBundle inşa et (dummy id'ler + birkaç dummy activity)
- *   4) buildFetXml(bundle) çağır → throw etmemeli + XML constraint tag'ini içermeli + ctx.skipped boş olmalı
- *
- * Çalıştırma:
- *   npx tsx scripts/round_trip_validation.ts [samplesPerFile=20]
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +17,6 @@ const DS = path.resolve(__dirname, '..', 'Plans', 'dataset_samples');
 
 const SAMPLES_PER_FILE = Number(process.argv[2] ?? '20');
 
-// ── Context block parser ──────────────────────────────────────────────────
 type Context = {
   teachers: string[];
   classes: string[];
@@ -66,7 +53,6 @@ function parseContext(userContent: string): Context | null {
   };
 }
 
-// ── Synthetic SchoolBundle inşa ───────────────────────────────────────────
 function buildBundle(ctx: Context, constraints: Constraint[]): SchoolBundle {
   const now = new Date().toISOString();
   const days = ctx.days.map((name, i) => ({ id: i + 1, name, orderIndex: i }));
@@ -106,7 +92,6 @@ function buildBundle(ctx: Context, constraints: Constraint[]): SchoolBundle {
     building: null,
     notes: null,
   }));
-  // Her sınıfa 2 dummy activity (so FET has something)
   const activities = classes.flatMap((c) => {
     const acts = [] as ReturnType<typeof makeAct>[];
     if (teachers.length === 0 || subjects.length === 0) return acts;
@@ -129,7 +114,6 @@ function buildBundle(ctx: Context, constraints: Constraint[]): SchoolBundle {
     return acts;
   });
 
-  // Constraint'leri ID + zorunlu alanlarla wrap et
   const dbConstraints: Constraint[] = constraints.map((c, i) => ({
     id: i + 1,
     type: c.type as ConstraintType,
@@ -156,18 +140,15 @@ function buildBundle(ctx: Context, constraints: Constraint[]): SchoolBundle {
   };
 }
 
-// ── Sample N satır ──────────────────────────────────────────────────────────
 function sampleLines(file: string, n: number): string[] {
   const lines = fs.readFileSync(file, 'utf-8').split('\n').filter((l) => l.trim());
   if (lines.length <= n) return lines;
-  // İlk n satır + son n satır (deterministik) yerine evenly-spaced sample
   const step = Math.floor(lines.length / n);
   const out: string[] = [];
   for (let i = 0; i < n; i++) out.push(lines[i * step]);
   return out;
 }
 
-// ── Stats ─────────────────────────────────────────────────────────────────
 type Stats = {
   total: number;
   schemaFail: number;
@@ -175,7 +156,7 @@ type Stats = {
   notConstraint: number;
   xmlBuildFail: number;
   xmlBuildOk: number;
-  skipped: number; // ctx.skipped > 0
+  skipped: number;
   perType: Record<string, { ok: number; fail: number; skipped: number }>;
   failures: Array<{ file: string; line: number; reason: string; type?: string }>;
 };
@@ -197,7 +178,6 @@ function bump(type: string, key: 'ok' | 'fail' | 'skipped') {
   stats.perType[type][key]++;
 }
 
-// ── Process bir dataset dosyası ────────────────────────────────────────────
 function processFile(fileBase: string) {
   const file = path.join(DS, fileBase);
   const lines = sampleLines(file, SAMPLES_PER_FILE);
@@ -244,7 +224,6 @@ function processFile(fileBase: string) {
       continue;
     }
     const res = parsed.data as any;
-    // Constraint kind: ya kind 'constraint' ya kind eksik (legacy) — her ikisi de constraints array içerir
     const isConstraintKind = res.kind === 'constraint' || (res.kind === undefined && Array.isArray(res.constraints));
     if (!isConstraintKind) {
       stats.notConstraint++;
@@ -256,7 +235,6 @@ function processFile(fileBase: string) {
       continue;
     }
 
-    // Build bundle and call buildFetXml
     const bundle = buildBundle(ctx, constraints as unknown as Constraint[]);
     try {
       const result = buildFetXml(bundle);
@@ -288,10 +266,8 @@ function processFile(fileBase: string) {
   }
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────
 const constraintFiles = fs.readdirSync(DS).filter((f) => {
   if (!f.endsWith('.jsonl')) return false;
-  // Sadece constraint üreten dosyaları al, mutation/query/wizard'ları dahil etme
   const exclude = [
     'data_mutations',
     'ambiguous',
@@ -315,6 +291,15 @@ const constraintFiles = fs.readdirSync(DS).filter((f) => {
     'generic_add_constraint',
     'constraint_relax',
     'per_class_subject_room',
+    'multi_turn_query',
+    'multi_turn_planning',
+    'update_entities',
+    'delete_activity',
+    'class_year',
+    'hour_count',
+    'constraint_manage',
+    'clear_split',
+    'cancel_generation',
   ];
   return !exclude.some((e) => f === `${e}.jsonl`);
 });
@@ -327,7 +312,6 @@ for (const f of constraintFiles) {
 }
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
-// ── Rapor ─────────────────────────────────────────────────────────────────
 console.log('\n========== SONUÇ ==========');
 console.log(`Toplam satır                : ${stats.total}`);
 console.log(`Constraint-kind             : ${stats.total - stats.notConstraint - stats.schemaFail - stats.contextFail}`);

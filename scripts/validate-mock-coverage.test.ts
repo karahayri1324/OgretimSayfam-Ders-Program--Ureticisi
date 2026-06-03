@@ -1,26 +1,3 @@
-/**
- * Mock coverage validator — Plans/dataset_samples/*.jsonl'den random 200 örnek
- * seçer, her birini context + user_request ile mockParseSync'e geçirir,
- * "anlaşıldı" sayısını raporlar.
- *
- * "Anlaşıldı" tanımı:
- *  - kind === 'constraint' ve constraints.length > 0 → tam
- *  - kind === 'constraint' ve unresolved.length > 0 → kısmi (model belirsizlik
- *    bildirebildi)
- *  - kind === 'query'/'tool_call'/'schedule_update'/'data_mutation' ve gelen
- *    kind beklenen ile eşleşiyor → tam
- *  - Karşılıklı dönüşüm (tool_call↔query, data_mutation↔schedule_update) →
- *    kısmi
- *
- * Mock pattern-bazlı olduğu için %50+ coverage hedefi makul.
- * Production LLM (fine-tuned) ile %95+'a çıkarılacak.
- *
- * Çalıştırma:
- *   npx vitest run scripts/validate-mock-coverage.ts
- *
- * (NOT: tsx ile direkt çalıştırılamaz çünkü electron modülünden DB chain
- * gelir; vitest CJS interop ile bu sorunu çözer.)
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -39,7 +16,6 @@ type Sample = {
   expectedKind: NonNullable<AIResponse['kind']>;
 };
 
-/** Dataset JSONL satırından AIContext'i ve user request'i parse eder. */
 function parseLine(file: string, raw: string): Sample | null {
   try {
     const row = JSON.parse(raw);
@@ -84,7 +60,6 @@ function parseLine(file: string, raw: string): Sample | null {
       expectedKind =
         (parsed.kind as NonNullable<AIResponse['kind']>) ?? 'constraint';
     } catch {
-      // ignore
     }
 
     return { file, context, userRequest, expectedKind };
@@ -235,7 +210,5 @@ function runValidation(sampleSize = 200): void {
 describe('Mock Coverage Validator (200 random dataset örnek)', () => {
   it('mock-server, dataset örneklerinin %50+ kategorisini tutarlı parse eder', () => {
     runValidation(200);
-    // Bu test her zaman geçer — script raporlama amaçlıdır.
-    // Strict eşik için test/ai-coverage.test.ts kullan.
   });
 });

@@ -72,6 +72,7 @@ const OP_TO_PAGE: Record<string, string> = {
   delete_activity: '/activities',
   add_split_activity: '/activities',
   merge_activities: '/activities',
+  clear_split: '/activities',
 
   add_constraint: '/constraints',
   delete_constraint: '/constraints',
@@ -223,11 +224,10 @@ export default function AIPanel() {
     if ([...ops].some((o) => o.includes('subject'))) promises.push(loadSubjects());
     if ([...ops].some((o) => o.includes('class'))) promises.push(loadClasses());
     if ([...ops].some((o) => o.includes('room'))) promises.push(loadRooms());
-    if ([...ops].some((o) => o.includes('activity'))) promises.push(loadActivities());
+    if ([...ops].some((o) => o.includes('activity') || o.includes('split'))) promises.push(loadActivities());
     if ([...ops].some((o) => o.includes('day') || o.includes('hour'))) {
       promises.push(loadSchedule());
     }
-    // set_setting → ayarları yeniden yükle (tema/AI kaynağı/FET süresi canlı yansır)
     if ([...ops].some((o) => o.includes('setting'))) {
       promises.push(loadSettings());
     }
@@ -325,8 +325,12 @@ export default function AIPanel() {
 
       const exportActions = r.actions.filter((a) => a.op === 'export_timetable');
       const navActions = r.actions.filter((a) => a.op === 'navigate_to');
+      const cancelActions = r.actions.filter((a) => a.op === 'cancel_generation');
       const otherActions = r.actions.filter(
-        (a) => a.op !== 'export_timetable' && a.op !== 'navigate_to',
+        (a) =>
+          a.op !== 'export_timetable' &&
+          a.op !== 'navigate_to' &&
+          a.op !== 'cancel_generation',
       );
 
       try {
@@ -392,6 +396,11 @@ export default function AIPanel() {
           navigate(page);
           toastInfo('Sayfaya yönlendiriliyor', page);
         }
+
+        if (cancelActions.length > 0) {
+          await useGenerateStore.getState().cancel();
+          toastSuccess('Üretim iptal edildi', 'FET çözümü durduruldu.');
+        }
       } catch (e) {
         toastError('Bağlantı hatası', String(e));
         updateMessage(msg.id, { status: 'rejected' });
@@ -443,7 +452,6 @@ export default function AIPanel() {
       className="relative flex h-full flex-col border-l border-surface-200 bg-card shadow-lg"
       style={{ width: panelWidth }}
     >
-      {/* Sol kenar — drag handle ile resize */}
       <div
         role="separator"
         aria-orientation="vertical"

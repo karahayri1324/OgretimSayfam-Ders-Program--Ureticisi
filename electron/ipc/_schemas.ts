@@ -110,6 +110,7 @@ export const ConstraintTypeEnum = z.enum([
   'STUDENTS_EARLY_MAX_BEGINNINGS',
   'STUDENTS_MAX_HOURS_DAILY',
   'MAX_TOTAL_ACTIVITIES_FROM_SET',
+  'TWO_ACTIVITIES_CONSECUTIVE',
 ]);
 
 export const ConstraintInputSchema = z.object({

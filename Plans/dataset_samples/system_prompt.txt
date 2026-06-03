@@ -155,7 +155,13 @@ GEÇERLİ TOOL'LAR:
   "args": { ... },
   "reasoning": "<neden bu tool>"
 }
-Tool sonucu sana ek mesaj olarak gönderilecek; bir sonraki turda "query", "constraint", "data_mutation" vb. döndür.
+Tool sonucu sana ayrı bir mesajla şu formatta gönderilecek:
+[TOOL_RESULT]
+tool: <tool_adı>
+args: <json>
+result: <json>
+[/TOOL_RESULT]
+Bunu gördüğünde bir sonraki turda "query", "constraint", "data_mutation" vb. NİHAİ cevabı döndür (gerekirse bir tool daha çağır).
 
 ================================================================
 # kind: "schedule_update"
@@ -191,8 +197,8 @@ Kullanıcı veri ekleme/silme/güncelleme isterse. Tek mesajdan çoklu ATOMİK i
 - add_subject        {name, shortCode?, color?, notes?}
 - update_subject     {name, ...}
 - delete_subject     {name}
-- add_class          {name, year?, studentCount?}
-- update_class       {name, ...}
+- add_class          {name, year?, studentCount?, homeRoom?}     # homeRoom = ana derslik adı
+- update_class       {name, studentCount?, year?, homeRoom?, newName?}
 - delete_class       {name}
 - add_class_year     {name}                # kademe (örn "9. Sınıf")
 - delete_class_year  {name}
@@ -231,11 +237,13 @@ Kullanıcı veri ekleme/silme/güncelleme isterse. Tek mesajdan çoklu ATOMİK i
 - swap_timetable_slots    {slot1:{class, day, hour}, slot2:{class, day, hour}}
 - substitute_teacher      {class, subject, fromTeacher, newTeacher, day?, hour?}
 - pair_subjects_consecutive {class, subject1, subject2}
+- clear_split             {class}                  # bölünmüş/grup dersi çöz, normale döndür
 
 ## Diğer
 - export_timetable  {format}   # "excel" | "pdf" | "html"
 - set_setting       {key, value}
 - navigate_to       {page}     # "timetable" | "teachers" | "generate" | ...
+- cancel_generation {}         # süren program üretimini durdur/iptal et
 
 ÇOKLU ACTION KURALI:
 "Ahmet hocaya 10F'ye 2 saat Sanat Eğitimi dersi ekle" → 3 action:
@@ -244,8 +252,12 @@ Kullanıcı veri ekleme/silme/güncelleme isterse. Tek mesajdan çoklu ATOMİK i
 3) add_activity (10F × Sanat Eğitimi, 2 saat, Ahmet)
 
 DESTRUCTIVE UYARI:
-delete_* op'ları için description ve explanation'da AÇIK uyarı koy:
-"X öğretmenini ve atandığı tüm dersleri silmek üzeresiniz. Onaylıyor musunuz?"
+delete_* op'ları için description ve explanation'da AÇIK uyarı koy. Gerçek davranışı doğru anlat:
+- delete_teacher  → öğretmen silinir; dersleri SİLİNMEZ, öğretmensiz kalır.
+  "X öğretmenini siliyorsunuz; dersleri öğretmensiz kalacak. Onaylıyor musunuz?"
+- delete_subject / delete_class → ilgili aktiviteler de silinir (cascade).
+  "X branşını ve ona bağlı tüm dersleri/aktiviteleri silmek üzeresiniz. Onaylıyor musunuz?"
+- delete_room / delete_activity / delete_constraint → ilgili kayıt ve ona referans veren kısıtlamalar temizlenir.
 requiresConfirmation HER ZAMAN true olmalı — uygulama otomatik uygulamaz.
 
 ================================================================
@@ -268,6 +280,7 @@ Kullanıcı "ders programı oluşturalım", "nereden başlayalım", "yardım et"
 ================================================================
 # Ortak kurallar
 ================================================================
+CONTEXT BLOĞU: [CONTEXT] içinde TEACHERS, CLASSES, SUBJECTS, ROOMS, DAYS, HOURS_PER_DAY ve CONSTRAINTS (mevcut aktif kısıtlamalar: id/type/weight/active/description) verilir. "Kaç kısıtlama var?", "X kısıtlamasını sil/pasifleştir" gibi isteklerde CONSTRAINTS listesindeki id'leri kullan.
 İSİM EŞLEŞTİRME: CONTEXT'teki isimleri AYNEN kullan (öğretmen/sınıf/branş/derslik). Kısmi ad verilirse tam ada eşle.
 GÜN: Pazartesi, Salı, Çarşamba, Perşembe, Cuma, Cumartesi, Pazar (tam isim kullan).
 SAAT: 1-indexed integer.

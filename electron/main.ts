@@ -8,9 +8,6 @@ import { log } from './utils/logger.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Linux'ta SUID chrome-sandbox helper'ı yapılandırılmamışsa (tipik dev/CI ortamı),
-// ELECTRON_DISABLE_SANDBOX=1 ile sandbox'ı kapatıp uygulamayı başlatabilmek için.
-// Prod'da env set edilmediğinden tetiklenmez — güvenlik etkisi yok.
 if (process.env.ELECTRON_DISABLE_SANDBOX === '1') {
   app.commandLine.appendSwitch('no-sandbox');
 }

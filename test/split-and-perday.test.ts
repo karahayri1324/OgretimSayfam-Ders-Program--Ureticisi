@@ -88,7 +88,7 @@ describe('buildFetXml — per-day hours (kısa günler)', () => {
     const b = baseBundle();
     b.dayHours = Array.from({ length: 5 }, (_, i) => ({
       id: i + 1,
-      dayId: 5, // Cuma
+      dayId: 5,
       orderIndex: i,
       name: `${i + 1}. Ders`,
       startTime: null,
@@ -108,7 +108,7 @@ describe('buildFetXml — per-day hours (kısa günler)', () => {
     const b = baseBundle();
     b.dayHours = Array.from({ length: 8 }, (_, i) => ({
       id: i + 1,
-      dayId: 1, // Pazartesi
+      dayId: 1,
       orderIndex: i,
       name: `${i + 1}. Ders`,
       startTime: null,

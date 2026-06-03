@@ -40,7 +40,6 @@ export class AIError extends Error {
   }
 }
 
-/** Varsayılan tool iterasyon limiti. `aiMaxToolIterations` ayarı ile [1,10] aralığında geçersiz kılınabilir. */
 export const MAX_TOOL_ITERATIONS = 3;
 
 function readMaxToolIterations(): number {
@@ -49,7 +48,6 @@ function readMaxToolIterations(): number {
     const n = parseInt(String(raw ?? ''), 10);
     if (Number.isFinite(n) && n >= 1 && n <= 10) return n;
   } catch {
-    // ayar okunamadı — varsayılana düş
   }
   return MAX_TOOL_ITERATIONS;
 }
@@ -66,16 +64,8 @@ function readTimeoutMs(): number {
 }
 
 const LOCAL_DEFAULT_ENDPOINT = 'http://localhost:8000';
-// Sunucu modu uç noktası — sunucu adresi burada/uygulama tarafında ayarlanır.
-// (Ayarlar'da artık URL alanı yok; kullanıcı sunucu adresini kendi yönetir.)
 const SERVER_ENDPOINT = '';
 
-/**
- * Aktif AI uç noktası. İki mod var:
- * - 'server' → kullanıcının uzak sunucu uç noktası (henüz boş olabilir)
- * - 'local'  (varsayılan) → localhost'taki yerel LLM
- * Mock kaldırıldı; uç nokta boşsa istek anlamlı bir hata ile başarısız olur.
- */
 function readEndpoint(): string {
   try {
     const mode = settingsRepo.get('aiMode');
@@ -92,11 +82,35 @@ function readEndpoint(): string {
   }
 }
 
+function coerceJson(raw: unknown): unknown {
+  if (raw && typeof raw === 'object') return raw;
+  if (typeof raw !== 'string') return raw;
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence && fence[1]) s = fence[1].trim();
+  try {
+    return JSON.parse(s);
+  } catch {
+  }
+  const i = s.indexOf('{');
+  const j = s.lastIndexOf('}');
+  if (i >= 0 && j > i) {
+    try {
+      return JSON.parse(s.slice(i, j + 1));
+    } catch {
+    }
+  }
+  return raw;
+}
+
+type RoundtripOpts = { noMoreTools?: boolean };
+
 async function singleRoundtrip(
   text: string,
   context: AIContext,
   toolHistory: ToolHistoryEntry[],
   conversationHistory: ConversationHistoryEntry[],
+  opts: RoundtripOpts = {},
 ): Promise<AIResponse> {
   const endpoint = readEndpoint();
   if (!endpoint) {
@@ -106,37 +120,51 @@ async function singleRoundtrip(
     );
   }
 
-  let raw: unknown;
-  try {
-    const res = await axios.post(
-      endpoint,
-      {
-        text,
-        context,
-        history: conversationHistory,
-        toolHistory,
-      },
-      {
+  const body = {
+    text,
+    context,
+    history: conversationHistory,
+    toolHistory,
+    noMoreTools: opts.noMoreTools === true,
+  };
+
+  const post = async (): Promise<unknown> => {
+    try {
+      const res = await axios.post(endpoint, body, {
         timeout: readTimeoutMs(),
         headers: { 'Content-Type': 'application/json' },
-      },
-    );
-    raw = res.data;
-  } catch (e) {
-    const ax = e as AxiosError;
-    if (ax.code === 'ECONNABORTED' || ax.message?.toLowerCase().includes('timeout')) {
-      throw new AIError('AI_TIMEOUT', 'AI sunucusu yanıt vermedi (zaman aşımı).', e);
+      });
+      return res.data;
+    } catch (e) {
+      const ax = e as AxiosError;
+      if (ax.code === 'ECONNABORTED' || ax.message?.toLowerCase().includes('timeout')) {
+        throw new AIError('AI_TIMEOUT', 'AI sunucusu yanıt vermedi (zaman aşımı).', e);
+      }
+      const status = ax.response?.status;
+      const detail = status ? `HTTP ${status}` : ax.message;
+      throw new AIError('AI_ERROR', `AI sunucusuna ulaşılamadı: ${detail}`, e);
     }
-    const status = ax.response?.status;
-    const detail = status ? `HTTP ${status}` : ax.message;
-    throw new AIError('AI_ERROR', `AI sunucusuna ulaşılamadı: ${detail}`, e);
-  }
+  };
 
+  const raw = await post();
   try {
-    return validateAIResponse(raw);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    throw new AIError('AI_INVALID_RESPONSE', `AI yanıtı doğrulanamadı: ${msg}`, e);
+    return validateAIResponse(coerceJson(raw));
+  } catch (firstErr) {
+    log.warn('AI yanıtı doğrulanamadı, yeniden deneniyor', {
+      error: firstErr instanceof Error ? firstErr.message : String(firstErr),
+    });
+    let raw2: unknown;
+    try {
+      raw2 = await post();
+    } catch (e) {
+      throw e;
+    }
+    try {
+      return validateAIResponse(coerceJson(raw2));
+    } catch (secondErr) {
+      const msg = secondErr instanceof Error ? secondErr.message : String(secondErr);
+      throw new AIError('AI_INVALID_RESPONSE', `AI yanıtı doğrulanamadı: ${msg}`, secondErr);
+    }
   }
 }
 
@@ -154,7 +182,10 @@ export const aiClient = {
     const maxIterations = readMaxToolIterations();
 
     for (let i = 0; i < maxIterations; i++) {
-      const response = await singleRoundtrip(text, context, toolHistory, history);
+      const isLastTurn = i === maxIterations - 1;
+      const response = await singleRoundtrip(text, context, toolHistory, history, {
+        noMoreTools: isLastTurn,
+      });
 
       if (response.kind !== 'tool_call') {
         return { response, toolCalls: toolHistory };
