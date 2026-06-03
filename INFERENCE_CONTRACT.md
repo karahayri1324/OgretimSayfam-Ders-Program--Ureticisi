@@ -33,7 +33,8 @@
   "toolHistory": [                              // bu istekte çalıştırılan tool'lar
     { "role": "tool", "tool": "getTeacherTimetable",
       "args": { "teacher": "Ahmet Yılmaz" },
-      "result": { "...": "..." } }
+      "result": { "...": "..." },
+      "reasoning": "modelin ilk tur tool_call cevabındaki reasoning metni" }
   ],
   "noMoreTools": false                          // true ise: bu turda tool_call ÜRETME
 }
@@ -85,10 +86,14 @@ CONSTRAINTS: <json>
 ### 2.4. tool turları (`toolHistory` doluysa — multi-turn)
 Her `toolHistory[i]` için **iki mesaj** eklenir:
 
-1. **assistant** — tool çağrısını yeniden kur:
+1. **assistant** — tool çağrısını yeniden kur (eğitimle birebir **4 anahtar**,
+   sırasıyla `kind, tool, args, reasoning`):
    ```json
-   {"kind":"tool_call","tool":"<tool>","args":<args>}
+   {"kind":"tool_call","tool":"<tool>","args":<args>,"reasoning":"<reasoning>"}
    ```
+   > `reasoning` eğitimde HER tool_call'da vardır (`generate_dataset.py:_tool_call`).
+   > App, ilk tur tool_call cevabındaki reasoning'i `toolHistory[i].reasoning` ile
+   > geri gönderir; serving onu aynen koyar. Atlanırsa 3-anahtarlı obje OOD olur.
 2. **user** — tool sonucu, eğitimdeki `[TOOL_RESULT]` sarmalıyla:
    ```
    [TOOL_RESULT]
@@ -139,7 +144,9 @@ def build_messages(payload: dict) -> list[dict]:
     for t in payload.get("toolHistory", []):
         msgs.append({"role": "assistant",
                      "content": json.dumps({"kind": "tool_call", "tool": t["tool"],
-                                            "args": t["args"]}, ensure_ascii=False)})
+                                            "args": t["args"],
+                                            "reasoning": t.get("reasoning", "")},
+                                           ensure_ascii=False)})
         msgs.append({"role": "user",
                      "content": (f"[TOOL_RESULT]\ntool: {t['tool']}\nargs: {j(t['args'])}\n"
                                  f"result: {j(t['result'])}\n[/TOOL_RESULT]")})
@@ -171,6 +178,7 @@ App tarafı `kind` alanına göre 6 tip bekler:
 | CONTEXT alanları | 7 alan (CONSTRAINTS dahil), sabit sıra | aynı sıra | `test/inference-contract.test.ts` |
 | USER_REQUEST | `[USER_REQUEST]...[/USER_REQUEST]` | aynı | — |
 | tool sonucu | `[TOOL_RESULT]...[/TOOL_RESULT]` user turu | aynı | — |
+| assistant tool_call turu | `{kind,tool,args,reasoning}` (4 anahtar) | aynı (reasoning dahil) | `test_inference_build.py` |
 | op/constraint listesi | `schema.ts` ile senkron | model `schema.ts`'e uygun üretir | zod validate |
 
 > **Model her güncellendiğinde:** system_prompt.txt değişmişse dataset'i **yeniden üret**

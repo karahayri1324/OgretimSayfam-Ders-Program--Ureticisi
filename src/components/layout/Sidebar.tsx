@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   Home,
   BookOpen,
@@ -43,14 +43,11 @@ function navClass(isActive: boolean) {
 }
 
 export default function Sidebar() {
-  const navigate = useNavigate();
   const logout = useAuthStore((s) => s.logout);
-  const guest = useAuthStore((s) => s.guest);
-  const email = useAuthStore((s) => s.email);
+  const email = useAuthStore((s) => s.user?.email ?? null);
 
   const handleLogout = () => {
-    logout();
-    navigate('/login', { replace: true });
+    void logout();
   };
 
   return (
@@ -83,11 +80,9 @@ export default function Sidebar() {
         <div className="ml-2 flex items-center gap-2 rounded-lg border border-line bg-card px-2.5 py-1 text-xs text-muted">
           <span
             className="inline-block size-1.5 rounded-full"
-            style={{ background: guest ? '#D89B2A' : '#5C7A4A' }}
+            style={{ background: '#5C7A4A' }}
           />
-          <span className="text-ink-700">
-            {guest ? 'Misafir' : email || 'Kullanıcı'}
-          </span>
+          <span className="text-ink-700">{email || 'Kullanıcı'}</span>
           <button
             type="button"
             onClick={handleLogout}

@@ -2,13 +2,27 @@ import { getDb } from '../connection.js';
 
 export type SettingsMap = Record<string, string>;
 
+export const RESERVED_SETTING_KEYS = new Set(['authToken', 'authUser']);
+
+export const WRITABLE_SETTING_KEYS = new Set([
+  'aiTimeoutSec',
+  'aiMaxToolIterations',
+  'fetTimeLimitSec',
+  'fetBinaryPath',
+  'theme',
+  'language',
+]);
+
 export const settingsRepo = {
   getAll(): SettingsMap {
     const rows = getDb()
       .prepare('SELECT key, value FROM settings')
       .all() as { key: string; value: string | null }[];
     const out: SettingsMap = {};
-    for (const r of rows) out[r.key] = r.value ?? '';
+    for (const r of rows) {
+      if (RESERVED_SETTING_KEYS.has(r.key)) continue;
+      out[r.key] = r.value ?? '';
+    }
     return out;
   },
 

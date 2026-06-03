@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ÖğretimSayfam · api4 Yönetim</title>
+<style>
+  :root { --p:#1E3FAE; --bg:#f6f7fb; --line:#e4e7ee; --ink:#1a1f2e; --muted:#6b7280; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:#fff; border-bottom:1px solid var(--line); padding:14px 22px; display:flex; align-items:center; gap:12px; }
+  header h1 { font-size:16px; margin:0; }
+  header .sp { flex:1; }
+  main { max-width:1100px; margin:22px auto; padding:0 18px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:18px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 4px; }
+  input, button, textarea { font:inherit; }
+  input, textarea { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; }
+  button { background:var(--p); color:#fff; border:none; border-radius:8px; padding:9px 14px; cursor:pointer; font-weight:600; }
+  button.ghost { background:#fff; color:var(--ink); border:1px solid var(--line); font-weight:500; }
+  button.danger { background:#c0392b; }
+  button.warn { background:#d89b2a; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+  .pill.ok { background:#e7f6ec; color:#1f7a40; }
+  .pill.bad { background:#fde8e6; color:#c0392b; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
+  .row > div { flex:1; min-width:160px; }
+  .msg { font-size:13px; padding:9px 12px; border-radius:8px; margin-bottom:10px; }
+  .msg.err { background:#fde8e6; color:#c0392b; }
+  .msg.ok { background:#e7f6ec; color:#1f7a40; }
+  .acts { display:flex; gap:6px; flex-wrap:wrap; }
+  .acts button { padding:5px 9px; font-size:12px; }
+  small.hint { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <strong style="color:var(--p)">ÖğretimSayfam</strong>
+  <span>· api4 Yönetim Paneli</span>
+  <span class="sp"></span>
+  <span id="who" style="font-size:13px;color:var(--muted)"></span>
+  <button class="ghost" id="logout" style="display:none">Çıkış</button>
+</header>
+<main>
+  <div id="loginCard" class="card">
+    <h3 style="margin-top:0">Yönetici Girişi</h3>
+    <div id="loginMsg"></div>
+    <label>E-posta</label>
+    <input id="email" type="email" autocomplete="username" />
+    <label>Şifre</label>
+    <input id="password" type="password" autocomplete="current-password" />
+    <div style="margin-top:14px"><button id="loginBtn">Giriş Yap</button></div>
+  </div>
+
+  <div id="app" style="display:none">
+    <div class="card">
+      <h3 style="margin-top:0">Global Ayarlar</h3>
+      <div id="settingsMsg"></div>
+      <div class="row">
+        <div>
+          <label>Varsayılan saatlik kota</label>
+          <input id="defLimit" type="number" min="0" />
+        </div>
+      </div>
+      <label>Varsayılan engel mesajı (demo bitti)</label>
+      <textarea id="defMsg" rows="2"></textarea>
+      <label>Kota aşım mesajı</label>
+      <textarea id="rlMsg" rows="2"></textarea>
+      <div style="margin-top:12px"><button id="saveSettings">Ayarları Kaydet</button></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:12px">
+        <div><label>Kullanıcı ara (e-posta / ad / okul)</label><input id="q" placeholder="ara..." /></div>
+        <div style="flex:0"><button class="ghost" id="refresh">Yenile</button></div>
+      </div>
+      <div id="usersMsg"></div>
+      <table>
+        <thead><tr>
+          <th>#</th><th>E-posta / Ad</th><th>Durum</th><th>Kota</th><th>Demo bitiş</th><th>İşlemler</th>
+        </tr></thead>
+        <tbody id="users"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+const API = location.origin;
+let token = localStorage.getItem("api4_admin_token") || "";
+
+function flash(el, text, kind) {
+  el.innerHTML = text ? `<div class="msg ${kind}">${text}</div>` : "";
+}
+async function api(path, opts = {}) {
+  const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(API + path, Object.assign({}, opts, { headers }));
+  let data = null;
+  try { data = await res.json(); } catch (_) {}
+  if (!res.ok) throw new Error((data && data.message) || ("HTTP " + res.status));
+  return data;
+}
+
+async function doLogin() {
+  flash(document.getElementById("loginMsg"), "", "");
+  try {
+    const data = await api("/v1/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        email: document.getElementById("email").value.trim(),
+        password: document.getElementById("password").value,
+      }),
+    });
+    if (!data.user.is_admin) throw new Error("Bu hesap yönetici değil.");
+    token = data.token;
+    localStorage.setItem("api4_admin_token", token);
+    enterApp(data.user);
+  } catch (e) {
+    flash(document.getElementById("loginMsg"), e.message, "err");
+  }
+}
+
+function logout() {
+  token = "";
+  localStorage.removeItem("api4_admin_token");
+  document.getElementById("app").style.display = "none";
+  document.getElementById("loginCard").style.display = "block";
+  document.getElementById("logout").style.display = "none";
+  document.getElementById("who").textContent = "";
+}
+
+function enterApp(user) {
+  document.getElementById("loginCard").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  document.getElementById("logout").style.display = "inline-block";
+  document.getElementById("who").textContent = user ? user.email : "";
+  loadSettings();
+  loadUsers();
+}
+
+async function loadSettings() {
+  try {
+    const s = await api("/v1/admin/settings");
+    document.getElementById("defLimit").value = s.default_rate_limit_per_hour;
+    document.getElementById("defMsg").value = s.default_block_message;
+    document.getElementById("rlMsg").value = s.rate_limit_message;
+  } catch (e) { if (/401/.test(e.message)) logout(); }
+}
+
+async function saveSettings() {
+  try {
+    await api("/v1/admin/settings", {
+      method: "PATCH",
+      body: JSON.stringify({
+        default_rate_limit_per_hour: Number(document.getElementById("defLimit").value),
+        default_block_message: document.getElementById("defMsg").value,
+        rate_limit_message: document.getElementById("rlMsg").value,
+      }),
+    });
+    flash(document.getElementById("settingsMsg"), "Kaydedildi.", "ok");
+  } catch (e) { flash(document.getElementById("settingsMsg"), e.message, "err"); }
+}
+
+async function loadUsers() {
+  const q = document.getElementById("q").value.trim();
+  try {
+    const users = await api("/v1/admin/users" + (q ? "?query=" + encodeURIComponent(q) : ""));
+    const tbody = document.getElementById("users");
+    tbody.innerHTML = "";
+    users.forEach((u) => tbody.appendChild(renderRow(u)));
+  } catch (e) { flash(document.getElementById("usersMsg"), e.message, "err"); }
+}
+
+function renderRow(u) {
+  const tr = document.createElement("tr");
+  const blocked = u.status === "blocked";
+  tr.innerHTML = `
+    <td>${u.id}${u.is_admin ? " 👑" : ""}</td>
+    <td><strong>${u.email}</strong><br><small class="hint">${u.name || "-"} · ${u.school || "-"}</small></td>
+    <td><span class="pill ${blocked ? "bad" : "ok"}">${blocked ? "ENGELLİ" : "aktif"}</span></td>
+    <td>${u.usage_last_hour}/${u.effective_rate_limit || "∞"}<br><small class="hint">${u.rate_limit_per_hour == null ? "global" : "özel"}</small></td>
+    <td><small class="hint">${u.demo_expires_at || "-"}</small></td>
+  `;
+  const td = document.createElement("td");
+  td.className = "acts";
+  const mkBtn = (label, cls, fn) => { const b = document.createElement("button"); b.textContent = label; if (cls) b.className = cls; b.onclick = fn; return b; };
+  if (blocked) td.appendChild(mkBtn("Aç", "", () => act(`/v1/admin/users/${u.id}/unblock`, "POST")));
+  else td.appendChild(mkBtn("Engelle", "danger", () => act(`/v1/admin/users/${u.id}/block`, "POST")));
+  td.appendChild(mkBtn("Özel mesaj", "warn ghost", () => {
+    const m = prompt("Bu kullanıcıya özel uyarı mesajı (boş = varsayılana dön):", u.block_message || "");
+    if (m !== null) act(`/v1/admin/users/${u.id}`, "PATCH", { block_message: m || null });
+  }));
+  td.appendChild(mkBtn("Kota", "ghost", () => {
+    const m = prompt("Saatlik kota (boş = global varsayılan):", u.rate_limit_per_hour == null ? "" : u.rate_limit_per_hour);
+    if (m !== null) act(`/v1/admin/users/${u.id}`, "PATCH", { rate_limit_per_hour: m === "" ? null : Number(m) });
+  }));
+  td.appendChild(mkBtn("Sayaç sıfırla", "ghost", () => act(`/v1/admin/users/${u.id}/reset-usage`, "POST")));
+  tr.appendChild(td);
+  return tr;
+}
+
+async function act(path, method, body) {
+  try {
+    await api(path, { method, body: body ? JSON.stringify(body) : undefined });
+    loadUsers();
+  } catch (e) { flash(document.getElementById("usersMsg"), e.message, "err"); }
+}
+
+document.getElementById("loginBtn").onclick = doLogin;
+document.getElementById("logout").onclick = logout;
+document.getElementById("saveSettings").onclick = saveSettings;
+document.getElementById("refresh").onclick = loadUsers;
+document.getElementById("q").addEventListener("keyup", (e) => { if (e.key === "Enter") loadUsers(); });
+["email", "password"].forEach((id) =>
+  document.getElementById(id).addEventListener("keyup", (e) => { if (e.key === "Enter") doLogin(); }));
+
+if (token) {
+  api("/v1/auth/me").then((d) => { if (d.user.is_admin) enterApp(d.user); else logout(); }).catch(logout);
+}
+</script>
+</body>
+</html>

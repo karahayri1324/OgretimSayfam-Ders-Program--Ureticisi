@@ -72,9 +72,6 @@ const DEFAULT_HOURS = [
 ];
 
 const DEFAULT_SETTINGS: Record<string, string> = {
-  aiMode: 'local',
-  aiLocalEndpoint: 'http://localhost:8000',
-  aiServerEndpoint: '',
   aiTimeoutSec: '30',
   fetTimeLimitSec: '120',
   fetBinaryPath: '',

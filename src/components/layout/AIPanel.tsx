@@ -26,6 +26,7 @@ import { useActivitiesStore } from '../../store/activities';
 import { useScheduleStore } from '../../store/schedule';
 import { useGenerateStore } from '../../store/generate';
 import { useSettingsStore } from '../../store/settings';
+import { useAuthStore } from '../../store/auth';
 import { useToastStore } from '../../store/toast';
 import { useNavigate } from 'react-router-dom';
 import type {
@@ -37,12 +38,15 @@ import type {
   DataMutationApplyResult,
 } from '../../lib/types';
 
+type Notice = 'subscription' | 'rateLimit' | 'authError';
+
 type Message = {
   id: string;
   role: 'user' | 'assistant';
   text: string;
   response?: AIResponse;
   status?: 'pending' | 'confirmed' | 'rejected';
+  notice?: Notice;
 };
 
 const OP_TO_PAGE: Record<string, string> = {
@@ -245,11 +249,26 @@ export default function AIPanel() {
     try {
       const res = await window.api.ai.parse(text);
       if (!res.ok) {
+        const code = res.error.code;
+        const notice: Notice | undefined =
+          code === 'AI_SUBSCRIPTION'
+            ? 'subscription'
+            : code === 'AI_RATE_LIMIT'
+              ? 'rateLimit'
+              : code === 'AI_UNAUTHORIZED'
+                ? 'authError'
+                : undefined;
         addMessage({
           id: crypto.randomUUID(),
           role: 'assistant',
-          text: `Hata: ${res.error.message}`,
+          text: notice ? res.error.message : `Hata: ${res.error.message}`,
+          notice,
         });
+        if (code === 'AI_UNAUTHORIZED') {
+          setTimeout(() => {
+            void useAuthStore.getState().logout();
+          }, 2500);
+        }
       } else {
         addMessage({
           id: crypto.randomUUID(),
@@ -613,6 +632,40 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function NoticeBubble({ notice, text }: { notice: Notice; text: string }) {
+  const isSub = notice === 'subscription';
+  const isAuth = notice === 'authError';
+  const palette = isAuth
+    ? 'border-l-red-500 bg-red-50 text-red-900'
+    : 'border-l-amber-500 bg-amber-50 text-amber-900';
+  return (
+    <div className="flex justify-start">
+      <div
+        className={cn(
+          'max-w-[90%] space-y-2 rounded-2xl rounded-bl-sm border border-l-4 border-surface-200 p-3 text-sm',
+          palette,
+        )}
+      >
+        <div className="flex items-start gap-2">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <p className="flex-1 whitespace-pre-wrap break-words">{text}</p>
+        </div>
+        {isSub && (
+          <button
+            type="button"
+            onClick={() =>
+              window.open('https://timetables.ogretimsayfam.com', '_blank')
+            }
+            className="ml-6 inline-flex items-center gap-1 rounded-md bg-amber-500 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-600"
+          >
+            Aboneliği Yenile
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function MessageBubble({
   msg,
   onConfirm,
@@ -630,6 +683,10 @@ function MessageBubble({
         </div>
       </div>
     );
+  }
+
+  if (msg.notice) {
+    return <NoticeBubble notice={msg.notice} text={msg.text} />;
   }
 
   const res = msg.response;

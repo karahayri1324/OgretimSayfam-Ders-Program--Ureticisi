@@ -3026,7 +3026,9 @@ def gen_constraint_relax(n: int) -> list[dict]:
 def gen_set_setting(n: int) -> list[dict]:
     """
     Kullanıcı ayarları AI üzerinden değiştirebilsin.
-    Desteklenen anahtarlar: fetTimeLimitSec, aiTimeoutSec, theme, aiMode.
+    Desteklenen anahtarlar: fetTimeLimitSec, aiTimeoutSec, theme.
+    (aiMode/yerel-sunucu uç noktası ayarları kaldırıldı — AI artık yalnızca
+    ÖğretimSayfam köprüsü üzerinden çalışır; bkz. server/ ve INFERENCE_CONTRACT.md.)
     """
     out = []
     samples = [
@@ -3046,12 +3048,6 @@ def gen_set_setting(n: int) -> list[dict]:
         ("Açık temaya dön", "theme", "light"),
         ("Aydınlık tema yap", "theme", "light"),
         ("Temayı açık yap", "theme", "light"),
-        ("Yerel yapay zekayı kullan", "aiMode", "local"),
-        ("AI'ı yerelde çalıştır", "aiMode", "local"),
-        ("Yerel modele geç", "aiMode", "local"),
-        ("Sunucudan kullan", "aiMode", "server"),
-        ("AI'ı sunucuya al", "aiMode", "server"),
-        ("Uzak sunucuya geç", "aiMode", "server"),
     ]
     for _ in range(n):
         request, key, value = random.choice(samples)

@@ -1,0 +1,22 @@
+services:
+  api4:
+    build: .
+    image: ogretimsayfam/api4-bridge:latest
+    container_name: api4-bridge
+    restart: unless-stopped
+    ports:
+      # Yalnızca localhost'a yayınla — dışarıya TLS sonlandıran ters proxy (Caddy/nginx)
+      # üzerinden açılır. Doğrudan internete açmayın.
+      - "127.0.0.1:9000:9000"
+    env_file:
+      - .env
+    environment:
+      DB_PATH: /app/data/bridge.db
+    volumes:
+      # Named volume — Docker sahipliği yönetir (non-root uid 10001 ile uyumlu).
+      - api4-data:/app/data
+      # system_prompt.txt'yi imaj yerine dışarıdan vermek isterseniz:
+      # - ./system_prompt.txt:/app/system_prompt.txt:ro
+
+volumes:
+  api4-data:

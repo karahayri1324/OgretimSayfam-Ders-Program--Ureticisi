@@ -36,8 +36,7 @@ export default function Welcome() {
   const loadTeachers = useTeachersStore((s) => s.load);
   const setPendingPrompt = useAIChatStore((s) => s.setPendingPrompt);
   const requestOpenPanel = useAIChatStore((s) => s.requestOpenPanel);
-  const guest = useAuthStore((s) => s.guest);
-  const name = useAuthStore((s) => s.name);
+  const name = useAuthStore((s) => s.user?.name ?? null);
 
   useEffect(() => {
     loadSubjects();
@@ -81,7 +80,7 @@ export default function Welcome() {
   const completed = cards.filter((c) => c.count > 0).length;
   const total = cards.length;
   const percent = Math.round((completed / total) * 100);
-  const greetingName = guest ? 'Misafir' : name || 'Müdür Bey';
+  const greetingName = name || 'Müdür Bey';
 
   const now = new Date();
   const weekday = now.toLocaleDateString('tr-TR', { weekday: 'long' });

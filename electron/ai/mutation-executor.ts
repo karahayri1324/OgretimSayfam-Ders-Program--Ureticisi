@@ -8,7 +8,7 @@ import { daysRepo } from '../db/repositories/days.js';
 import { hoursRepo } from '../db/repositories/hours.js';
 import { dayHoursRepo } from '../db/repositories/day_hours.js';
 import { constraintsRepo } from '../db/repositories/constraints.js';
-import { settingsRepo } from '../db/repositories/settings.js';
+import { settingsRepo, WRITABLE_SETTING_KEYS } from '../db/repositories/settings.js';
 import { timetablesRepo } from '../db/repositories/timetables.js';
 import { getDb } from '../db/connection.js';
 import type { ConstraintType, TimetableSlot } from '../../src/lib/types.js';
@@ -664,6 +664,9 @@ const handlers: Record<DataMutationOp, Handler> = {
 
   set_setting(params) {
     const key = requireString(params, 'key');
+    if (!WRITABLE_SETTING_KEYS.has(key)) {
+      throw new Error(`'${key}' bu yolla değiştirilemez.`);
+    }
     const rawValue = params.value;
     if (rawValue === undefined || rawValue === null) {
       throw new Error("'value' boş olamaz.");

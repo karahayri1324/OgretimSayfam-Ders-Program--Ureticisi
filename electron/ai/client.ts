@@ -4,6 +4,8 @@ import { validateAIResponse } from './schema.js';
 import type { AIContext } from './mock-server.js';
 import { settingsRepo } from '../db/repositories/settings.js';
 import { executeTool, type ToolResult } from './tools.js';
+import { API_BASE } from '../config.js';
+import { getToken } from '../auth/session.js';
 import { log } from '../utils/logger.js';
 
 export type ConversationHistoryEntry =
@@ -22,6 +24,7 @@ export type ToolHistoryEntry = {
   tool: string;
   args: Record<string, unknown>;
   result: ToolResult;
+  reasoning: string;
 };
 
 export type ParseWithToolsResult = {
@@ -29,10 +32,18 @@ export type ParseWithToolsResult = {
   toolCalls: ToolHistoryEntry[];
 };
 
+export type AIErrorCode =
+  | 'AI_ERROR'
+  | 'AI_TIMEOUT'
+  | 'AI_INVALID_RESPONSE'
+  | 'AI_UNAUTHORIZED'
+  | 'AI_SUBSCRIPTION'
+  | 'AI_RATE_LIMIT';
+
 export class AIError extends Error {
-  readonly code: 'AI_ERROR' | 'AI_TIMEOUT' | 'AI_INVALID_RESPONSE';
+  readonly code: AIErrorCode;
   readonly cause?: unknown;
-  constructor(code: 'AI_ERROR' | 'AI_TIMEOUT' | 'AI_INVALID_RESPONSE', message: string, cause?: unknown) {
+  constructor(code: AIErrorCode, message: string, cause?: unknown) {
     super(message);
     this.code = code;
     this.cause = cause;
@@ -63,24 +74,7 @@ function readTimeoutMs(): number {
   return 30_000;
 }
 
-const LOCAL_DEFAULT_ENDPOINT = 'http://localhost:8000';
-const SERVER_ENDPOINT = '';
-
-function readEndpoint(): string {
-  try {
-    const mode = settingsRepo.get('aiMode');
-    if (mode === 'server') {
-      const v = settingsRepo.get('aiServerEndpoint');
-      const ep = typeof v === 'string' ? v.trim() : '';
-      return ep || SERVER_ENDPOINT;
-    }
-    const v = settingsRepo.get('aiLocalEndpoint');
-    const ep = typeof v === 'string' ? v.trim() : '';
-    return ep || LOCAL_DEFAULT_ENDPOINT;
-  } catch {
-    return LOCAL_DEFAULT_ENDPOINT;
-  }
-}
+const AI_ENDPOINT = `${API_BASE}/v1/ai/respond`;
 
 function coerceJson(raw: unknown): unknown {
   if (raw && typeof raw === 'object') return raw;
@@ -112,11 +106,11 @@ async function singleRoundtrip(
   conversationHistory: ConversationHistoryEntry[],
   opts: RoundtripOpts = {},
 ): Promise<AIResponse> {
-  const endpoint = readEndpoint();
-  if (!endpoint) {
+  const token = getToken();
+  if (!token) {
     throw new AIError(
-      'AI_ERROR',
-      'AI uç noktası ayarlı değil. Ayarlar → AI bölümünden Yerel veya Sunucu uç noktasını girin.',
+      'AI_UNAUTHORIZED',
+      'Oturum bulunamadı. Lütfen giriş yapın.',
     );
   }
 
@@ -130,18 +124,31 @@ async function singleRoundtrip(
 
   const post = async (): Promise<unknown> => {
     try {
-      const res = await axios.post(endpoint, body, {
+      const res = await axios.post(AI_ENDPOINT, body, {
         timeout: readTimeoutMs(),
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
       });
       return res.data;
     } catch (e) {
-      const ax = e as AxiosError;
+      const ax = e as AxiosError<{ error?: string; message?: string }>;
       if (ax.code === 'ECONNABORTED' || ax.message?.toLowerCase().includes('timeout')) {
         throw new AIError('AI_TIMEOUT', 'AI sunucusu yanıt vermedi (zaman aşımı).', e);
       }
       const status = ax.response?.status;
-      const detail = status ? `HTTP ${status}` : ax.message;
+      const serverMsg = ax.response?.data?.message;
+      if (status === 401) {
+        throw new AIError('AI_UNAUTHORIZED', serverMsg || 'Oturumunuz geçersiz. Lütfen tekrar giriş yapın.', e);
+      }
+      if (status === 403) {
+        throw new AIError('AI_SUBSCRIPTION', serverMsg || 'Erişiminiz kısıtlandı.', e);
+      }
+      if (status === 429) {
+        throw new AIError('AI_RATE_LIMIT', serverMsg || 'Saatlik istek limitinize ulaştınız.', e);
+      }
+      const detail = serverMsg || (status ? `HTTP ${status}` : ax.message);
       throw new AIError('AI_ERROR', `AI sunucusuna ulaşılamadı: ${detail}`, e);
     }
   };
@@ -193,6 +200,7 @@ export const aiClient = {
 
       const toolName = response.tool;
       const args = response.args ?? {};
+      const reasoning = typeof response.reasoning === 'string' ? response.reasoning : '';
       const result = executeTool(toolName, args);
       log.info('AI tool çağrısı', {
         tool: toolName,
@@ -200,7 +208,7 @@ export const aiClient = {
         ok: !('error' in result),
         iteration: i + 1,
       });
-      toolHistory.push({ role: 'tool', tool: toolName, args, result });
+      toolHistory.push({ role: 'tool', tool: toolName, args, result, reasoning });
     }
 
     log.warn('AI tool iterasyon limiti aşıldı', { max: maxIterations });

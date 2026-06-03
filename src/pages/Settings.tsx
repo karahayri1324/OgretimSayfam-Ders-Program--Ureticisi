@@ -5,10 +5,13 @@ import {
   ExternalLink,
   Save,
   Info,
+  User,
+  LogOut,
 } from 'lucide-react';
 import { tr } from '../lib/i18n';
 import { useSettingsStore } from '../store/settings';
 import { useToastStore } from '../store/toast';
+import { useAuthStore } from '../store/auth';
 import { Button } from '../components/ui/Button';
 import { Input, Label } from '../components/ui/Input';
 import { Card, CardBody, CardHeader } from '../components/ui/Card';
@@ -17,10 +20,9 @@ import { applyTheme } from '../lib/theme';
 export default function Settings() {
   const { settings, load, update } = useSettingsStore();
   const toast = useToastStore();
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
 
-  const [aiMode, setAiMode] = useState<'local' | 'server'>('local');
-  const [localEndpoint, setLocalEndpoint] = useState('http://localhost:8000');
-  const [serverEndpoint, setServerEndpoint] = useState('');
   const [aiTimeout, setAiTimeout] = useState(30);
   const [fetTimeLimit, setFetTimeLimit] = useState(120);
   const [saving, setSaving] = useState(false);
@@ -30,9 +32,6 @@ export default function Settings() {
   }, [load]);
 
   useEffect(() => {
-    setAiMode(settings.aiMode === 'server' ? 'server' : 'local');
-    setLocalEndpoint(settings.aiLocalEndpoint || 'http://localhost:8000');
-    setServerEndpoint(settings.aiServerEndpoint || '');
     setAiTimeout(settings.aiTimeoutSec);
     setFetTimeLimit(settings.fetTimeLimitSec);
   }, [settings]);
@@ -40,9 +39,6 @@ export default function Settings() {
   async function handleSave() {
     setSaving(true);
     const ok = await update({
-      aiMode,
-      aiLocalEndpoint: localEndpoint.trim() || 'http://localhost:8000',
-      aiServerEndpoint: serverEndpoint.trim(),
       aiTimeoutSec: Math.max(1, Math.floor(aiTimeout)),
       fetTimeLimitSec: Math.max(10, Math.floor(fetTimeLimit)),
     });
@@ -74,54 +70,40 @@ export default function Settings() {
       </header>
 
       <Card>
-        <CardHeader title="AI" description="AI parse uç noktası ve zaman aşımı" />
-        <CardBody className="space-y-4">
-          <div>
-            <Label>{tr.settings.aiSource}</Label>
-            <div className="mt-1 flex gap-2">
-              <button
-                type="button"
-                onClick={() => setAiMode('local')}
-                aria-pressed={aiMode === 'local'}
-                className={
-                  aiMode === 'local'
-                    ? 'rounded-lg border border-primary-300 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700'
-                    : 'rounded-lg border border-surface-200 bg-surface-50 px-4 py-2 text-sm text-ink-600 hover:bg-surface-100'
-                }
-              >
-                {tr.settings.aiLocal}
-              </button>
-              <button
-                type="button"
-                onClick={() => setAiMode('server')}
-                aria-pressed={aiMode === 'server'}
-                className={
-                  aiMode === 'server'
-                    ? 'rounded-lg border border-primary-300 bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700'
-                    : 'rounded-lg border border-surface-200 bg-surface-50 px-4 py-2 text-sm text-ink-600 hover:bg-surface-100'
-                }
-              >
-                {tr.settings.aiServer}
-              </button>
+        <CardHeader title={tr.settings.account} />
+        <CardBody className="space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="flex size-10 items-center justify-center rounded-full bg-primary-50 text-primary-600">
+              <User size={18} />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-ink-900">
+                {user?.name || user?.email || '—'}
+              </p>
+              <p className="truncate text-xs text-ink-500">{user?.email ?? ''}</p>
             </div>
           </div>
-          {aiMode === 'local' ? (
-            <div>
-              <Label htmlFor="ai-local">{tr.settings.aiLocalEndpoint}</Label>
-              <Input
-                id="ai-local"
-                value={localEndpoint}
-                onChange={(e) => setLocalEndpoint(e.target.value)}
-                placeholder="http://localhost:8000"
-              />
-              <p className="mt-1 text-xs text-ink-500">{tr.settings.aiLocalHint}</p>
-            </div>
-          ) : (
-            <div>
-              <Label>{tr.settings.aiServerEndpoint}</Label>
-              <p className="mt-1 text-xs text-ink-500">{tr.settings.aiServerHint}</p>
-            </div>
-          )}
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Button
+              variant="secondary"
+              onClick={() =>
+                window.open('https://timetables.ogretimsayfam.com', '_blank')
+              }
+            >
+              <ExternalLink size={14} />
+              {tr.settings.manageSubscription}
+            </Button>
+            <Button variant="secondary" onClick={() => logout()}>
+              <LogOut size={14} />
+              {tr.settings.logout}
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="AI" description={tr.settings.aiDescription} />
+        <CardBody className="space-y-4">
           <div className="w-48">
             <Label htmlFor="ai-timeout">{tr.settings.aiTimeout}</Label>
             <Input

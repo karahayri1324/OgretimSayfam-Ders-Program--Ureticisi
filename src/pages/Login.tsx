@@ -9,7 +9,7 @@ import {
   Eye,
   EyeOff,
   ArrowRight,
-  Sparkles,
+  AlertCircle,
   type LucideIcon,
 } from 'lucide-react';
 import { useAuthStore } from '../store/auth';
@@ -42,39 +42,43 @@ export default function Login() {
   const navigate = useNavigate();
   const login = useAuthStore((s) => s.login);
   const register = useAuthStore((s) => s.register);
-  const continueAsGuest = useAuthStore((s) => s.continueAsGuest);
 
   const [mode, setMode] = useState<Mode>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (submitting) return;
     const fd = new FormData(e.currentTarget);
+    setError(null);
     setSubmitting(true);
     try {
       if (mode === 'login') {
         await login(
-          String(fd.get('email') ?? 'demo@okulum.k12.tr'),
+          String(fd.get('email') ?? '').trim(),
           String(fd.get('password') ?? ''),
         );
       } else {
-        await register(
-          String(fd.get('name') ?? 'Kullanıcı'),
-          String(fd.get('email') ?? ''),
-          String(fd.get('password') ?? ''),
-        );
+        await register({
+          email: String(fd.get('email') ?? '').trim(),
+          password: String(fd.get('password') ?? ''),
+          name: String(fd.get('name') ?? '').trim() || undefined,
+          school: String(fd.get('school') ?? '').trim() || undefined,
+        });
       }
       navigate('/welcome', { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'İşlem başarısız.');
     } finally {
       setSubmitting(false);
     }
   }
 
-  function handleGuest() {
-    continueAsGuest();
-    navigate('/welcome', { replace: true });
+  function switchMode(m: Mode) {
+    setMode(m);
+    setError(null);
   }
 
   return (
@@ -220,7 +224,7 @@ export default function Login() {
                 type="button"
                 role="tab"
                 aria-selected={active}
-                onClick={() => setMode(m)}
+                onClick={() => switchMode(m)}
                 style={{
                   flex: 1,
                   padding: '10px 14px',
@@ -356,6 +360,28 @@ export default function Login() {
             </label>
           )}
 
+          {error && (
+            <div
+              role="alert"
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                marginTop: 4,
+                padding: '10px 12px',
+                borderRadius: 10,
+                background: '#FBE9E7',
+                border: `1px solid ${defter.red}33`,
+                color: defter.red,
+                fontSize: 13,
+                lineHeight: 1.45,
+              }}
+            >
+              <AlertCircle size={15} style={{ marginTop: 1, flexShrink: 0 }} />
+              <span>{error}</span>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={submitting}
@@ -385,45 +411,6 @@ export default function Login() {
                 ? 'Giriş Yap'
                 : 'Hesabı Oluştur'}
             {!submitting && <ArrowRight size={14} />}
-          </button>
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              margin: '14px 0 4px',
-              fontSize: 11,
-              letterSpacing: 1.5,
-              color: defter.muted,
-              textTransform: 'uppercase',
-            }}
-          >
-            <span style={{ flex: 1, height: 1, background: defter.line }} />
-            <span>veya</span>
-            <span style={{ flex: 1, height: 1, background: defter.line }} />
-          </div>
-          <button
-            type="button"
-            onClick={handleGuest}
-            style={{
-              padding: '12px 18px',
-              borderRadius: 12,
-              border: `1px solid ${defter.line2}`,
-              background: defter.paper,
-              color: defter.ink,
-              fontWeight: 500,
-              fontSize: 14,
-              fontFamily: fontSans,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-            }}
-          >
-            <Sparkles size={13} color={defter.amber} />
-            Misafir Devam Et
           </button>
 
           {mode === 'register' && (
@@ -467,7 +454,7 @@ export default function Login() {
               Hesabın yok mu?{' '}
               <button
                 type="button"
-                onClick={() => setMode('register')}
+                onClick={() => switchMode('register')}
                 style={{
                   background: 'transparent',
                   border: 'none',
@@ -487,7 +474,7 @@ export default function Login() {
               Zaten hesabın var mı?{' '}
               <button
                 type="button"
-                onClick={() => setMode('login')}
+                onClick={() => switchMode('login')}
                 style={{
                   background: 'transparent',
                   border: 'none',

@@ -1,76 +1,63 @@
 import { create } from 'zustand';
 
-
-const STORAGE_KEY = 'osf-auth-v1';
-
-type Persisted = {
-  authed: boolean;
-  guest: boolean;
-  email: string | null;
+export type AuthUser = {
+  id: number;
+  email: string;
   name: string | null;
+  school: string | null;
+  status: string;
+  isAdmin: boolean;
 };
-
-function read(): Persisted {
-  if (typeof window === 'undefined') {
-    return { authed: false, guest: false, email: null, name: null };
-  }
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { authed: false, guest: false, email: null, name: null };
-    const parsed = JSON.parse(raw);
-    return {
-      authed: Boolean(parsed.authed),
-      guest: Boolean(parsed.guest),
-      email: typeof parsed.email === 'string' ? parsed.email : null,
-      name: typeof parsed.name === 'string' ? parsed.name : null,
-    };
-  } catch {
-    return { authed: false, guest: false, email: null, name: null };
-  }
-}
-
-function write(s: Persisted) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-  } catch {
-  }
-}
 
 type AuthState = {
   authed: boolean;
-  guest: boolean;
-  email: string | null;
-  name: string | null;
-  login: (email: string, _password: string) => Promise<void>;
-  register: (name: string, email: string, _password: string) => Promise<void>;
-  continueAsGuest: () => void;
-  logout: () => void;
+  ready: boolean;
+  user: AuthUser | null;
+  init: () => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  register: (input: {
+    email: string;
+    password: string;
+    name?: string;
+    school?: string;
+  }) => Promise<void>;
+  logout: () => Promise<void>;
 };
 
-export const useAuthStore = create<AuthState>((set) => {
-  const initial = read();
-  return {
-    ...initial,
-    login: async (email) => {
-      const next = { authed: true, guest: false, email, name: null };
-      set(next);
-      write(next);
-    },
-    register: async (name, email) => {
-      const next = { authed: true, guest: false, email, name };
-      set(next);
-      write(next);
-    },
-    continueAsGuest: () => {
-      const next = { authed: false, guest: true, email: null, name: null };
-      set(next);
-      write(next);
-    },
-    logout: () => {
-      const next = { authed: false, guest: false, email: null, name: null };
-      set(next);
-      write(next);
-    },
-  };
-});
+export const useAuthStore = create<AuthState>((set) => ({
+  authed: false,
+  ready: false,
+  user: null,
+
+  init: async () => {
+    try {
+      const res = await window.api.auth.status();
+      if (res.ok && res.data.authed) {
+        set({ authed: true, user: (res.data.user as AuthUser) ?? null, ready: true });
+        return;
+      }
+    } catch {
+    }
+    set({ authed: false, user: null, ready: true });
+  },
+
+  login: async (email, password) => {
+    const res = await window.api.auth.login({ email, password });
+    if (!res.ok) throw new Error(res.error.message);
+    set({ authed: true, user: res.data as AuthUser });
+  },
+
+  register: async (input) => {
+    const res = await window.api.auth.register(input);
+    if (!res.ok) throw new Error(res.error.message);
+    set({ authed: true, user: res.data as AuthUser });
+  },
+
+  logout: async () => {
+    try {
+      await window.api.auth.logout();
+    } finally {
+      set({ authed: false, user: null });
+    }
+  },
+}));

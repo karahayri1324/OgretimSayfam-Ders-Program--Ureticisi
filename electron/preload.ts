@@ -11,6 +11,12 @@ const on = (channel: string, handler: (...args: unknown[]) => void) => {
 };
 
 const api = {
+  auth: {
+    status: () => invoke('auth:status'),
+    register: (data: unknown) => invoke('auth:register', data),
+    login: (data: unknown) => invoke('auth:login', data),
+    logout: () => invoke('auth:logout'),
+  },
   teachers: {
     list: () => invoke('teachers:list'),
     create: (data: unknown) => invoke('teachers:create', data),

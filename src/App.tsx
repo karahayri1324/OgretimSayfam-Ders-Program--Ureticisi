@@ -19,9 +19,15 @@ import { useSettingsStore } from './store/settings';
 import { applyTheme } from './lib/theme';
 
 export default function App() {
-  const allowed = useAuthStore((s) => s.authed || s.guest);
+  const authed = useAuthStore((s) => s.authed);
+  const ready = useAuthStore((s) => s.ready);
+  const initAuth = useAuthStore((s) => s.init);
   const theme = useSettingsStore((s) => s.settings.theme);
   const loadSettings = useSettingsStore((s) => s.load);
+
+  useEffect(() => {
+    initAuth();
+  }, [initAuth]);
 
   useEffect(() => {
     loadSettings();
@@ -31,7 +37,11 @@ export default function App() {
     applyTheme(theme);
   }, [theme]);
 
-  if (!allowed) {
+  if (!ready) {
+    return <div className="h-screen w-screen bg-paper" />;
+  }
+
+  if (!authed) {
     return (
       <Routes>
         <Route path="/login" element={<Login />} />

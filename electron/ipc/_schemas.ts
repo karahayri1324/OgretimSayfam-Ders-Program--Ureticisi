@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { WRITABLE_SETTING_KEYS } from '../db/repositories/settings.js';
 
 const nullableString = z
   .union([z.string(), z.null()])
@@ -168,11 +169,19 @@ export const SetSplitSchema = z.object({
 
 export const AIParseSchema = z.string().trim().min(1, 'Mesaj boş olamaz');
 
-export const SettingsPatchSchema = z.record(
-  z
-    .union([z.string(), z.number(), z.boolean(), z.null()])
-    .transform((v) => (v == null ? '' : String(v))),
-);
+export const SettingsPatchSchema = z
+  .record(
+    z
+      .union([z.string(), z.number(), z.boolean(), z.null()])
+      .transform((v) => (v == null ? '' : String(v))),
+  )
+  .transform((obj) => {
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (WRITABLE_SETTING_KEYS.has(k)) out[k] = v;
+    }
+    return out;
+  });
 
 export const GenerateRunOptsSchema = z
   .object({

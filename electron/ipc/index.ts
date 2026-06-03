@@ -10,10 +10,12 @@ import { registerAiHandlers } from './ai.js';
 import { registerGenerateHandlers } from './generate.js';
 import { registerSettingsHandlers } from './settings.js';
 import { registerAppHandlers } from './app.js';
+import { registerAuthHandlers } from './auth.js';
 import { log } from '../utils/logger.js';
 
 export function registerAllHandlers(getWindow: () => BrowserWindow): void {
   log.info('IPC handler\'ları kayıt ediliyor');
+  registerAuthHandlers();
   registerTeachersHandlers();
   registerClassesHandlers();
   registerRoomsHandlers();

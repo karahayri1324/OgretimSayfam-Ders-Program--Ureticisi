@@ -7,6 +7,7 @@ export type ChatMessage = {
   text: string;
   response?: AIResponse;
   status?: 'pending' | 'confirmed' | 'rejected';
+  notice?: 'subscription' | 'rateLimit' | 'authError';
 };
 
 export type PendingPromptMode = 'fill' | 'send';
