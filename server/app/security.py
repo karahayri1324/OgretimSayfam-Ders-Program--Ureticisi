@@ -24,8 +24,6 @@ def hash_password(password: str) -> str:
     return f"pbkdf2_{_PBKDF2_ALGO}${_PBKDF2_ROUNDS}${salt.hex()}${dk.hex()}"
 
 
-# Var olmayan e-posta için bile PBKDF2 çalıştırıp zamanlama yan-kanalını kapatmak üzere
-# kullanılan sabit kukla hash. verify_password ile aynı maliyeti üretir.
 DUMMY_PASSWORD_HASH = hash_password("x" * 12)
 
 

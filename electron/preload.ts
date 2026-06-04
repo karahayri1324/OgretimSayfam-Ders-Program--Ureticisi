@@ -27,7 +27,8 @@ const api = {
     list: () => invoke('classes:list'),
     create: (data: unknown) => invoke('classes:create', data),
     update: (id: number, data: unknown) => invoke('classes:update', id, data),
-    delete: (id: number) => invoke('classes:delete', id),
+    delete: (id: number, opts?: { kind?: string }) =>
+      invoke('classes:delete', id, opts),
   },
   rooms: {
     list: () => invoke('rooms:list'),

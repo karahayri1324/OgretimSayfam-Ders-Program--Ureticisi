@@ -128,6 +128,8 @@ function ConstraintItem({
               onChange={(e) => setWeight(Number(e.target.value))}
               onMouseUp={() => onWeight(weight)}
               onTouchEnd={() => onWeight(weight)}
+              onKeyUp={() => onWeight(weight)}
+              onBlur={() => onWeight(weight)}
               className="w-56 accent-primary-500"
             />
           </div>

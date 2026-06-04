@@ -2,6 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>ÖğretimSayfam · api4 Yönetim</title>
 <style>
@@ -93,7 +94,8 @@ const API = location.origin;
 let token = localStorage.getItem("api4_admin_token") || "";
 
 function flash(el, text, kind) {
-  el.innerHTML = text ? `<div class="msg ${kind}">${text}</div>` : "";
+  // text sunucu mesajı olabilir → esc ile kaçır (esc bildirimi hoisted).
+  el.innerHTML = text ? `<div class="msg ${kind}">${esc(text)}</div>` : "";
 }
 async function api(path, opts = {}) {
   const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
@@ -175,15 +177,23 @@ async function loadUsers() {
   } catch (e) { flash(document.getElementById("usersMsg"), e.message, "err"); }
 }
 
+function esc(v) {
+  // Kullanıcı-kontrollü alanları innerHTML'e basmadan önce kaçır (stored XSS önlemi:
+  // ad/okul gibi serbest metinler self-register ile gelir ve admin panelde render edilir).
+  return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+
 function renderRow(u) {
   const tr = document.createElement("tr");
   const blocked = u.status === "blocked";
   tr.innerHTML = `
     <td>${u.id}${u.is_admin ? " 👑" : ""}</td>
-    <td><strong>${u.email}</strong><br><small class="hint">${u.name || "-"} · ${u.school || "-"}</small></td>
+    <td><strong>${esc(u.email)}</strong><br><small class="hint">${esc(u.name || "-")} · ${esc(u.school || "-")}</small></td>
     <td><span class="pill ${blocked ? "bad" : "ok"}">${blocked ? "ENGELLİ" : "aktif"}</span></td>
     <td>${u.usage_last_hour}/${u.effective_rate_limit || "∞"}<br><small class="hint">${u.rate_limit_per_hour == null ? "global" : "özel"}</small></td>
-    <td><small class="hint">${u.demo_expires_at || "-"}</small></td>
+    <td><small class="hint">${esc(u.demo_expires_at || "-")}</small></td>
   `;
   const td = document.createElement("td");
   td.className = "acts";

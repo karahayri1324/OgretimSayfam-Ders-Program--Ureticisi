@@ -125,9 +125,14 @@ export default function Schedule() {
   }
 
   function changeHoursPerDay(n: number) {
-    const clamped = Math.max(1, Math.min(20, Math.floor(n || 0)));
+    if (!Number.isFinite(n) || n < 1) return;
+    const clamped = Math.max(1, Math.min(20, Math.floor(n)));
     setHoursPerDay(clamped);
-    setHourRows((cur) => buildDefaultHours(clamped, cur));
+    setHourRows((cur) => (clamped > cur.length ? buildDefaultHours(clamped, cur) : cur));
+  }
+
+  function commitHoursPerDay() {
+    setHourRows((cur) => buildDefaultHours(hoursPerDay, cur));
   }
 
   function updateRow(i: number, patch: Partial<HourRow>) {
@@ -256,6 +261,7 @@ export default function Schedule() {
                   max={20}
                   value={hoursPerDay}
                   onChange={(e) => changeHoursPerDay(Number(e.target.value))}
+                  onBlur={commitHoursPerDay}
                 />
               </div>
               <div className="flex items-end gap-2 rounded-lg border border-surface-200 bg-surface-50/60 px-3 py-2">

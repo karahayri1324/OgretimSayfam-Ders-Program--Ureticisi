@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import threading
 import uuid
 
 import pytest
 
-from app import repo
+from app import rate_limit, repo
 
 from .conftest import auth_headers
 
@@ -76,6 +77,33 @@ def test_zero_limit_is_unlimited(client):
     repo.update_user(uid, {"rate_limit_per_hour": 0})
     for _ in range(10):
         assert _ai(client, token).status_code == 200
+
+
+def test_try_consume_is_atomic_under_concurrency(client):
+    email = f"rl_atomic_{uuid.uuid4().hex[:8]}@example.com"
+    client.post("/v1/auth/register", json={"email": email, "password": "secret12345"})
+    user0 = repo.get_user_by_email(email)
+    assert user0 is not None
+    uid = int(user0["id"])
+    repo.update_user(uid, {"rate_limit_per_hour": 1})
+    user = repo.get_user_by_email(email)
+
+    results: list[bool] = []
+    lock = threading.Lock()
+
+    def worker() -> None:
+        allowed, _used, _limit = rate_limit.try_consume(user)
+        with lock:
+            results.append(allowed)
+
+    threads = [threading.Thread(target=worker) for _ in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sum(1 for a in results if a) == 1, results
+    assert rate_limit.usage_last_hour(uid) == 1
 
 
 def test_reset_usage_via_admin(client, admin_token):

@@ -726,10 +726,6 @@ function teacherMinRestBetweenDays(c: Constraint, ctx: BuilderContext): HandlerR
   const totalHours = ctx.hours.length;
   const k = Math.min(Math.floor(minRest), totalHours);
   if (k <= 0) return skip(ctx, c, 'minRestHours geçersiz');
-  // Yaklaşım (NotAvailableTimes ile): her gece sınırında (gün N → gün N+1) gün N'in
-  // son `eveningBlock` saatini ve gün N+1'in ilk `morningBlock` saatini kapat; toplam = k.
-  // Böylece gün N'in son dersi ile gün N+1'in ilk dersi arasında en az k saat kalır.
-  // İlk günün sabahı ve son günün akşamı (gece sınırı olmadığından) kısıtlanmaz.
   const eveningBlock = Math.ceil(k / 2);
   const morningBlock = Math.floor(k / 2);
   const days = ctx.days;
@@ -836,7 +832,7 @@ function classEarlyMaxBeginnings(c: Constraint, ctx: BuilderContext): HandlerRes
     section: 'time',
     tag: 'ConstraintStudentsSetEarlyMaxBeginningsAtSecondHour',
     body: {
-      Weight_Percentage: 100,
+      Weight_Percentage: c.weight,
       Max_Beginnings_At_Second_Hour: Math.floor(max),
       Students: cls,
       ...commonTail(c),
@@ -928,20 +924,26 @@ function activityFixedTime(c: Constraint, ctx: BuilderContext): HandlerResult {
   if (!ctx.dayByName.has(day)) return skip(ctx, c, `Bilinmeyen gün: "${day}"`);
   const hourObj = ctx.hourByOrder.get(hour);
   if (!hourObj) return skip(ctx, c, `Bilinmeyen saat: ${hour}`);
-  const fetIds = ctx.fetActivityIdsByActivity.get(aid) ?? [];
-  if (fetIds.length === 0) return skip(ctx, c, `Aktivite bulunamadı: ${aid}`);
-  return fetIds.map((id) => ({
+  const pool = ctx.fetActivityIdsByActivity.get(aid) ?? [];
+  if (pool.length === 0) return skip(ctx, c, `Aktivite bulunamadı: ${aid}`);
+  const used = ctx.fixedTimeCursorByActivity.get(aid) ?? 0;
+  if (used >= pool.length) {
+    return skip(ctx, c, `Aktivitenin sabitlenebilecek tüm saatleri kullanıldı: ${aid}`);
+  }
+  const fetId = pool[used]!;
+  ctx.fixedTimeCursorByActivity.set(aid, used + 1);
+  return [{
     section: 'time' as const,
     tag: 'ConstraintActivityPreferredStartingTime',
     body: {
       Weight_Percentage: c.weight,
-      Activity_Id: id,
+      Activity_Id: fetId,
       Preferred_Day: day,
       Preferred_Hour: hourObj.name,
       Permanently_Locked: true,
       ...commonTail(c),
     },
-  }));
+  }];
 }
 
 function activitiesSameStartingTime(c: Constraint, ctx: BuilderContext): HandlerResult {
@@ -1434,7 +1436,7 @@ function studentsEarlyMaxBeginnings(c: Constraint, ctx: BuilderContext): Handler
     section: 'time',
     tag: 'ConstraintStudentsEarlyMaxBeginningsAtSecondHour',
     body: {
-      Weight_Percentage: 100,
+      Weight_Percentage: c.weight,
       Max_Beginnings_At_Second_Hour: Math.floor(max),
       ...commonTail(c),
     },

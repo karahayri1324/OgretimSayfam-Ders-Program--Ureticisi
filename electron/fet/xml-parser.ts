@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
-import type { TimetableSlot } from '../../src/lib/types.js';
+import type { Hour, TimetableSlot } from '../../src/lib/types.js';
 import type { SchoolBundle } from './types.js';
 
 export type ParseContext = {
@@ -10,6 +10,7 @@ export type ParseContext = {
   fetActivityIdsByActivity: Map<number, number[]>;
   durationByFetId?: Map<number, number>;
   dbActivityIdByFetId?: Map<number, number>;
+  hours?: Hour[];
 };
 
 export type ParseResult = {
@@ -58,8 +59,9 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): ParseResult {
     .sort((a, b) => a.orderIndex - b.orderIndex)
     .forEach((d, i) => dayIndexByName.set(d.name, i));
 
+  const hourSource = ctx.hours && ctx.hours.length > 0 ? ctx.hours : bundle.hours;
   const hourIndexByName = new Map<string, number>();
-  bundle.hours
+  hourSource
     .slice()
     .sort((a, b) => a.orderIndex - b.orderIndex)
     .forEach((h, i) => hourIndexByName.set(h.name, i));
@@ -93,7 +95,6 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): ParseResult {
     const hourName = (raw.Hour ?? '').toString();
     const dayIndex = dayIndexByName.get(dayName);
     const hourIndex = hourIndexByName.get(hourName);
-    // Yerleştirilemeyen aktiviteler boş <Day>/<Hour> ile gelir → atlanır (placedFetIds'e eklenmez).
     if (dayIndex === undefined || hourIndex === undefined) continue;
 
     const subj = subjectById.get(act.subjectId);
@@ -102,7 +103,6 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): ParseResult {
     const roomName = (raw.Room ?? '').toString().trim();
     const room = roomName ? roomByName.get(roomName) : null;
 
-    // Bu FET aktivitesinin gerçek süresi (split kalan blokları için blockDuration yanlış olur).
     const duration = ctx.durationByFetId?.get(fetId) ?? Math.max(1, act.blockDuration || 1);
     placedFetIds.add(fetId);
     for (let i = 0; i < duration; i++) {

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fetBinaryPath } from './binary-path.js';
 import { parseTimetable } from './xml-parser.js';
+import type { Hour } from '../../src/lib/types.js';
 import type {
   FetProgressEvent,
   FetResult,
@@ -17,6 +18,7 @@ export async function runFet(
   bundle: SchoolBundle,
   fetActivityIdsByActivity: Map<number, number[]>,
   durationByFetId: Map<number, number>,
+  builtHours: Hour[],
   opts: FetRunOptions = {},
 ): Promise<FetResult> {
   const start = Date.now();
@@ -150,7 +152,6 @@ export async function runFet(
       }
 
       if (code === 0) {
-        // FET çözümsüz/imkansız durumda da 0 ile çıkabilir; stdout + logs/result dosyalarına bak.
         const resultText = `${stdoutBuf}\n${await readErrorFiles(outputDir)}`;
         if (/could not (generate|find)|impossible|imkans|olanaks/i.test(resultText)) {
           resolve({
@@ -170,6 +171,7 @@ export async function runFet(
             bundle,
             fetActivityIdsByActivity,
             durationByFetId,
+            hours: builtHours,
           });
           if (parsed.unplacedFetIds.length > 0) {
             const total = parsed.placedFetIds.size + parsed.unplacedFetIds.length;

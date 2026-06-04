@@ -34,8 +34,6 @@ def _ensure_jwt_secret() -> None:
         )
     stored = db.get_app_setting("jwt_secret", "")
     if not stored:
-        # Atomik: yalnızca yoksa yaz, sonra kalıcı değeri tekrar oku. Çok-worker'da
-        # her worker'ın farklı secret üretip token'ları geçersiz kılmasını (TOCTOU) önler.
         db.insert_app_setting_if_absent("jwt_secret", secrets.token_hex(32))
         stored = db.get_app_setting("jwt_secret", "")
         log.warning(
@@ -129,7 +127,20 @@ def create_app() -> FastAPI:
 
         @app.get("/admin", include_in_schema=False)
         async def admin_panel() -> FileResponse:
-            return FileResponse(str(STATIC_DIR / "admin.html"))
+            return FileResponse(
+                str(STATIC_DIR / "admin.html"),
+                headers={
+                    "Content-Security-Policy": (
+                        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+                        "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+                        "connect-src 'self'; base-uri 'none'; form-action 'none'; "
+                        "object-src 'none'"
+                    ),
+                    "X-Content-Type-Options": "nosniff",
+                    "X-Frame-Options": "DENY",
+                    "Referrer-Policy": "no-referrer",
+                },
+            )
 
     return app
 

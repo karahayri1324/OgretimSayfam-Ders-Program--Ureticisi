@@ -339,6 +339,7 @@ export type AIResponse =
 
 export type TimetableSlot = {
   activityId: number;
+  sourceActivityId?: number | null;
   dayIndex: number;
   hourIndex: number;
   classId: number | null;

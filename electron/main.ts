@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerAllHandlers } from './ipc/index.js';
 import { initDatabase, closeDatabase } from './db/connection.js';
+import { abortActiveGeneration } from './ipc/generate.js';
 import { log } from './utils/logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -89,6 +90,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  abortActiveGeneration();
   closeDatabase();
   if (process.platform !== 'darwin') {
     app.quit();
@@ -96,5 +98,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  abortActiveGeneration();
   closeDatabase();
 });

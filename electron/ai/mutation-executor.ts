@@ -410,7 +410,21 @@ const handlers: Record<DataMutationOp, Handler> = {
         teachersRepo.update(teacherId, { subjectIds: [...t.subjectIds, subjectId] });
       }
     }
+    let existingId: number | undefined;
+    if (teacherId === null) {
+      const dup = activitiesRepo
+        .list()
+        .find(
+          (a) =>
+            a.classId === classId &&
+            a.subjectId === subjectId &&
+            a.teacherId == null &&
+            a.splitGroupId == null,
+        );
+      if (dup) existingId = dup.id;
+    }
     const id = activitiesRepo.upsert({
+      id: existingId,
       classId,
       subjectId,
       teacherId,
@@ -431,11 +445,33 @@ const handlers: Record<DataMutationOp, Handler> = {
     if (!subject) throw new Error(`Branş bulunamadı: '${subjectName}'`);
 
     const all = activitiesRepo.list();
-    const existing = all.find(
+    const matches = all.filter(
       (a) => a.classId === klass.id && a.subjectId === subject.id,
     );
-    if (!existing) {
+    if (matches.length === 0) {
       throw new Error(`${className} × ${subjectName} aktivitesi bulunamadı.`);
+    }
+    let existing = matches[0]!;
+    if (matches.length > 1) {
+      const selName = optString(params, 'fromTeacher');
+      if (selName) {
+        const ft = findByName(selName, teachersRepo.list());
+        const found = ft ? matches.find((m) => m.teacherId === ft.id) : undefined;
+        if (!found) {
+          throw new Error(
+            `${className} × ${subjectName} için '${selName}' öğretmenli aktivite bulunamadı.`,
+          );
+        }
+        existing = found;
+      } else {
+        const names = matches
+          .map((m) => (m.teacherId ? teachersRepo.get(m.teacherId)?.name ?? '(boş)' : '(boş)'))
+          .join(', ');
+        throw new Error(
+          `${className} × ${subjectName} için birden fazla aktivite var (öğretmenler: ${names}). ` +
+            `Hangisini güncellemek istediğinizi 'fromTeacher' ile belirtin.`,
+        );
+      }
     }
     const weeklyHours = optInt(params, 'weeklyHours') ?? existing.weeklyHours;
     const blockDuration = optInt(params, 'blockDuration') ?? existing.blockDuration;
@@ -464,11 +500,33 @@ const handlers: Record<DataMutationOp, Handler> = {
     const subject = findByName(subjectName, subjectsRepo.list());
     if (!subject) throw new Error(`Branş bulunamadı: '${subjectName}'`);
     const all = activitiesRepo.list();
-    const existing = all.find(
+    const matches = all.filter(
       (a) => a.classId === klass.id && a.subjectId === subject.id,
     );
-    if (!existing) {
+    if (matches.length === 0) {
       throw new Error(`${className} × ${subjectName} aktivitesi bulunamadı.`);
+    }
+    let existing = matches[0]!;
+    if (matches.length > 1) {
+      const selName = optString(params, 'teacher') ?? optString(params, 'fromTeacher');
+      if (selName) {
+        const ft = findByName(selName, teachersRepo.list());
+        const found = ft ? matches.find((m) => m.teacherId === ft.id) : undefined;
+        if (!found) {
+          throw new Error(
+            `${className} × ${subjectName} için '${selName}' öğretmenli aktivite bulunamadı.`,
+          );
+        }
+        existing = found;
+      } else {
+        const names = matches
+          .map((m) => (m.teacherId ? teachersRepo.get(m.teacherId)?.name ?? '(boş)' : '(boş)'))
+          .join(', ');
+        throw new Error(
+          `${className} × ${subjectName} için birden fazla aktivite var (öğretmenler: ${names}). ` +
+            `Hangisini silmek istediğinizi 'teacher' ile belirtin.`,
+        );
+      }
     }
     activitiesRepo.delete(existing.id);
     const pruned = pruneConstraintsByActivityIds([existing.id]);
@@ -948,10 +1006,12 @@ const handlers: Record<DataMutationOp, Handler> = {
       );
     }
 
+    const dbActivityId = slot.sourceActivityId ?? slot.activityId;
+
     const existing = constraintsRepo.list().find(
       (c) =>
         c.type === 'ACTIVITY_FIXED_TIME' &&
-        (c.params as { activityId?: number }).activityId === slot.activityId &&
+        (c.params as { activityId?: number }).activityId === dbActivityId &&
         (c.params as { day?: string }).day === day &&
         (c.params as { hour?: number }).hour === hour,
     );
@@ -963,7 +1023,7 @@ const handlers: Record<DataMutationOp, Handler> = {
       type: 'ACTIVITY_FIXED_TIME',
       weight: 100,
       active: true,
-      params: { activityId: slot.activityId, day, hour },
+      params: { activityId: dbActivityId, day, hour },
       source: 'ai',
       notes: `Slot kilidi (mevcut): ${className} ${day} ${hour}. → ${slot.subjectName}`,
     });
@@ -1216,10 +1276,13 @@ const handlers: Record<DataMutationOp, Handler> = {
       );
     }
 
+    const dbActivityA = slotA.sourceActivityId ?? slotA.activityId;
+    const dbActivityB = slotB.sourceActivityId ?? slotB.activityId;
+
     for (const c of constraintsRepo.list()) {
       if (c.type !== 'ACTIVITY_FIXED_TIME') continue;
       const aid = (c.params as { activityId?: number }).activityId;
-      if (aid === slotA.activityId || aid === slotB.activityId) {
+      if (aid === dbActivityA || aid === dbActivityB) {
         constraintsRepo.delete(c.id);
       }
     }
@@ -1228,7 +1291,7 @@ const handlers: Record<DataMutationOp, Handler> = {
       type: 'ACTIVITY_FIXED_TIME',
       weight: 100,
       active: true,
-      params: { activityId: slotA.activityId, day: day2, hour: hour2 },
+      params: { activityId: dbActivityA, day: day2, hour: hour2 },
       source: 'ai',
       notes: `Swap: ${class1} ${day1}/${hour1} ↔ ${class2} ${day2}/${hour2}`,
     });
@@ -1236,7 +1299,7 @@ const handlers: Record<DataMutationOp, Handler> = {
       type: 'ACTIVITY_FIXED_TIME',
       weight: 100,
       active: true,
-      params: { activityId: slotB.activityId, day: day1, hour: hour1 },
+      params: { activityId: dbActivityB, day: day1, hour: hour1 },
       source: 'ai',
       notes: `Swap: ${class2} ${day2}/${hour2} ↔ ${class1} ${day1}/${hour1}`,
     });

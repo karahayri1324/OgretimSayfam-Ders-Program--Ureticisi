@@ -29,6 +29,15 @@ function readFetTimeLimitFromSettings(): number {
 
 let activeController: AbortController | null = null;
 
+export function abortActiveGeneration(): void {
+  if (activeController) {
+    try {
+      activeController.abort();
+    } catch {
+    }
+  }
+}
+
 export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
   ipcMain.handle('generate:run', async (_e, raw) => {
     const v = validate(GenerateRunOptsSchema, raw);
@@ -39,8 +48,6 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
       return err('BUSY', 'Zaten bir üretim devam ediyor. Önce iptal edin.');
     }
 
-    // Slot'u senkron olarak işaretle: await'ten önce claim et, yoksa iki eşzamanlı
-    // generate:run guard'ı birlikte geçip iki FET süreci başlatabilir (cancel da bozulur).
     const controller = new AbortController();
     activeController = controller;
 
@@ -147,6 +154,7 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
         bundle,
         built.fetActivityIdsByActivity,
         built.durationByFetId,
+        built.hours,
         {
           timeLimit: effectiveTimeLimit,
           signal: controller.signal,

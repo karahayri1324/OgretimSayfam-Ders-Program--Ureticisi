@@ -49,8 +49,6 @@ def register(body: RegisterRequest) -> AuthResponse:
 @router.post("/login", response_model=AuthResponse)
 def login(body: LoginRequest, request: Request) -> AuthResponse:
     email = str(body.email)
-    # Kilidi IP+e-posta'ya bağla: yalnızca e-postaya bağlamak, saldırganın bir kurbanın
-    # e-postasını bilerek onu 15 dk kilitlemesine izin verirdi (hesap-kilidi DoS).
     throttle_key = f"{_client_ip(request)}|{email.lower()}"
     if login_throttle.is_locked(throttle_key):
         raise HTTPException(
@@ -67,7 +65,6 @@ def login(body: LoginRequest, request: Request) -> AuthResponse:
         detail={"error": "invalid_credentials", "message": "E-posta veya şifre hatalı."},
     )
     if user is None:
-        # Var olmayan e-postada da PBKDF2 çalıştır → yanıt süresi farkıyla hesap sayımı (enumeration) engellenir.
         verify_password(body.password, DUMMY_PASSWORD_HASH)
         login_throttle.record_failure(throttle_key)
         raise invalid

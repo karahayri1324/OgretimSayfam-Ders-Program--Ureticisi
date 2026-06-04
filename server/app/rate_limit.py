@@ -65,6 +65,39 @@ def record(user_id: int) -> None:
     _cleanup_old(now)
 
 
+def try_consume(user: sqlite3.Row) -> tuple[bool, int, int]:
+    """Atomik kota kontrol+kayıt. (izin_verildi, kullanım, limit) döndürür.
+
+    check() + record()'u AYRI çağırmak TOCTOU yaratıyordu: eşzamanlı istekler hepsi
+    used<limit görüp geçiyor, sonra hepsi kaydediliyordu (kota baypası). Burada sayma ve
+    (izinliyse) ekleme TEK kilitli kritik bölgede yapılır, böylece istekler serileşir.
+    limit <= 0 → sınırsız.
+    """
+    limit = effective_limit(user)
+    user_id = int(user["id"])
+    now = datetime.now(timezone.utc)
+    since = _iso(now - _WINDOW)
+    with db._lock:  # noqa: SLF001 — kasıtlı: tek atomik kritik bölge
+        conn = db.get_conn()
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM request_log WHERE user_id = ? AND created_at > ?",
+            (user_id, since),
+        ).fetchone()
+        used = int(row["c"]) if row else 0
+        if limit > 0 and used >= limit:
+            return False, used, limit
+        conn.execute(
+            "INSERT INTO request_log (user_id, created_at) VALUES (?, ?)",
+            (user_id, _iso(now)),
+        )
+        conn.execute(
+            "DELETE FROM request_log WHERE created_at < ?",
+            (_iso(now - _CLEANUP_OLDER_THAN),),
+        )
+        conn.commit()
+        return True, used + 1, limit
+
+
 def reset_usage(user_id: int) -> None:
     db.execute("DELETE FROM request_log WHERE user_id = ?", (user_id,))
 

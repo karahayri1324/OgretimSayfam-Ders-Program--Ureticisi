@@ -546,7 +546,7 @@ export const tools = {
         subject: slot.subjectName,
         teacher: slot.teacherName,
         room: slot.roomName,
-        activityId: slot.activityId,
+        activityId: slot.sourceActivityId ?? slot.activityId,
       },
     };
   },

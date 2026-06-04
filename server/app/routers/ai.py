@@ -21,8 +21,6 @@ async def respond(
 ) -> Any:
     user_id = int(user["id"])
 
-    # Bu handler async → uvicorn event-loop thread'inde koşar. Senkron + kilit alan
-    # SQLite çağrılarını thread havuzuna taşı ki tek yavaş yazma tüm event-loop'u dondurmasın.
     if gating.is_blocked(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -32,7 +30,7 @@ async def respond(
             },
         )
 
-    allowed, used, limit = await run_in_threadpool(rate_limit.check, user)
+    allowed, used, limit = await run_in_threadpool(rate_limit.try_consume, user)
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -44,7 +42,6 @@ async def respond(
             },
             headers={"Retry-After": "3600"},
         )
-    await run_in_threadpool(rate_limit.record, user_id)
 
     await run_in_threadpool(repo.touch_last_seen, user_id)
 

@@ -130,6 +130,50 @@ export const teachersRepo = {
   },
 
   delete(id: number): void {
-    getDb().prepare('DELETE FROM teachers WHERE id = ?').run(id);
+    const db = getDb();
+    const schoolId = schoolsRepo.getActiveId();
+    const trx = db.transaction(() => {
+      db.prepare('DELETE FROM teachers WHERE id = ?').run(id);
+      const dupRows = db
+        .prepare(
+          `SELECT id FROM activities
+           WHERE school_id = ? AND teacher_id IS NULL AND split_group_id IS NULL
+             AND id NOT IN (
+               SELECT MIN(id) FROM activities
+               WHERE school_id = ? AND teacher_id IS NULL AND split_group_id IS NULL
+               GROUP BY class_id, subject_id
+             )`,
+        )
+        .all(schoolId, schoolId) as { id: number }[];
+      if (dupRows.length === 0) return;
+      const dupIds = dupRows.map((r) => r.id);
+      const placeholders = dupIds.map(() => '?').join(',');
+      db.prepare(`DELETE FROM activities WHERE id IN (${placeholders})`).run(...dupIds);
+      const idSet = new Set(dupIds);
+      const cons = db
+        .prepare(`SELECT id, params_json FROM constraints WHERE school_id = ?`)
+        .all(schoolId) as { id: number; params_json: string }[];
+      const del = db.prepare('DELETE FROM constraints WHERE id = ?');
+      for (const c of cons) {
+        let refs = false;
+        try {
+          const p = JSON.parse(c.params_json) as {
+            activityId?: unknown;
+            activityIds?: unknown;
+          };
+          if (typeof p.activityId === 'number' && idSet.has(p.activityId)) {
+            refs = true;
+          } else if (
+            Array.isArray(p.activityIds) &&
+            p.activityIds.some((x) => typeof x === 'number' && idSet.has(x))
+          ) {
+            refs = true;
+          }
+        } catch {
+        }
+        if (refs) del.run(c.id);
+      }
+    });
+    trx();
   },
 };

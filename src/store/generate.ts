@@ -80,8 +80,6 @@ export const useGenerateStore = create<State>((set, get) => ({
   },
 
   cancel: async () => {
-    // Önce senkron olarak dinleyiciyi kaldır + durumu işaretle: IPC round-trip sırasında
-    // gelecek geç bir 'done'/'error' olayı iptal durumunu ezmesin.
     get().unsubscribe?.();
     set({ status: 'cancelled', unsubscribe: null });
     await window.api.generate.cancel();

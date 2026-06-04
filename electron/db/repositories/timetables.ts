@@ -148,6 +148,7 @@ export const timetablesRepo = {
 
     return rows.map((r) => ({
       activityId: r.activity_id,
+      sourceActivityId: r.source_activity_id,
       dayIndex: r.day_index,
       hourIndex: r.hour_index,
       classId: r.class_id,

@@ -6,8 +6,8 @@ import time
 
 _WINDOW_SEC = 900
 _MAX_FAILS = 8
-_MAX_KEYS = 10_000          # bellek üst sınırı: en fazla bu kadar anahtar tutulur
-_SWEEP_INTERVAL = 60.0      # süresi dolmuş anahtarları periyodik temizleme aralığı
+_MAX_KEYS = 10_000
+_SWEEP_INTERVAL = 60.0
 _lock = threading.Lock()
 _fails: dict[str, list[float]] = {}
 _last_sweep = 0.0
@@ -52,7 +52,6 @@ def record_failure(key: str) -> None:
         lst = _prune(_fails.get(k, []), now)
         lst.append(now)
         _fails[k] = lst
-        # Sert üst sınır: aşılırsa en eski (son aktivitesi en geride olan) anahtarları at.
         if len(_fails) > _MAX_KEYS:
             overflow = len(_fails) - _MAX_KEYS
             for old_k in sorted(_fails, key=lambda kk: _fails[kk][-1])[:overflow]:

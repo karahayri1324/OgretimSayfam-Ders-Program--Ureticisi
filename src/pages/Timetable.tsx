@@ -116,16 +116,23 @@ export default function Timetable() {
     const fmt = pendingExport.format.toLowerCase();
     let needSelect = false;
     if (pendingExport.class) {
-      const target = entityList.find(
-        (e) => e.name.toLocaleLowerCase('tr') === pendingExport.class!.toLocaleLowerCase('tr'),
-      );
-      if (target && target.id !== selectedId) {
+      const want = pendingExport.class;
+      const norm = (s: string) => s.toLocaleLowerCase('tr').replace(/[\s./_-]/g, '');
+      const target =
+        entityList.find(
+          (e) => e.name.toLocaleLowerCase('tr') === want.toLocaleLowerCase('tr'),
+        ) ?? entityList.find((e) => norm(e.name) === norm(want));
+      if (!target) {
+        consumePendingExport();
+        toast.error(tr.timetable.exportFailed, `'${want}' sınıfı bulunamadı.`);
+        return;
+      }
+      if (target.id !== selectedId) {
         setSelectedId(target.id);
         needSelect = true;
       }
     }
     consumePendingExport();
-    // Seçim değiştiyse export'u selectedId güncellenince çalıştır (stale closure → yanlış sınıf bug'ı).
     if (needSelect) setExportAfterSelect(fmt);
     else runExport(fmt);
     // eslint-disable-next-line react-hooks/exhaustive-deps

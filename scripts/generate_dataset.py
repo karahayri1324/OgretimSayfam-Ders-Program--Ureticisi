@@ -4694,7 +4694,6 @@ def gen_schedule_update(n: int) -> list[dict]:
         if choice == 0:
             mins = random.choice([5, 10, 15, 5, 10, 20])
             if random.random() < 0.4:
-                # Kısaltma: extend_breaks negatif dakika kabul eder (GAP 15).
                 request = random.choice([
                     f"Teneffüsleri {mins} dakika kısalt",
                     f"Molaları {mins} dakika azalt",
@@ -5197,10 +5196,6 @@ def gen_cancel_generation(n: int) -> list[dict]:
     return out
 
 
-# ───────────────────────── Parity-gap kapatan generator'lar ─────────────────────────
-# Aşağıdaki üreticiler, executor'da var olan ama eğitimde temsil edilmeyen yetenekleri
-# ve yeni eklenen op'ları (update_class_year, set_days, set_hour_times, clear_day_hours)
-# kapsar. Böylece AI, kullanıcının manuel yapabildiği her işi öğrenir (capability parity).
 
 def gen_rename_entities(n: int) -> list[dict]:
     """update_teacher/subject/class/room → newName ile yeniden adlandırma (GAP 8)."""

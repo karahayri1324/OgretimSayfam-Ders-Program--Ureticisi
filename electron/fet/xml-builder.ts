@@ -9,6 +9,7 @@ const FET_VERSION = '6.8.5';
 const MIN_DAYS_WEIGHT = 95;
 const PER_DAY_BLOCKED_WEIGHT = 100;
 const SPLIT_GROUP_WEIGHT = 100;
+const HOME_ROOM_WEIGHT = 95;
 
 export type BuildResult = {
   xml: string;
@@ -16,6 +17,7 @@ export type BuildResult = {
   fetActivityIdsByActivity: Map<number, number[]>;
   durationByFetId: Map<number, number>;
   activityGroupIdById: Map<number, number>;
+  hours: Hour[];
 };
 
 export function buildFetXml(school: SchoolBundle): BuildResult {
@@ -27,6 +29,7 @@ export function buildFetXml(school: SchoolBundle): BuildResult {
   appendMinDaysBetweenActivities(timeNodes, ctx);
   appendShortDayBlockedSlots(timeNodes, ctx);
   appendSplitGroupConstraints(timeNodes, ctx);
+  appendHomeRoomConstraints(spaceNodes, ctx, school);
 
   const doc = create({ version: '1.0', encoding: 'UTF-8' });
   const root = doc.ele('fet', { version: FET_VERSION });
@@ -53,6 +56,7 @@ export function buildFetXml(school: SchoolBundle): BuildResult {
     fetActivityIdsByActivity: ctx.fetActivityIdsByActivity,
     durationByFetId: ctx.durationByFetId,
     activityGroupIdById: ctx.activityGroupIdById,
+    hours: ctx.hours,
   };
 }
 
@@ -192,6 +196,7 @@ function buildContext(school: SchoolBundle): BuilderContext {
     fetActivityIdsByActivity,
     durationByFetId,
     studentsNameByActivity,
+    fixedTimeCursorByActivity: new Map<number, number>(),
     skipped: [],
   };
 }
@@ -424,6 +429,37 @@ function appendShortDayBlockedSlots(
       Comments: 'Per-day kısa gün boş saatleri (auto)',
     },
   });
+}
+
+function appendHomeRoomConstraints(
+  spaceNodes: ConstraintNode[],
+  _ctx: BuilderContext,
+  school: SchoolBundle,
+): void {
+  const roomById = new Map(school.rooms.map((r) => [r.id, r.name]));
+  const explicit = new Set<string>();
+  for (const c of school.constraints) {
+    if (c.type !== 'CLASS_HOME_ROOM') continue;
+    const cl = (c.params as { class?: unknown }).class;
+    if (typeof cl === 'string') explicit.add(cl.trim().toLocaleLowerCase('tr'));
+  }
+  for (const cls of school.classes) {
+    if (cls.homeRoomId == null) continue;
+    if (explicit.has(cls.name.trim().toLocaleLowerCase('tr'))) continue;
+    const roomName = roomById.get(cls.homeRoomId);
+    if (!roomName) continue;
+    spaceNodes.push({
+      section: 'space',
+      tag: 'ConstraintStudentsSetHomeRoom',
+      body: {
+        Weight_Percentage: HOME_ROOM_WEIGHT,
+        Students: cls.name,
+        Room: roomName,
+        Active: true,
+        Comments: 'Ana derslik (auto)',
+      },
+    });
+  }
 }
 
 function appendSplitGroupConstraints(

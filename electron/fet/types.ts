@@ -87,6 +87,7 @@ export type BuilderContext = {
   fetActivityIdsByActivity: Map<number, number[]>;
   durationByFetId: Map<number, number>;
   studentsNameByActivity: Map<number, string>;
+  fixedTimeCursorByActivity: Map<number, number>;
   skipped: SkippedConstraint[];
 };
 

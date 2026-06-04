@@ -108,9 +108,10 @@ export const useClassesStore = create<State>((set, get) => ({
   },
 
   removeYear: async (id) => {
-    const res = await window.api.classes.delete(id);
+    const res = await window.api.classes.delete(id, { kind: 'year' });
     if (res.ok) {
-      set({ years: get().years.filter((y) => y.id !== id), lastError: null });
+      set({ lastError: null });
+      await get().load();
       return true;
     }
     set({ lastError: ipcErrMessage(res) });

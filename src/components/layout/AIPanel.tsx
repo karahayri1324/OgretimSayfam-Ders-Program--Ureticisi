@@ -164,6 +164,7 @@ export default function AIPanel() {
   const consumePendingPrompt = useAIChatStore((s) => s.consumePendingPrompt);
   const panelOpenSignal = useAIChatStore((s) => s.panelOpenSignal);
   const { addConstraint } = useConstraintsStore();
+  const loadConstraints = useConstraintsStore((s) => s.load);
   const loadTeachers = useTeachersStore((s) => s.load);
   const loadSubjects = useSubjectsStore((s) => s.load);
   const loadClasses = useClassesStore((s) => s.load);
@@ -176,7 +177,6 @@ export default function AIPanel() {
   const toastInfo = useToastStore((s) => s.info);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Onay uygulanırken aynı mesajın tekrar tetiklenmesini engelle (çift tık → çift mutation).
   const applyingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -226,21 +226,17 @@ export default function AIPanel() {
     }
   }
 
-  async function reloadAffectedStores(actions: DataMutationAction[]): Promise<void> {
-    const ops = new Set(actions.map((a) => a.op));
-    const promises: Array<Promise<unknown>> = [];
-    if ([...ops].some((o) => o.includes('teacher'))) promises.push(loadTeachers());
-    if ([...ops].some((o) => o.includes('subject'))) promises.push(loadSubjects());
-    if ([...ops].some((o) => o.includes('class'))) promises.push(loadClasses());
-    if ([...ops].some((o) => o.includes('room'))) promises.push(loadRooms());
-    if ([...ops].some((o) => o.includes('activity') || o.includes('split'))) promises.push(loadActivities());
-    if ([...ops].some((o) => o.includes('day') || o.includes('hour'))) {
-      promises.push(loadSchedule());
-    }
-    if ([...ops].some((o) => o.includes('setting'))) {
-      promises.push(loadSettings());
-    }
-    await Promise.all(promises);
+  async function reloadAffectedStores(_actions: DataMutationAction[]): Promise<void> {
+    await Promise.all([
+      loadTeachers(),
+      loadSubjects(),
+      loadClasses(),
+      loadRooms(),
+      loadActivities(),
+      loadSchedule(),
+      loadSettings(),
+      loadConstraints(),
+    ]);
   }
 
   async function doSend(raw: string): Promise<void> {
@@ -389,7 +385,6 @@ export default function AIPanel() {
           }
           const data = res.data as DataMutationApplyResult;
           await reloadAffectedStores(otherActions);
-          // Mutation atomik: herhangi bir hata → tümü geri alınır. O yüzden 'rejected' işaretle, başarı gösterme.
           if (data.rolledBack || data.errors.length > 0) {
             toastError(
               'Hiçbir işlem uygulanmadı (geri alındı)',
