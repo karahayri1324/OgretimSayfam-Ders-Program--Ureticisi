@@ -1,7 +1,14 @@
 import { daysRepo } from '../db/repositories/days.js';
 import { hoursRepo } from '../db/repositories/hours.js';
 import { dayHoursRepo } from '../db/repositories/day_hours.js';
+import { timetablesRepo } from '../db/repositories/timetables.js';
 import { log } from '../utils/logger.js';
+
+/** "HH:MM" → dakika; geçersizse null. */
+function parseHM(t: string | null | undefined): number | null {
+  const m = t ? /^(\d{1,2}):(\d{2})$/.exec(t.trim()) : null;
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
 import type { AIScheduleUpdateResponse, Hour } from '../../src/lib/types.js';
 
 
@@ -87,10 +94,6 @@ function extendBreaks(params: Record<string, unknown>): ScheduleUpdateApplyResul
   // - kısaltmada (negatif) teneffüs eksiye düşüp ardışık dersler ÜST ÜSTE binmemeli veya
   //   saatler 00:00'ın altına düşüp sessizce clamp'lenmemeli (#6 — eskiden yalnız minutes>0
   //   denetleniyordu, negatif tüm guard'ları atlıyordu).
-  const parseHM = (t: string | null): number | null => {
-    const m = t ? /^(\d{1,2}):(\d{2})$/.exec(t.trim()) : null;
-    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
-  };
   const shiftInvalid = (
     rows: { startTime: string | null; endTime: string | null }[],
   ): boolean => {
@@ -202,6 +205,7 @@ function addHoursToDay(params: Record<string, unknown>): ScheduleUpdateApplyResu
 
   const last = baseline[baseline.length - 1];
   let nextStart: string | null = last?.endTime ?? null;
+  let prevEnd: number | null = parseHM(last?.endTime ?? null);
   // Yeni orderIndex'i mevcutların MAX'ından devam ettir; baseline.length kullanmak süreksiz
   // (gap'li) orderIndex'lerde UNIQUE(day_id, hour_order_index) çakışmasına yol açıyordu (#20).
   let maxOrder = baseline.reduce((m, r) => Math.max(m, r.orderIndex), -1);
@@ -209,6 +213,23 @@ function addHoursToDay(params: Record<string, unknown>): ScheduleUpdateApplyResu
     const order = ++maxOrder;
     const start = nextStart;
     const end = start ? shiftClock(start, 40) : null;
+    // shiftClock gün sonunu (23:59) AŞMADAN sessizce clamp'liyor; günün son dersi geç bitiyorsa
+    // (örn. 23:30) eklenen ders start≈end (sıfır/negatif süre) veya öncekiyle çakışır → DB'ye
+    // geçersiz saat yazılır, FET'e bozuk Activity gider, kullanıcı uyarı görmezdi (#11).
+    const sMin = parseHM(start);
+    const eMin = parseHM(end);
+    if (sMin != null && eMin != null) {
+      if (eMin <= sMin) {
+        throw new Error(
+          `Eklenen dersler gün sonuna (23:59) sığmıyor. Önce teneffüsleri kısaltın ` +
+            `veya günün başlangıç saatini öne alın.`,
+        );
+      }
+      if (prevEnd != null && sMin < prevEnd) {
+        throw new Error('Eklenen ders bir önceki dersle çakışıyor (gün sonuna sığmıyor).');
+      }
+      prevEnd = eMin;
+    }
     baseline.push({
       orderIndex: order,
       name: `${order + 1}. Ders`,
@@ -260,11 +281,34 @@ function setHoursPerDay(params: Record<string, unknown>): ScheduleUpdateApplyRes
     });
   }
   hoursRepo.replaceAll(next);
-  dayHoursRepo.clearAll();
+
+  // Güne-özel saat (day_hours) override'ları global saat şemasına dayandığından, global sayı
+  // değişince geçersiz kalır → temizlenir. Eskiden bu SESSİZCE yapılıyordu; kullanıcı 'Cuma'ya
+  // ekstra ders'ini kaybettiğini fark etmiyordu (#18). Kaç gün etkilendiğini mesajda bildir.
+  const affectedDays = new Set(dayHoursRepo.list().map((r) => r.dayId)).size;
+  if (affectedDays > 0) dayHoursRepo.clearAll();
+
+  // Üretilmiş bir programdaki slot'lar konumsal hour_index taşır; saat sayısı AZALTILDIYSA
+  // index'i n'i aşan slot'lar saat-başlığısız (yetim) kalır → ekran/export tutarsızlığı (#19).
+  // Re-üretim gerektiğini kullanıcıya açıkça söyle (slot'lara dokunmuyoruz; FET tekrar üretmeli).
+  let staleWarning = '';
+  try {
+    const latest = timetablesRepo.latest();
+    const orphan = latest?.slots.some((s) => s.hourIndex >= n) ?? false;
+    if (orphan) {
+      staleWarning =
+        ' Mevcut üretilmiş program artık bu saat sayısıyla uyumsuz — lütfen programı yeniden üretin.';
+    }
+  } catch {
+    /* timetable okunamadıysa uyarı atlanır */
+  }
+
+  const overrideNote =
+    affectedDays > 0 ? ` (${affectedDays} güne özel saat ayarı sıfırlandı)` : '';
   return {
     ok: true,
     action: 'set_hours_per_day',
-    message: `Günlük ders saati sayısı ${n} olarak ayarlandı.`,
+    message: `Günlük ders saati sayısı ${n} olarak ayarlandı${overrideNote}.${staleWarning}`,
     data: snapshot(),
   };
 }

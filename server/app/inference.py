@@ -161,4 +161,11 @@ async def run_inference(payload: AIRequest) -> Any:
     except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
         raise UpstreamError("Model yanıtı çözümlenemedi.", status=502) from exc
 
-    return coerce_json(content)
+    result = coerce_json(content)
+    # coerce_json çözemezse ham string'i geri veriyordu → endpoint HTTP-200 + çöp gövde
+    # döndürür, client AI_INVALID_RESPONSE gösterir AMA kota zaten tüketildi ve iade EDİLMEZDİ
+    # (#17, örn. max_tokens ile yarıda kesilmiş JSON / düz metin). Yapısal olmayan çıktıyı
+    # upstream hatası say → kota iadesi (ai.py) + temiz hata. Sözleşme her zaman dict/list bekler.
+    if not isinstance(result, (dict, list)):
+        raise UpstreamError("Model geçerli JSON üretmedi.", status=502)
+    return result

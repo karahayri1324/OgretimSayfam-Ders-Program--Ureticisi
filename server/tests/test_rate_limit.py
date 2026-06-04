@@ -92,7 +92,7 @@ def test_try_consume_is_atomic_under_concurrency(client):
     lock = threading.Lock()
 
     def worker() -> None:
-        allowed, _used, _limit = rate_limit.try_consume(user)
+        allowed, _used, _limit, _rid = rate_limit.try_consume(user)
         with lock:
             results.append(allowed)
 

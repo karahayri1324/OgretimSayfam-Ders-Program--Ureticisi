@@ -157,11 +157,14 @@ export const activitiesRepo = {
     trx();
   },
 
-  setSplitGroup(activityIds: number[]): number | null {
+  setSplitGroup(rawActivityIds: number[]): number | null {
     const db = getDb();
     const schoolId = schoolsRepo.getActiveId();
 
-    if (!Array.isArray(activityIds) || activityIds.length === 0) return null;
+    if (!Array.isArray(rawActivityIds) || rawActivityIds.length === 0) return null;
+    // Duplike id'leri ele: çağıran (split/merge) iki grubu aynı aktiviteye çözmüşse, dedup
+    // edilmeden 'çok-üyeli' sanılıp gerçekte 1-üyeli yetim grup kuruluyordu → bozuk FET (#1/#14).
+    const activityIds = [...new Set(rawActivityIds)];
 
     const trx = db.transaction(() => {
       if (activityIds.length === 1) {

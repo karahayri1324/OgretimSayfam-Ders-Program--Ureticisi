@@ -210,7 +210,7 @@ Kullanıcı veri ekleme/silme/güncelleme isterse. Tek mesajdan çoklu ATOMİK i
 ## Aktivite (ders dağıtımı)
 - add_activity        {class, subject, teacher?, weeklyHours, blockDuration?}
 - update_activity     {class, subject, weeklyHours?, blockDuration?, teacher?}
-- delete_activity     {class, subject}
+- delete_activity     {class, subject, teacher?}   # aynı sınıf×branş birden çok öğretmende ise 'teacher' ile hangisini sileceğini belirt
 - add_split_activity  {class, weeklyHours, groups:[{subject, teacher?, room?}, ...]}  # aynı saat, farklı oda/grup
 - merge_activities    {classes:[...], subject, weeklyHours, teacher?, room?}          # birden çok sınıf tek ders
 

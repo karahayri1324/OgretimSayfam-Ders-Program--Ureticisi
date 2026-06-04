@@ -3,6 +3,7 @@ import { aiClient, AIError, type ConversationHistoryEntry } from '../ai/client.j
 import { buildAIContext } from '../ai/context-builder.js';
 import { aiMessagesRepo } from '../db/repositories/ai_messages.js';
 import { applyMutations } from '../ai/mutation-executor.js';
+import { isGenerationActive } from './generate.js';
 import {
   applyScheduleUpdate,
   type ScheduleUpdateApplyResult,
@@ -24,15 +25,21 @@ import type {
 
 const HISTORY_LIMIT = 10;
 
+// Sohbet temizlendiğinde artan epoch; uçuştaki bir ai:parse await'i temizlemeden SONRA dönerse
+// mesajları YENİDEN boş DB'ye yazmasın diye kullanılır (#15 — UI boş ama DB'de hayalet geçmiş).
+let clearEpoch = 0;
+
 function buildHistory(): ConversationHistoryEntry[] {
   const all = aiMessagesRepo.list();
-  const slice = all.slice(-HISTORY_LIMIT);
-  const out: ConversationHistoryEntry[] = [];
-  for (const m of slice) {
-    if (m.role === 'user') out.push({ role: 'user', text: m.text });
-    else if (m.role === 'assistant') out.push({ role: 'assistant', text: m.text });
+  // ÖNCE user/assistant'a filtrele, SONRA son N'i al. Tersi (önce slice) tool-call ('system')
+  // satırları pencereyi doldurunca gerçek user/assistant bağlamını eziyordu → çok-turlu referans
+  // çözümleme (anafora) tool-yoğun oturumda sessizce başarısız oluyordu (#4-history).
+  const convo: ConversationHistoryEntry[] = [];
+  for (const m of all) {
+    if (m.role === 'user') convo.push({ role: 'user', text: m.text });
+    else if (m.role === 'assistant') convo.push({ role: 'assistant', text: m.text });
   }
-  return out;
+  return convo.slice(-HISTORY_LIMIT);
 }
 
 const ApplyMutationsSchema = z.array(DataMutationActionSchema).min(1);
@@ -64,12 +71,20 @@ export function registerAiHandlers(): void {
       };
     }
 
+    const epochAtStart = clearEpoch;
     try {
       const { response, toolCalls } = await aiClient.parseWithTools({
         text,
         context,
         history: conversationHistory,
       });
+
+      // Çağrı uçuştayken kullanıcı 'Sohbeti temizle' dediyse (clearEpoch arttı), bu mesajları
+      // YENİDEN yazma — yoksa UI boş kalıp DB'de hayalet geçmiş birikiyordu (#15). Yanıtı yine
+      // döndür (kullanıcı bu turun cevabını görsün) ama kalıcılaştırma.
+      if (clearEpoch !== epochAtStart) {
+        return { ok: true, data: response };
+      }
 
       // Mesajları yalnızca BAŞARILI çağrıdan sonra kalıcılaştır; aksi halde başarısız çağrı
       // DB'de yanıtsız bir 'user' mesajı bırakıp sonraki turda sarkık geçmiş üretiyordu (#21).
@@ -139,6 +154,7 @@ export function registerAiHandlers(): void {
 
   ipcMain.handle('ai:clearHistory', async (): Promise<Result<null>> => {
     try {
+      clearEpoch++; // uçuştaki ai:parse'ın temizlenen geçmişi geri yazmasını engelle (#15)
       aiMessagesRepo.clear();
       return { ok: true, data: null };
     } catch (e) {
@@ -154,6 +170,17 @@ export function registerAiHandlers(): void {
   ipcMain.handle(
     'ai:applyScheduleUpdate',
     async (_evt, raw: unknown): Promise<Result<ScheduleUpdateApplyResult>> => {
+      // Canlı üretim sürerken gün/saat değişikliği, üretim biterken sonucun bayatlamış
+      // saat indekslerine yazılmasına yol açar (#5 ailesi). Üretim bitene dek reddet.
+      if (isGenerationActive()) {
+        return {
+          ok: false,
+          error: {
+            code: 'BUSY',
+            message: 'Program üretimi sürerken plan değiştirilemez. Üretim bitince tekrar deneyin.',
+          },
+        };
+      }
       const parsed = ScheduleUpdateResponseSchema.safeParse(raw);
       if (!parsed.success) {
         const issues = parsed.error.issues
@@ -188,6 +215,19 @@ export function registerAiHandlers(): void {
   ipcMain.handle(
     'ai:applyMutations',
     async (_evt, raw: unknown): Promise<Result<DataMutationApplyResult>> => {
+      // Canlı üretim sürerken aktivite/sınıf/öğretmen silme/ekleme, üretim biterken sonucun
+      // artık var olmayan id'lere FK INSERT yapıp TÜM üretimi çökertmesine yol açıyordu (#5).
+      // Üretim bitene dek mutasyonu reddet (veri kaybını önler).
+      if (isGenerationActive()) {
+        return {
+          ok: false,
+          error: {
+            code: 'BUSY',
+            message:
+              'Program üretimi sürerken veri değiştirilemez. Üretim bitince (veya iptal edince) tekrar deneyin.',
+          },
+        };
+      }
       const parsed = ApplyMutationsSchema.safeParse(raw);
       if (!parsed.success) {
         const issues = parsed.error.issues

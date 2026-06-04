@@ -61,6 +61,82 @@ function requireString(params: Record<string, unknown>, key: string): string {
   return v.trim();
 }
 
+// Ham AI gün adını ('pazartesi','Carsamba','CUMA') KANONIK days tablosu adına ('Pazartesi')
+// çevirir. FET handler'ları (xml-builder dayByName) günü TAM eşler; ham string FET-build'de
+// sessizce unknownDays'e düşüp kısıtı KAYBEDİYORDU (#12). Bulunamazsa null.
+function canonicalDayName(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  const days = daysRepo.list();
+  const exact = days.find((d) => d.name === raw.trim());
+  if (exact) return exact.name;
+  const fuzzy = days.find((d) => deburr(d.name) === deburr(raw));
+  return fuzzy ? fuzzy.name : null;
+}
+
+// Bir entity ad alanını ('teacher'/'class'/'subject'/'room') KANONIK DB adına çözer ve var
+// olduğunu DOĞRULAR. FET, kısıt referanslarını ada-göre tam eşler; ayrıca constraint-mapper.ts
+// referans-doğrulama katmanı ölü kod olduğundan add_constraint hayalet entity'leri sessizce
+// DB'ye yazıp AI'a gerçek kısıt gibi sunuyordu (FET'te skip → AI/DB ↔ FET kalıcı sapma, #9).
+function resolveEntityField(
+  p: Record<string, unknown>,
+  key: string,
+  list: { id: number; name: string }[],
+  label: string,
+): void {
+  const v = p[key];
+  if (typeof v !== 'string' || !v.trim()) return;
+  const hit = findByName(v, list);
+  if (!hit) throw new Error(`${label} bulunamadı: '${v}'`);
+  p[key] = hit.name;
+}
+
+// add_constraint/add_activity_constraint param'larını DB'ye yazmadan ÖNCE normalleştir:
+// gün adlarını kanonikleştir, entity referanslarını doğrula+kanonikleştir. Böylece kısıt ya
+// gerçekten uygulanır ya da net hatayla reddedilir — sessiz kayıp olmaz.
+function normalizeConstraintParams(raw: Record<string, unknown>): Record<string, unknown> {
+  const p: Record<string, unknown> = { ...raw };
+
+  if ('day' in p && typeof p.day === 'string') {
+    const c = canonicalDayName(p.day);
+    if (!c) throw new Error(`Gün bulunamadı: '${String(p.day)}'`);
+    p.day = c;
+  }
+  if (Array.isArray(p.days)) {
+    p.days = p.days.map((d) => {
+      const c = canonicalDayName(d);
+      if (!c) throw new Error(`Gün bulunamadı: '${String(d)}'`);
+      return c;
+    });
+  }
+  if (Array.isArray(p.slots)) {
+    p.slots = p.slots.map((s) => {
+      if (s && typeof s === 'object' && 'day' in (s as Record<string, unknown>)) {
+        const so = s as Record<string, unknown>;
+        const c = canonicalDayName(so.day);
+        if (!c) throw new Error(`Gün bulunamadı: '${String(so.day)}'`);
+        return { ...so, day: c };
+      }
+      return s;
+    });
+  }
+
+  resolveEntityField(p, 'teacher', teachersRepo.list(), 'Öğretmen');
+  resolveEntityField(p, 'class', classesRepo.list(), 'Sınıf');
+  resolveEntityField(p, 'subject', subjectsRepo.list(), 'Branş');
+  resolveEntityField(p, 'room', roomsRepo.list(), 'Derslik');
+  if (Array.isArray(p.rooms)) {
+    const rooms = roomsRepo.list();
+    p.rooms = p.rooms.map((r) => {
+      if (typeof r !== 'string' || !r.trim()) return r;
+      const hit = findByName(r, rooms);
+      if (!hit) throw new Error(`Derslik bulunamadı: '${r}'`);
+      return hit.name;
+    });
+  }
+
+  return p;
+}
+
 function requireConstraintType(params: Record<string, unknown>): ConstraintType {
   const type = requireString(params, 'type');
   const parsed = ConstraintTypeEnum.safeParse(type);
@@ -74,6 +150,20 @@ function optString(params: Record<string, unknown>, key: string): string | undef
   const v = params[key];
   if (typeof v !== 'string' || !v.trim()) return undefined;
   return v.trim();
+}
+
+// Fine-tuned model bool'u string ('false'/'true'/'0'/'1') olarak üretebilir; params z.record(
+// z.any()) olduğundan zorlanmaz. JS'te Boolean('false')===true, Boolean('0')===true → 'pasifleştir'
+// isteği kısıtı AKTİF bırakırdı (#13). Yaygın string/sayı temsillerini doğru çöz.
+function coerceBool(v: unknown, fallback: boolean): boolean {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v !== 0;
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    if (['true', '1', 'yes', 'evet', 'aktif', 'on'].includes(s)) return true;
+    if (['false', '0', 'no', 'hayir', 'hayır', 'pasif', 'off'].includes(s)) return false;
+  }
+  return fallback;
 }
 
 function optInt(params: Record<string, unknown>, key: string): number | undefined {
@@ -705,7 +795,7 @@ const handlers: Record<DataMutationOp, Handler> = {
     if (!Number.isFinite(id) || id <= 0) {
       throw new Error('constraintId geçerli değil.');
     }
-    const active = Boolean(params.active);
+    const active = coerceBool(params.active, true);
     const list = constraintsRepo.list();
     const c = list.find((x) => x.id === id);
     if (!c) throw new Error(`Kısıtlama bulunamadı (id=${id}).`);
@@ -719,10 +809,13 @@ const handlers: Record<DataMutationOp, Handler> = {
     if (!Number.isFinite(weight) || weight < 0 || weight > 100) {
       throw new Error('weight 0-100 arası olmalı.');
     }
-    const constraintParams =
+    const rawParams =
       typeof params.params === 'object' && params.params !== null
         ? (params.params as Record<string, unknown>)
         : {};
+    // Gün kanonikleştir + entity referanslarını doğrula (#9, #12) — yoksa kısıt sessizce
+    // FET'te düşer ve AI/DB durumu gerçeklikle sapardı.
+    const constraintParams = normalizeConstraintParams(rawParams);
     const notes = typeof params.notes === 'string' ? params.notes : null;
     const id = constraintsRepo.add({
       type,
@@ -757,10 +850,12 @@ const handlers: Record<DataMutationOp, Handler> = {
     if (!Number.isFinite(weight) || weight < 0 || weight > 100) {
       throw new Error('weight 0-100 arası olmalı.');
     }
-    const innerParams =
+    const rawInner =
       typeof params.params === 'object' && params.params !== null
         ? (params.params as Record<string, unknown>)
         : {};
+    // innerParams da (slots[].day, day, room vb.) doğrulanmadan yazılıyordu (#9 kardeşi).
+    const innerParams = normalizeConstraintParams(rawInner);
 
     const activities = activitiesRepo.list();
     const classes = classesRepo.list();
@@ -894,6 +989,16 @@ const handlers: Record<DataMutationOp, Handler> = {
       const teacherPart = teacherName ? ` (${teacherName})` : '';
       const roomPart = roomName ? ` → ${roomName}` : '';
       groupSummaries.push(`${subjectName}${teacherPart}${roomPart}`);
+    }
+
+    // İki grup aynı (sınıf+ders+öğretmen) kombinasyonuna çözülürse upsert ON CONFLICT ile
+    // tek satıra çöker, createdIds duplike id taşır → setSplitGroup 1-üyeli yetim grup kurar
+    // (split anlamsız, FET'te bozuk _g öğrenci kümesi). Net hatayla reddet (#1).
+    if (new Set(createdIds).size < 2) {
+      throw new Error(
+        `Split grupları aynı ders/öğretmen kombinasyonuna çözüldü; gruplar farklı branş ` +
+          `veya farklı öğretmen olmalı (verilen gruplar tek aktiviteye denk geliyor).`,
+      );
     }
 
     const groupId = activitiesRepo.setSplitGroup(createdIds);
@@ -1256,6 +1361,15 @@ const handlers: Record<DataMutationOp, Handler> = {
       }
     }
 
+    // Birden çok sınıf adı aynı sınıfa fuzzy-eşleşirse (örn. '9A' ve '9-A') aynı (sınıf+ders+
+    // öğretmen) upsert'e çöküp createdIds duplike olur → birleşik grup eksik üyeli kalır (#14).
+    if (new Set(createdIds).size < 2) {
+      throw new Error(
+        `Verilen sınıflar tek sınıfa çözüldü; birleştirme için en az 2 FARKLI sınıf gerekli ` +
+          `(adların birbirine karışmadığından emin olun).`,
+      );
+    }
+
     const groupId = activitiesRepo.setSplitGroup(createdIds);
     const teacherPart = teacherName ? ` (öğretmen: ${teacherName})` : '';
     const roomPart = roomName ? `, oda: ${roomName}` : '';
@@ -1339,6 +1453,17 @@ const handlers: Record<DataMutationOp, Handler> = {
 
     const dbActivityA = slotA.sourceActivityId ?? slotA.activityId;
     const dbActivityB = slotB.sourceActivityId ?? slotB.activityId;
+
+    // İki slot AYNI DB aktivitesine aitse (çok-saatli blok ya da aynı split üyesinin iki saati),
+    // aynı activityId için iki çelişkili ACTIVITY_FIXED_TIME üretilir; FET fixedTimeCursor'u
+    // alt-id↔hedef eşleşmesini GARANTİ ETMEZ → blok bozulur/yarım uygulanır (#3). Bu durumda
+    // saat-bazlı swap ACTIVITY_FIXED_TIME ile ifade edilemez; net hatayla reddet.
+    if (dbActivityA === dbActivityB) {
+      throw new Error(
+        `Bu iki slot aynı dersin (${slotA.subjectName}) parçası — aynı aktivitenin iki saatini ` +
+          `bu şekilde yer değiştiremezsiniz. Farklı dersler/sınıflar arasında swap yapın.`,
+      );
+    }
 
     for (const c of constraintsRepo.list()) {
       if (c.type !== 'ACTIVITY_FIXED_TIME') continue;

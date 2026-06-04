@@ -5,9 +5,26 @@ import { activitiesRepo } from '../db/repositories/activities.js';
 import { constraintsRepo } from '../db/repositories/constraints.js';
 import { daysRepo } from '../db/repositories/days.js';
 import { hoursRepo } from '../db/repositories/hours.js';
+import { dayHoursRepo } from '../db/repositories/day_hours.js';
 import { timetablesRepo } from '../db/repositories/timetables.js';
 import { roomsRepo } from '../db/repositories/rooms.js';
 import type { Day, TimetableSlot } from '../../src/lib/types.js';
+
+/** Günlük efektif ders saati = max(global, her-gün override uzunluğu) — FET'in slot kurduğu
+ *  maxHours ile (xml-builder.ts) ve AI context'iyle (context-builder.ts #10) AYNI. Yalnız
+ *  global hours.length kullanmak, day_hours override'lı günlerde AI'a yanlış slot sayısı
+ *  raporlayıp gerçek boş slot'ları/sabitleme aralığını kaçırtıyordu (critic kardeş risk). */
+function effectiveHoursPerDay(): number {
+  const global = hoursRepo.list().length;
+  const byDay = new Map<number, number>();
+  let maxDay = 0;
+  for (const r of dayHoursRepo.list()) {
+    const c = (byDay.get(r.dayId) ?? 0) + 1;
+    byDay.set(r.dayId, c);
+    if (c > maxDay) maxDay = c;
+  }
+  return Math.max(global, maxDay);
+}
 
 
 export type ToolArgs = Record<string, unknown>;
@@ -286,7 +303,7 @@ export const tools = {
     return {
       result: {
         daysCount: days.length,
-        hoursPerDay: hours.length,
+        hoursPerDay: effectiveHoursPerDay(),
         days,
         hours,
       },
@@ -315,8 +332,7 @@ export const tools = {
     const classes = classesRepo.list();
     const activities = activitiesRepo.list();
     const days = daysRepo.list();
-    const hours = hoursRepo.list();
-    const hoursPerDay = hours.length || 8;
+    const hoursPerDay = effectiveHoursPerDay() || 8;
     const slotsPerWeek = days.length * hoursPerDay;
 
     const issues: Array<{
@@ -441,7 +457,7 @@ export const tools = {
     }
 
     const days = daysRepo.list();
-    const hoursPerDay = hoursRepo.list().length || 8;
+    const hoursPerDay = effectiveHoursPerDay() || 8;
     const totalCapacity = days.length * hoursPerDay;
 
     const byDay = new Map<number, number>();
@@ -563,7 +579,7 @@ export const tools = {
     if (!klass) return { error: `Sınıf bulunamadı: '${className}'` };
 
     const days = daysRepo.list();
-    const hoursPerDay = hoursRepo.list().length || 8;
+    const hoursPerDay = effectiveHoursPerDay() || 8;
 
     const grid: Array<Array<{ subject: string; teacher: string; room: string | null } | null>> = [];
     for (let d = 0; d < days.length; d++) {
@@ -773,7 +789,7 @@ export const tools = {
       return { result: { generated: false, message: 'Henüz program üretilmedi.' } };
     }
     const days = daysRepo.list();
-    const hoursPerDay = hoursRepo.list().length || 8;
+    const hoursPerDay = effectiveHoursPerDay() || 8;
 
     let entity: string;
     let entityType: 'class' | 'teacher' | 'room';

@@ -11,7 +11,9 @@ type State = {
   result: TimetableResult | null;
   unsubscribe: null | (() => void);
   loadLatest: () => Promise<void>;
-  run: (timeLimitSec: number) => Promise<void>;
+  /** Üretimi başlatır. Zaten bir üretim sürüyorsa BAŞLATMAZ ve `false` döner (çağıran sahte
+   *  "başlatıldı" bildirimi göstermesin diye, #16). Başlatıldıysa `true`. */
+  run: (timeLimitSec: number) => Promise<boolean>;
   cancel: () => Promise<void>;
   reset: () => void;
 };
@@ -35,7 +37,7 @@ export const useGenerateStore = create<State>((set, get) => ({
     // Üretim sürerken ikinci bir run() (örn. AI run_solver) gelirse, mevcut canlı listener
     // sökülür ve backend BUSY döner → ilk üretimin 'done' event'ini kimse dinlemez, tamamlanan
     // program UI'a hiç yansımaz, sahte 'error' gösterilirdi (#10). Zaten çalışıyorsa çık.
-    if (get().status === 'running') return;
+    if (get().status === 'running') return false;
     get().unsubscribe?.();
     set({
       status: 'running',
@@ -78,7 +80,7 @@ export const useGenerateStore = create<State>((set, get) => ({
       if (get().status === 'cancelled') {
         get().unsubscribe?.();
         set({ unsubscribe: null });
-        return;
+        return true;
       }
       set({
         status: 'error',
@@ -87,6 +89,7 @@ export const useGenerateStore = create<State>((set, get) => ({
       get().unsubscribe?.();
       set({ unsubscribe: null });
     }
+    return true;
   },
 
   cancel: async () => {

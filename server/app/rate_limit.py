@@ -65,13 +65,17 @@ def record(user_id: int) -> None:
     _cleanup_old(now)
 
 
-def try_consume(user: sqlite3.Row) -> tuple[bool, int, int]:
-    """Atomik kota kontrol+kayıt. (izin_verildi, kullanım, limit) döndürür.
+def try_consume(user: sqlite3.Row) -> tuple[bool, int, int, int | None]:
+    """Atomik kota kontrol+kayıt. (izin_verildi, kullanım, limit, eklenen_rowid) döndürür.
 
     check() + record()'u AYRI çağırmak TOCTOU yaratıyordu: eşzamanlı istekler hepsi
     used<limit görüp geçiyor, sonra hepsi kaydediliyordu (kota baypası). Burada sayma ve
     (izinliyse) ekleme TEK kilitli kritik bölgede yapılır, böylece istekler serileşir.
     limit <= 0 → sınırsız.
+
+    Eklenen satırın rowid'i 4. eleman olarak döner; refund() bu KESİN satırı silebilsin
+    diye (eskiden refund 'en yeni satır'ı siliyordu → aynı kullanıcının eşzamanlı BAŞARILI
+    isteğinin satırını yanlışlıkla silip kota muhasebesini bozuyordu, #8). İzin verilmezse None.
     """
     limit = effective_limit(user)
     user_id = int(user["id"])
@@ -93,36 +97,38 @@ def try_consume(user: sqlite3.Row) -> tuple[bool, int, int]:
             used = int(row["c"]) if row else 0
             if limit > 0 and used >= limit:
                 conn.commit()
-                return False, used, limit
-            conn.execute(
+                return False, used, limit, None
+            cur = conn.execute(
                 "INSERT INTO request_log (user_id, created_at) VALUES (?, ?)",
                 (user_id, _iso(now)),
             )
+            rid = int(cur.lastrowid) if cur.lastrowid is not None else None
             conn.execute(
                 "DELETE FROM request_log WHERE created_at < ?",
                 (_iso(now - _CLEANUP_OLDER_THAN),),
             )
             conn.commit()
-            return True, used + 1, limit
+            return True, used + 1, limit, rid
         except Exception:
             conn.rollback()
             raise
 
 
-def refund(user_id: int) -> None:
-    """Upstream çağrısı başarısızsa try_consume ile tüketilen son kota birimini iade et (#5).
+def refund(user_id: int, rowid: int | None) -> None:
+    """Upstream çağrısı başarısızsa try_consume'un EKLEDİĞİ KESİN satırı iade et (#5, #8).
 
-    Kullanıcı, vLLM erişilemez/timeout/5xx olduğunda boşa saatlik hak kaybetmesin.
+    Kullanıcı, vLLM erişilemez/timeout/5xx olduğunda boşa saatlik hak kaybetmesin. user_id
+    guard'ı, başka kullanıcının satırının yanlışlıkla silinmesini engeller (savunma derinliği).
     """
+    if rowid is None:
+        return
     with db._lock:  # noqa: SLF001 — try_consume ile aynı kritik-bölge disiplini
         conn = db.get_conn()
-        row = conn.execute(
-            "SELECT rowid AS rid FROM request_log WHERE user_id = ? ORDER BY rowid DESC LIMIT 1",
-            (user_id,),
-        ).fetchone()
-        if row:
-            conn.execute("DELETE FROM request_log WHERE rowid = ?", (row["rid"],))
-            conn.commit()
+        conn.execute(
+            "DELETE FROM request_log WHERE rowid = ? AND user_id = ?",
+            (rowid, user_id),
+        )
+        conn.commit()
 
 
 def reset_usage(user_id: int) -> None:

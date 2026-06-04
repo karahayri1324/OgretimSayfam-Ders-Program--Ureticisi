@@ -259,3 +259,41 @@ describe('Round-5 regresyon', () => {
     expect(countTag(xml, 'ConstraintTwoActivitiesConsecutive')).toBe(2);
   });
 });
+
+describe('Round-6 — FET XML guvenligi', () => {
+  // XML 1.0 metin-yasak kontrol karakterleri: 0x00-08, 0x0B, 0x0C, 0x0E-1F.
+  const CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/;
+
+  it('ad/notlardaki XML-1.0-yasak kontrol karakterleri strip edilir; XML well-formed kalir (#6)', () => {
+    const b = makeBundle();
+    // Guvenilmez serbest metin: ic kontrol karakteri + dusey-tab; eskiden ham yazilip fet-cl'in
+    // XML parser'ini cokertiyordu.
+    b.teachers[0]!.name = 'Ahmet\u0001\u000BYilmaz';
+    b.rooms[0]!.name = 'Lab\u0001';
+    b.subjects[0]!.notes = 'not\u0002satiri';
+    const { xml } = buildFetXml(b);
+    expect(CONTROL_RE.test(xml)).toBe(false);
+    expect(xml).toContain('AhmetYilmaz');
+    expect(xml).toContain('Lab</Name>');
+  });
+
+  it('turetilmis ogrenci-kumesi adi baska sinifin adiyla cakisirsa net hata firlatir (#7)', () => {
+    const b = makeBundle();
+    b.classes = [
+      { id: 1, yearId: 1, name: '5A', studentCount: 30, homeRoomId: null },
+      { id: 2, yearId: 1, name: '5A_g1', studentCount: 20, homeRoomId: null },
+    ];
+    // 5A'yi 2 gruba bol -> sentetik altgrup '5A_g1' uretilir; gercek '5A_g1' sinifinin Group'u
+    // ile cakisir -> FET ayni isimli iki Students-set gorur. Uretimden ONCE net hatayla yakala.
+    b.activities = [
+      { id: 1, classId: 1, subjectId: 1, teacherId: 1, weeklyHours: 2, blockDuration: 1, notes: null, splitGroupId: 10 },
+      { id: 2, classId: 1, subjectId: 1, teacherId: 1, weeklyHours: 2, blockDuration: 1, notes: null, splitGroupId: 10 },
+      { id: 3, classId: 2, subjectId: 1, teacherId: 1, weeklyHours: 2, blockDuration: 1, notes: null },
+    ];
+    expect(() => buildFetXml(b)).toThrow(/çakış/i);
+  });
+
+  it('normal sinif adlari cakisma denetimini tetiklemez (false-positive yok)', () => {
+    expect(() => buildFetXml(makeBundle())).not.toThrow();
+  });
+});

@@ -30,7 +30,9 @@ async def respond(
             },
         )
 
-    allowed, used, limit = await run_in_threadpool(rate_limit.try_consume, user)
+    allowed, used, limit, consumed_rowid = await run_in_threadpool(
+        rate_limit.try_consume, user
+    )
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -48,9 +50,10 @@ async def respond(
     try:
         return await run_inference(body)
     except UpstreamError as exc:
-        # Upstream başarısız (vLLM down/timeout/5xx) → tüketilen kota birimini iade et;
-        # kullanıcı bizim tarafımızdaki arızadan ötürü hak kaybetmesin (#5).
-        await run_in_threadpool(rate_limit.refund, user_id)
+        # Upstream başarısız (vLLM down/timeout/5xx) VEYA model geçerli JSON üretmedi (#17) →
+        # tüketilen KESİN kota satırını iade et; kullanıcı bizim tarafımızdaki arızadan ötürü
+        # hak kaybetmesin (#5, #8 — eşzamanlı istekte yanlış satır silinmesin diye rowid ile).
+        await run_in_threadpool(rate_limit.refund, user_id, consumed_rowid)
         raise HTTPException(
             status_code=exc.status,
             detail={"error": "upstream", "message": str(exc)},

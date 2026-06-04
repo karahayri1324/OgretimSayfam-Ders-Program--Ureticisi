@@ -459,12 +459,24 @@ export default function AIPanel() {
       const tl = r.timeLimitSec ?? 120;
       try {
         navigate('/generate');
+        // Toast'ı GERÇEK başlatmaya bağla: run() zaten bir üretim sürüyorsa başlatmadan false
+        // döner; eskiden koşulsuz 'Üretim başlatıldı' gösterip kullanıcıyı yanıltıyordu (#16).
         setTimeout(() => {
-          runSolver(tl).catch((e) => {
-            toastError('Üretim başlatılamadı', String(e));
-          });
+          runSolver(tl)
+            .then((started) => {
+              if (started) {
+                toastSuccess('Üretim başlatıldı', `FET çalışıyor (${tl} sn)`);
+              } else {
+                toastError(
+                  'Üretim zaten sürüyor',
+                  'Mevcut üretim bitince (veya iptal edince) tekrar deneyin.',
+                );
+              }
+            })
+            .catch((e) => {
+              toastError('Üretim başlatılamadı', String(e));
+            });
         }, 60);
-        toastSuccess('Üretim başlatıldı', `FET çalışıyor (${tl} sn)`);
       } catch (e) {
         toastError('Üretim başlatılamadı', String(e));
         updateMessage(msg.id, { status: 'rejected' });

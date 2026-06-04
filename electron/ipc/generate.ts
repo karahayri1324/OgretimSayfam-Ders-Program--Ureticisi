@@ -29,6 +29,13 @@ function readFetTimeLimitFromSettings(): number {
 
 let activeController: AbortController | null = null;
 
+/** Canlı bir FET üretimi sürüyor mu? AI mutasyonları (ai:applyMutations / applyScheduleUpdate)
+ *  bu sırada DB'yi değiştirirse, üretim biterken sonuç bayatlamış/silinmiş entity id'lerine FK
+ *  INSERT yapıp tüm üretimi çökertiyordu (#5). Mutasyon handler'ları bununla guard'lanır. */
+export function isGenerationActive(): boolean {
+  return activeController !== null;
+}
+
 export function abortActiveGeneration(): void {
   if (activeController) {
     try {
