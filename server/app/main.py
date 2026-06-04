@@ -19,6 +19,10 @@ log = logging.getLogger("bridge")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# İstek gövdesi üst sınırı: pydantic alan-boyut sınırları (#15) doğrulamadan ÖNCE gövde tümüyle
+# belleğe alındığından, Content-Length'i baştan reddederek büyük gövdenin tamponlanmasını engelle.
+_MAX_BODY_BYTES = 4 * 1024 * 1024
+
 
 def _ensure_jwt_secret() -> None:
     """JWT_SECRET env yoksa DB'de kalıcı bir secret üret (restart'ta token'lar yaşasın).
@@ -90,6 +94,16 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def _limit_body_size(request: Request, call_next):
+        cl = request.headers.get("content-length")
+        if cl is not None and cl.isdigit() and int(cl) > _MAX_BODY_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"error": "payload_too_large", "message": "İstek gövdesi çok büyük."},
+            )
+        return await call_next(request)
 
     @app.exception_handler(HTTPException)
     async def http_exc_handler(_request: Request, exc: HTTPException) -> JSONResponse:

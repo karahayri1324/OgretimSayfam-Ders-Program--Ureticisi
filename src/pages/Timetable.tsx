@@ -164,10 +164,20 @@ export default function Timetable() {
     );
   }
 
-  const slotMap = new Map<string, TimetableSlot>();
+  // Bir hücrede birden çok aktivite olabilir (split/eşli sınıf) — tek değerli Map ikincisini
+  // sessizce eziyordu; dizi tut (export'taki #8 ile aynı). Ayrıca FET, global plandan fazla
+  // saate ders koyabilir; ekranda yalnız global `hours` gezilirse o dersler görünmezdi (#13).
+  const slotMap = new Map<string, TimetableSlot[]>();
   for (const s of filteredSlots) {
-    slotMap.set(`${s.dayIndex}_${s.hourIndex}`, s);
+    const k = `${s.dayIndex}_${s.hourIndex}`;
+    const arr = slotMap.get(k);
+    if (arr) arr.push(s);
+    else slotMap.set(k, [s]);
   }
+  let maxHourIdx = hours.length - 1;
+  for (const s of filteredSlots) if (s.hourIndex > maxHourIdx) maxHourIdx = s.hourIndex;
+  const hourRows: ((typeof hours)[number] | null)[] = [];
+  for (let i = 0; i <= maxHourIdx; i++) hourRows.push(hours[i] ?? null);
 
   function buildExportContext(): ExportContext | null {
     if (!result || selectedId == null) return null;
@@ -354,12 +364,12 @@ export default function Timetable() {
               </tr>
             </thead>
             <tbody>
-              {hours.map((h, hi) => (
-                <tr key={h.id ?? hi}>
+              {hourRows.map((h, hi) => (
+                <tr key={h?.id ?? `h${hi}`}>
                   <th className="border-b border-r border-surface-200 bg-card px-3 py-2 text-left text-xs font-medium text-ink-700">
                     <div className="flex flex-col">
-                      <span>{h.name || `${hi + 1}. ${tr.schedule.hourLabel}`}</span>
-                      {h.startTime && (
+                      <span>{h?.name || `${hi + 1}. ${tr.schedule.hourLabel}`}</span>
+                      {h?.startTime && (
                         <span className="text-[10px] text-ink-400">
                           {h.startTime}
                           {h.endTime ? `–${h.endTime}` : ''}
@@ -368,8 +378,8 @@ export default function Timetable() {
                     </div>
                   </th>
                   {days.map((_d, di) => {
-                    const slot = slotMap.get(`${di}_${hi}`);
-                    if (!slot) {
+                    const cellSlots = slotMap.get(`${di}_${hi}`) ?? [];
+                    if (cellSlots.length === 0) {
                       return (
                         <td
                           key={di}
@@ -379,9 +389,10 @@ export default function Timetable() {
                         </td>
                       );
                     }
+                    const first = cellSlots[0]!;
                     const color =
-                      slot.subjectId != null
-                        ? subjectColorById.get(slot.subjectId)
+                      first.subjectId != null
+                        ? subjectColorById.get(first.subjectId)
                         : null;
                     return (
                       <td
@@ -397,24 +408,35 @@ export default function Timetable() {
                             borderLeft: `3px solid ${color ?? '#3b82f6'}`,
                           }}
                         >
-                          <span className="font-semibold text-ink-900">
-                            {slot.subjectName}
-                          </span>
-                          {view !== 'teacher' && slot.teacherName && (
-                            <span className="text-ink-700">
-                              {slot.teacherName}
-                            </span>
-                          )}
-                          {view !== 'class' && slot.className && (
-                            <span className="text-ink-700">
-                              {slot.className}
-                            </span>
-                          )}
-                          {view !== 'room' && slot.roomName && (
-                            <span className="text-ink-500">
-                              {slot.roomName}
-                            </span>
-                          )}
+                          {cellSlots.map((slot, si) => (
+                            <div
+                              key={si}
+                              className={
+                                si > 0
+                                  ? 'mt-0.5 flex flex-col gap-0.5 border-t border-white/50 pt-0.5'
+                                  : 'flex flex-col gap-0.5'
+                              }
+                            >
+                              <span className="font-semibold text-ink-900">
+                                {slot.subjectName}
+                              </span>
+                              {view !== 'teacher' && slot.teacherName && (
+                                <span className="text-ink-700">
+                                  {slot.teacherName}
+                                </span>
+                              )}
+                              {view !== 'class' && slot.className && (
+                                <span className="text-ink-700">
+                                  {slot.className}
+                                </span>
+                              )}
+                              {view !== 'room' && slot.roomName && (
+                                <span className="text-ink-500">
+                                  {slot.roomName}
+                                </span>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       </td>
                     );

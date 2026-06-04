@@ -71,6 +71,15 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS login_failures (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    throttle_key TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_login_failures_key_time
+    ON login_failures (throttle_key, created_at);
 """
 
 

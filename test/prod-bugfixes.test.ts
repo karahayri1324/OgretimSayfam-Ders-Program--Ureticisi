@@ -204,3 +204,58 @@ describe('Round-3: FET geçersiz tag/alan adları (#10-#16)', () => {
     expect(xml).not.toContain('ConstraintActivitiesMaxHoursDaily');
   });
 });
+
+describe('Round-5 regresyon', () => {
+  it('expandSlots numerik-STRING saat ("2") ile slotu DÜŞÜRMEZ — kısıt üretilir (#1)', () => {
+    const xml = buildFetXml(
+      makeBundle({
+        constraints: [
+          constraint('TEACHER_NOT_AVAILABLE', {
+            teacher: 'Ahmet Yılmaz',
+            slots: [{ day: 'Pazartesi', hour: '2' }],
+          }),
+        ],
+      }),
+    ).xml;
+    expect(countTag(xml, 'ConstraintTeacherNotAvailableTimes')).toBe(1);
+  });
+
+  it('SUBJECT_CONSECUTIVE_HOURS (sınıfsız) FARKLI sınıfların derslerini ardışık zorlamaz (#2)', () => {
+    const bundle: SchoolBundle = {
+      institutionName: 'Test',
+      days: [
+        { id: 1, name: 'Pazartesi', orderIndex: 0 },
+        { id: 2, name: 'Salı', orderIndex: 1 },
+      ],
+      hours: [
+        { id: 1, name: '1. Ders', orderIndex: 0, startTime: null, endTime: null },
+        { id: 2, name: '2. Ders', orderIndex: 1, startTime: null, endTime: null },
+      ],
+      subjects: [{ id: 1, name: 'Matematik', shortCode: null, color: null, notes: null }],
+      teachers: [{ id: 1, name: 'T1', weeklyTargetHours: 0, notes: null, subjectIds: [1] }],
+      classes: [
+        { id: 1, yearId: 1, name: '9A', studentCount: 30, homeRoomId: null },
+        { id: 2, yearId: 1, name: '9B', studentCount: 30, homeRoomId: null },
+      ],
+      years: [{ id: 1, name: '9', orderIndex: 0 }],
+      rooms: [{ id: 1, name: '101', capacity: 30, building: null, notes: null }],
+      activities: [
+        { id: 1, classId: 1, subjectId: 1, teacherId: 1, weeklyHours: 1, blockDuration: 1, notes: null },
+        { id: 2, classId: 2, subjectId: 1, teacherId: 1, weeklyHours: 1, blockDuration: 1, notes: null },
+      ],
+      constraints: [constraint('SUBJECT_CONSECUTIVE_HOURS', { subject: 'Matematik' })],
+    };
+    // 9A ve 9B'nin 1'er saatlik dersleri çapraz eşleşmemeli → hiç consecutive çifti olmamalı.
+    expect(countTag(buildFetXml(bundle).xml, 'ConstraintTwoActivitiesConsecutive')).toBe(0);
+  });
+
+  it('SUBJECT_CONSECUTIVE_HOURS tek sınıfta çok-bloklu dersi KENDİ alt-aktiviteleri içinde çiftler (#2)', () => {
+    const xml = buildFetXml(
+      makeBundle({
+        constraints: [constraint('SUBJECT_CONSECUTIVE_HOURS', { subject: 'Matematik' })],
+      }),
+    ).xml;
+    // 9A Matematik weeklyHours=4 → 4 alt-aktivite → 2 ardışık çift (sınıf-içi davranış korunur).
+    expect(countTag(xml, 'ConstraintTwoActivitiesConsecutive')).toBe(2);
+  });
+});

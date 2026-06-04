@@ -82,34 +82,51 @@ function extendBreaks(params: Record<string, unknown>): ScheduleUpdateApplyResul
   if (cur.length === 0) {
     throw new Error('Henüz tanımlı ders saati yok — önce ders saatlerini ekleyin.');
   }
-  // Kümülatif uzatma hiçbir günü (global VEYA güne-özel) 24 saati taşırmamalı; aksi halde
-  // son dersler saçma saatlere kayar / sessizce 23:59'a clamp'lenir (#6, #10).
-  if (minutes > 0) {
-    const overflows = (
-      rows: { startTime: string | null; endTime: string | null }[],
-    ): boolean => {
-      if (rows.length === 0) return false;
-      const last = rows[rows.length - 1];
-      const ref = last?.endTime ?? last?.startTime ?? null;
-      const m = ref ? /^(\d{1,2}):(\d{2})$/.exec(ref.trim()) : null;
-      return !!m && Number(m[1]) * 60 + Number(m[2]) + minutes * (rows.length - 1) > 23 * 60 + 59;
-    };
-    if (overflows(cur)) {
-      throw new Error('Bu kadar uzatma günü (24 saat) taşırıyor; daha küçük bir değer deneyin.');
+  // Kümülatif kaydırma HER İKİ yönde de geçerli kalmalı (global VEYA güne-özel):
+  // - uzatmada (pozitif) son dersler 24 saati taşırmamalı,
+  // - kısaltmada (negatif) teneffüs eksiye düşüp ardışık dersler ÜST ÜSTE binmemeli veya
+  //   saatler 00:00'ın altına düşüp sessizce clamp'lenmemeli (#6 — eskiden yalnız minutes>0
+  //   denetleniyordu, negatif tüm guard'ları atlıyordu).
+  const parseHM = (t: string | null): number | null => {
+    const m = t ? /^(\d{1,2}):(\d{2})$/.exec(t.trim()) : null;
+    return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+  };
+  const shiftInvalid = (
+    rows: { startTime: string | null; endTime: string | null }[],
+  ): boolean => {
+    let prevEnd: number | null = null;
+    for (let i = 0; i < rows.length; i++) {
+      const s = parseHM(rows[i]!.startTime);
+      const e = parseHM(rows[i]!.endTime);
+      const ss = s == null ? null : s + minutes * i;
+      const se = e == null ? null : e + minutes * i;
+      if (ss != null && (ss < 0 || ss > 23 * 60 + 59)) return true;
+      if (se != null && (se < 0 || se > 23 * 60 + 59)) return true;
+      if (ss != null && se != null && se < ss) return true;
+      if (prevEnd != null && ss != null && ss < prevEnd) return true;
+      if (se != null) prevEnd = se;
+      else if (ss != null) prevEnd = ss;
     }
-    const dhCheck = dayHoursRepo.list();
-    const byDayCheck = new Map<number, typeof dhCheck>();
-    for (const r of dhCheck) {
-      const arr = byDayCheck.get(r.dayId) ?? [];
-      arr.push(r);
-      byDayCheck.set(r.dayId, arr);
-    }
-    for (const rows of byDayCheck.values()) {
-      const sorted = [...rows].sort((a, b) => a.orderIndex - b.orderIndex);
-      if (overflows(sorted)) {
-        throw new Error('Bu kadar uzatma bazı günlerin saatlerini 24 saati taşırıyor; daha küçük değer deneyin.');
-      }
-    }
+    return false;
+  };
+  const dhCheck = dayHoursRepo.list();
+  const byDayCheck = new Map<number, typeof dhCheck>();
+  for (const r of dhCheck) {
+    const arr = byDayCheck.get(r.dayId) ?? [];
+    arr.push(r);
+    byDayCheck.set(r.dayId, arr);
+  }
+  const invalid =
+    shiftInvalid(cur) ||
+    [...byDayCheck.values()].some((rows) =>
+      shiftInvalid([...rows].sort((a, b) => a.orderIndex - b.orderIndex)),
+    );
+  if (invalid) {
+    throw new Error(
+      minutes > 0
+        ? 'Bu kadar uzatma günü (24 saat) taşırıyor; daha küçük bir değer deneyin.'
+        : 'Bu kadar kısaltma dersleri çakıştırıyor veya geçersiz saate düşürüyor; daha küçük bir değer deneyin.',
+    );
   }
   const next = cur.map((h, i) => ({
     name: h.name,

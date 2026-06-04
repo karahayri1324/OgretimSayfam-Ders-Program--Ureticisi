@@ -49,6 +49,18 @@ function buildSlotMap(slots: TimetableSlot[]): Map<string, TimetableSlot[]> {
   return m;
 }
 
+function effectiveHourRows(hours: Hour[], slots: TimetableSlot[]): (Hour | null)[] {
+  // FET, bir güne global plandan FAZLA saat eklenmişse (per-gün 'Sona saat ekle') o fazla
+  // saatlere de ders yerleştirir; parser bunları maxHours'a göre indeksler. Export yalnız
+  // global `hours` dizisini gezerse o fazla-saat dersleri sessizce düşerdi (#13). Slotlardaki
+  // en büyük hourIndex'i de kapsayan satır kümesi üret (eksik satırlar = null placeholder).
+  let maxIdx = hours.length - 1;
+  for (const s of slots) if (s.hourIndex > maxIdx) maxIdx = s.hourIndex;
+  const rows: (Hour | null)[] = [];
+  for (let i = 0; i <= maxIdx; i++) rows.push(hours[i] ?? null);
+  return rows;
+}
+
 function cellText(slot: TimetableSlot, view: ViewMode): string[] {
   const parts: string[] = [];
   if (slot.subjectName) parts.push(slot.subjectName);
@@ -77,11 +89,11 @@ export function buildHtml(ctx: ExportContext): string {
         .join('')}
     </tr>`;
 
-  const tableBody = hours
+  const tableBody = effectiveHourRows(hours, filteredSlots)
     .map((h, hi) => {
-      const label = h.name || `${hi + 1}. Ders`;
+      const label = h?.name || `${hi + 1}. Ders`;
       const time =
-        h.startTime && h.endTime
+        h?.startTime && h?.endTime
           ? `<div class="time">${escapeHtml(h.startTime)}–${escapeHtml(h.endTime)}</div>`
           : '';
       const cells = days
@@ -159,9 +171,9 @@ export function downloadXlsx(ctx: ExportContext, filename: string): void {
 
   const header = ['Saat / Gün', ...days.map((d) => dayLabel(d))];
   const rows: (string | number)[][] = [header];
-  hours.forEach((h, hi) => {
-    const label = h.name || `${hi + 1}. Ders`;
-    const time = h.startTime && h.endTime ? ` (${h.startTime}–${h.endTime})` : '';
+  effectiveHourRows(hours, filteredSlots).forEach((h, hi) => {
+    const label = h?.name || `${hi + 1}. Ders`;
+    const time = h?.startTime && h?.endTime ? ` (${h.startTime}–${h.endTime})` : '';
     const row: (string | number)[] = [`${label}${time}`];
     days.forEach((_d, di) => {
       const cellSlots = slotMap.get(`${di}_${hi}`) ?? [];

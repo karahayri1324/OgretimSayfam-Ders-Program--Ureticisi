@@ -90,6 +90,9 @@ function ConstraintItem({
   onWeight: (weight: number) => void;
 }) {
   const [weight, setWeight] = useState(c.weight);
+  // Ağırlık dışarıdan değişince (AI set_constraint_weight / reload) aynı key ile remount
+  // olmadığından yerel state bayat kalıyordu; prop değişince senkronla (#11).
+  useEffect(() => setWeight(c.weight), [c.weight]);
 
   return (
     <Card>

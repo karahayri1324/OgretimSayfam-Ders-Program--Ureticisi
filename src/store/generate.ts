@@ -32,6 +32,10 @@ export const useGenerateStore = create<State>((set, get) => ({
   },
 
   run: async (timeLimitSec) => {
+    // Üretim sürerken ikinci bir run() (örn. AI run_solver) gelirse, mevcut canlı listener
+    // sökülür ve backend BUSY döner → ilk üretimin 'done' event'ini kimse dinlemez, tamamlanan
+    // program UI'a hiç yansımaz, sahte 'error' gösterilirdi (#10). Zaten çalışıyorsa çık.
+    if (get().status === 'running') return;
     get().unsubscribe?.();
     set({
       status: 'running',

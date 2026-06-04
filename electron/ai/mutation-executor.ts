@@ -935,6 +935,18 @@ const handlers: Record<DataMutationOp, Handler> = {
           `Önce add_activity ile ekleyin.`,
       );
     }
+    if (matches.length > 1) {
+      // Belirsizlikte sessizce matches[0]'ı kilitlemek YANLIŞ öğretmenin dersini sabitliyordu
+      // (update_activity/delete_activity/substitute_teacher hepsi burada hata fırlatıyor;
+      // set_timetable_slot tek istisnaydı). 'teacher' ile netleştirilsin.
+      const names = matches
+        .map((m) => (m.teacherId ? teachersRepo.get(m.teacherId)?.name ?? '?' : 'atanmamış'))
+        .join(', ');
+      throw new Error(
+        `${className} × ${subjectName} için birden fazla aktivite var (öğretmenler: ${names}). ` +
+          `Hangisini kilitleyeceğinizi 'teacher' ile belirtin.`,
+      );
+    }
     const act = matches[0]!;
 
     // FET ACTIVITY_FIXED_TIME handler'ı gün adını KANONIK days tablosu adıyla (tam) eşler;
@@ -1061,6 +1073,16 @@ const handlers: Record<DataMutationOp, Handler> = {
     const hour = optInt(params, 'hour');
     if (hour == null || hour < 1) throw new Error("'hour' 1+ olmalı.");
 
+    // Kilitler KANONIK days adıyla saklanır (set/lock/swap hepsi dayObj.name yazar). Ham
+    // 'pazartesi'/'PAZARTESİ' ile gelen unlock'ta cp.day === day strict eşleşmesi tutmaz →
+    // kilit kalkmadığı halde "zaten serbest" denirdi (FET slotu yine sabitlerdi). Kanonikleştir.
+    const days = daysRepo.list();
+    const dayObj =
+      days.find((d) => d.name === day) ??
+      days.find((d) => deburr(d.name) === deburr(day));
+    if (!dayObj) throw new Error(`Gün bulunamadı: '${day}'`);
+    const canonicalDay = dayObj.name;
+
     let targetActivityIds: Set<number>;
     if (params.activityId !== undefined) {
       const aid = Number(params.activityId);
@@ -1079,10 +1101,13 @@ const handlers: Record<DataMutationOp, Handler> = {
     for (const c of constraintsRepo.list()) {
       if (c.type !== 'ACTIVITY_FIXED_TIME') continue;
       const cp = c.params as { activityId?: number; day?: string; hour?: number };
+      const dayMatches =
+        cp.day === canonicalDay ||
+        (cp.day != null && deburr(cp.day) === deburr(canonicalDay));
       if (
         cp.activityId !== undefined &&
         targetActivityIds.has(cp.activityId) &&
-        cp.day === day &&
+        dayMatches &&
         cp.hour === hour
       ) {
         constraintsRepo.delete(c.id);

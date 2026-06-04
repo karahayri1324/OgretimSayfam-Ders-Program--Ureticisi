@@ -1,8 +1,21 @@
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import Annotated, Any
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+# Liste elemanı tek tek de sınırlanmalı: max_length yalnız ELEMAN SAYISINI sınırlar; eleman
+# string'leri / iç içe dict'ler sınırsız kalırsa devasa tek istekle bellek + upstream token
+# maliyeti şişirilip DoS yapılabilir (#15). Ad alanları için makul bir üst sınır.
+EntityName = Annotated[str, Field(max_length=200)]
+
+
+def _too_big(value: Any, limit: int) -> bool:
+    try:
+        return len(json.dumps(value, default=str)) > limit
+    except (TypeError, ValueError):
+        return True
 
 
 class RegisterRequest(BaseModel):
@@ -36,13 +49,21 @@ class MeResponse(BaseModel):
 
 
 class AIContext(BaseModel):
-    teachers: list[str] = Field(default_factory=list, max_length=5000)
-    classes: list[str] = Field(default_factory=list, max_length=5000)
-    subjects: list[str] = Field(default_factory=list, max_length=5000)
-    rooms: list[str] = Field(default_factory=list, max_length=5000)
-    days: list[str] = Field(default_factory=list, max_length=60)
+    teachers: list[EntityName] = Field(default_factory=list, max_length=5000)
+    classes: list[EntityName] = Field(default_factory=list, max_length=5000)
+    subjects: list[EntityName] = Field(default_factory=list, max_length=5000)
+    rooms: list[EntityName] = Field(default_factory=list, max_length=5000)
+    days: list[EntityName] = Field(default_factory=list, max_length=60)
     hoursPerDay: int = Field(default=8, ge=0, le=100)
     constraints: list[dict[str, Any]] = Field(default_factory=list, max_length=5000)
+
+    @field_validator("constraints")
+    @classmethod
+    def _cap_constraints(cls, v: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        # Eleman sayısı (max_length) yetmez; her dict sınırsız büyüyebilir → toplam boyutu sınırla.
+        if _too_big(v, 200_000):
+            raise ValueError("constraints çok büyük")
+        return v
 
 
 class HistoryEntry(BaseModel):
@@ -56,6 +77,22 @@ class ToolHistoryEntry(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     result: Any = None
     reasoning: str = Field(default="", max_length=8000)
+
+    @field_validator("args")
+    @classmethod
+    def _cap_args(cls, v: dict[str, Any]) -> dict[str, Any]:
+        # args dict[str,Any] sınırsızdı (200 toolHistory girişiyle çarpılınca DoS) — boyutu sınırla.
+        if _too_big(v, 20_000):
+            raise ValueError("tool args çok büyük")
+        return v
+
+    @field_validator("result")
+    @classmethod
+    def _cap_result(cls, v: Any) -> Any:
+        # result Any = None idi (tip+boyut sınırsız) — serialize boyutunu sınırla.
+        if v is not None and _too_big(v, 50_000):
+            raise ValueError("tool result çok büyük")
+        return v
 
 
 class AIRequest(BaseModel):

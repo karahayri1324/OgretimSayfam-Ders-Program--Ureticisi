@@ -1,63 +1,44 @@
 from __future__ import annotations
 
-import threading
-import time
+from datetime import datetime, timedelta, timezone
 
+from . import db
 
-_WINDOW_SEC = 900
+_WINDOW = timedelta(seconds=900)
 _MAX_FAILS = 8
-_MAX_KEYS = 10_000
-_SWEEP_INTERVAL = 60.0
-_lock = threading.Lock()
-_fails: dict[str, list[float]] = {}
-_last_sweep = 0.0
+# Eski sürüm sayaçları process-içi bir dict'te tutuyordu; uvicorn --workers N altında her
+# worker'ın kendi sayacı vardı ve istekler worker'lara round-robin dağıldığından efektif eşik
+# ~8*N'e çıkıp brute-force koruması zayıflıyordu (#16). Sayaçları SQLite'ta tutup (request_log
+# ile aynı disiplin) tüm worker'lar arasında paylaşıyoruz.
 
 
-def _prune(ts: list[float], now: float) -> list[float]:
-    return [t for t in ts if now - t < _WINDOW_SEC]
-
-
-def _sweep(now: float) -> None:
-    """Süresi dolmuş/boş anahtarları sil (çağıran _lock'u tutuyor olmalı)."""
-    dead = [k for k, ts in _fails.items() if not _prune(ts, now)]
-    for k in dead:
-        _fails.pop(k, None)
-
-
-def _maybe_sweep(now: float) -> None:
-    global _last_sweep
-    if now - _last_sweep >= _SWEEP_INTERVAL:
-        _sweep(now)
-        _last_sweep = now
+def _iso(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def is_locked(key: str) -> bool:
     k = key.lower()
-    with _lock:
-        now = time.monotonic()
-        _maybe_sweep(now)
-        lst = _prune(_fails.get(k, []), now)
-        if lst:
-            _fails[k] = lst
-        elif k in _fails:
-            del _fails[k]
-        return len(lst) >= _MAX_FAILS
+    since = _iso(datetime.now(timezone.utc) - _WINDOW)
+    row = db.query_one(
+        "SELECT COUNT(*) AS c FROM login_failures WHERE throttle_key = ? AND created_at > ?",
+        (k, since),
+    )
+    return bool(row) and int(row["c"]) >= _MAX_FAILS
 
 
 def record_failure(key: str) -> None:
     k = key.lower()
-    with _lock:
-        now = time.monotonic()
-        _maybe_sweep(now)
-        lst = _prune(_fails.get(k, []), now)
-        lst.append(now)
-        _fails[k] = lst
-        if len(_fails) > _MAX_KEYS:
-            overflow = len(_fails) - _MAX_KEYS
-            for old_k in sorted(_fails, key=lambda kk: _fails[kk][-1])[:overflow]:
-                _fails.pop(old_k, None)
+    now = datetime.now(timezone.utc)
+    db.execute(
+        "INSERT INTO login_failures (throttle_key, created_at) VALUES (?, ?)",
+        (k, _iso(now)),
+    )
+    # Pencerenin iki katından eski kayıtları temizle (tablo sınırsız büyümesin).
+    db.execute(
+        "DELETE FROM login_failures WHERE created_at < ?",
+        (_iso(now - _WINDOW * 2),),
+    )
 
 
 def clear(key: str) -> None:
-    with _lock:
-        _fails.pop(key.lower(), None)
+    db.execute("DELETE FROM login_failures WHERE throttle_key = ?", (key.lower(),))

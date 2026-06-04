@@ -70,12 +70,24 @@ function expandSlots(
     const hours: number[] = [];
     if (obj.hour === null || obj.hour === undefined) {
       for (let i = 1; i <= ctx.hours.length; i++) hours.push(i);
-    } else if (typeof obj.hour === 'number') {
-      if (!ctx.hourByOrder.has(obj.hour)) {
-        unknownHours.add(obj.hour);
+    } else {
+      // hour numeric VEYA numerik-string olabilir (constraint params z.record(z.any()) olduğundan
+      // SlotSchema'nın hour:number'ı hiç zorlanmıyor). getNum gibi coerce et; aksi halde '3' gibi
+      // string saat ikisi de eşleşmeyip hours boş kalıyor, not-available/teneffüs/tercih kısıtı
+      // sessizce düşüyordu (#1).
+      const hv =
+        typeof obj.hour === 'number'
+          ? obj.hour
+          : typeof obj.hour === 'string' &&
+              obj.hour.trim() !== '' &&
+              !Number.isNaN(Number(obj.hour))
+            ? Number(obj.hour)
+            : NaN;
+      if (!Number.isFinite(hv) || !ctx.hourByOrder.has(hv)) {
+        if (Number.isFinite(hv)) unknownHours.add(hv);
         continue;
       }
-      hours.push(obj.hour);
+      hours.push(hv);
     }
 
     for (const d of dayNames) {
@@ -417,23 +429,33 @@ function subjectConsecutiveHours(c: Constraint, ctx: BuilderContext): HandlerRes
   const cls = getStr(c.params, 'class');
   if (cls && !ctx.classByName.has(cls)) return skip(ctx, c, `Bilinmeyen sınıf: "${cls}"`);
 
-  const { fetIds } = activitiesForSubject(ctx, subj, cls);
-  if (fetIds.length < 2) return skip(ctx, c, 'Ardışıklık için en az 2 aktivite gerekli');
-
+  // Ardışıklık aynı sınıfın aynı dersinin ALT-aktiviteleri (blok parçaları) için anlamlıdır.
+  // Eski kod sınıf belirtilmediğinde TÜM sınıfların fetId'lerini düz bir listede (i,i+1) eşleştirip
+  // farklı sınıfların alakasız derslerini ardışık olmaya zorluyordu (rastgele, çoğu zaman çözümsüz) (#2).
+  // Çiftlemeyi her aktivitenin yalnız kendi alt-aktiviteleri içinde yap.
+  const subjObj = ctx.subjectByName.get(subj)!;
+  const clsObj = cls ? ctx.classByName.get(cls) : null;
   const pairs: ConstraintNode[] = [];
-  for (let i = 0; i + 1 < fetIds.length; i += 2) {
-    pairs.push({
-      section: 'time',
-      tag: 'ConstraintTwoActivitiesConsecutive',
-      body: {
-        Weight_Percentage: c.weight,
-        First_Activity_Id: fetIds[i],
-        Second_Activity_Id: fetIds[i + 1],
-        ...commonTail(c),
-      },
-    });
+  for (const a of ctx.activities) {
+    if (a.subjectId !== subjObj.id) continue;
+    if (clsObj && a.classId !== clsObj.id) continue;
+    const ids = ctx.fetActivityIdsByActivity.get(a.id) ?? [];
+    for (let i = 0; i + 1 < ids.length; i += 2) {
+      pairs.push({
+        section: 'time',
+        tag: 'ConstraintTwoActivitiesConsecutive',
+        body: {
+          Weight_Percentage: c.weight,
+          First_Activity_Id: ids[i],
+          Second_Activity_Id: ids[i + 1],
+          ...commonTail(c),
+        },
+      });
+    }
   }
-  if (pairs.length === 0) return skip(ctx, c, 'Çiftleştirilebilir aktivite yok');
+  if (pairs.length === 0) {
+    return skip(ctx, c, 'Ardışıklık için aynı sınıf+derste en az 2 alt-aktivite (blok) gerekli');
+  }
   return pairs;
 }
 

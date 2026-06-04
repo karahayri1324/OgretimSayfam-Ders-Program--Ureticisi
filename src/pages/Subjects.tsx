@@ -224,7 +224,15 @@ function SubjectDialog({
         name: n,
         // Toplu ekleme: tek girilen kodu HER derse kopyalama (yinelenen/yanlış kod) → çoklu'da boş bırak (#27).
         shortCode: parsedNames.length > 1 ? null : code.trim() || null,
-        color: parsedNames.length > 1 ? randomColor() : color,
+        // Serbest-metin hex alanına geçersiz değer (ör. 'red') yazılıp kaydedilince DB'ye geçersiz
+        // renk gidiyor, Timetable inline-style sessizce bozuluyordu (#12). Geçerli hex değilse
+        // güvenli bir renge düş (mutation-executor ile aynı doğrulama).
+        color:
+          parsedNames.length > 1
+            ? randomColor()
+            : /^#[0-9a-fA-F]{3,8}$/.test(color.trim())
+              ? color.trim()
+              : randomColor(),
         notes: notes.trim() || null,
       });
     }

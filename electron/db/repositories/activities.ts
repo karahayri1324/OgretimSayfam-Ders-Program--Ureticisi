@@ -117,22 +117,23 @@ export const activitiesRepo = {
         input.notes ?? null,
       );
 
-    if (result.lastInsertRowid && Number(result.lastInsertRowid) > 0) {
+    // teacher_id NULL ise UNIQUE indeksinde NULL'lar ayrık sayıldığından ON CONFLICT
+    // hiç tetiklenmez → her zaman taze INSERT → lastInsertRowid doğru.
+    // teacher_id NON-NULL ise çakışmada DO UPDATE çalışabilir; SQLite DO UPDATE'te
+    // last_insert_rowid()'i GÜNCELLEMEZ (önceki bir INSERT'in rowid'i kalır) → bu değere
+    // güvenmek YANLIŞ/alakasız bir aktivite id'si döndürür. NON-NULL durumda kombinasyon
+    // benzersiz olduğundan id'yi kanonik SELECT ile çöz.
+    if ((input.teacherId ?? null) === null) {
       return Number(result.lastInsertRowid);
     }
     const existing = db
       .prepare(
         `SELECT id FROM activities
-         WHERE school_id = ? AND class_id = ? AND subject_id = ?
-           AND (teacher_id IS ? OR teacher_id = ?)`,
+         WHERE school_id = ? AND class_id = ? AND subject_id = ? AND teacher_id = ?`,
       )
-      .get(
-        schoolId,
-        input.classId,
-        input.subjectId,
-        input.teacherId ?? null,
-        input.teacherId ?? null,
-      ) as { id: number } | undefined;
+      .get(schoolId, input.classId, input.subjectId, input.teacherId) as
+      | { id: number }
+      | undefined;
     if (!existing) {
       throw new Error('Aktivite kaydedildikten sonra bulunamadı.');
     }
@@ -140,7 +141,20 @@ export const activitiesRepo = {
   },
 
   delete(id: number): void {
-    getDb().prepare('DELETE FROM activities WHERE id = ?').run(id);
+    const db = getDb();
+    const schoolId = schoolsRepo.getActiveId();
+    // Bare DELETE bir split-grubun 2 üyesinden birini silerse, kalan üye split_group_id'sini
+    // korur (1 üyeli yetim grup) → FET XML'inde var olmayan _g1 öğrenci-kümesine atıf →
+    // fet-cl dosyayı reddeder, üretim tamamen çöker. cleanupOrphanGroup ile grubu temizle.
+    // Ayrıca repodaki tek scope'suz mutasyondu; school_id ile sınırla (çok-okul izolasyonu).
+    const trx = db.transaction(() => {
+      const prev = db
+        .prepare('SELECT split_group_id FROM activities WHERE id = ? AND school_id = ?')
+        .get(id, schoolId) as { split_group_id: number | null } | undefined;
+      db.prepare('DELETE FROM activities WHERE id = ? AND school_id = ?').run(id, schoolId);
+      if (prev?.split_group_id != null) cleanupOrphanGroup(db, schoolId, prev.split_group_id);
+    });
+    trx();
   },
 
   setSplitGroup(activityIds: number[]): number | null {
