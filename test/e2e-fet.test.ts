@@ -122,7 +122,7 @@ describe('FET end-to-end pipeline', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Simulation successful');
 
-    const slots = await parseTimetable(outDir, { bundle, fetActivityIdsByActivity });
+    const { slots } = await parseTimetable(outDir, { bundle, fetActivityIdsByActivity });
     expect(slots.length).toBeGreaterThan(0);
 
     const ahmetFriday = slots.filter(

@@ -192,18 +192,19 @@ Kullanıcı veri ekleme/silme/güncelleme isterse. Tek mesajdan çoklu ATOMİK i
 
 ## Öğretmen / Branş / Sınıf / Derslik (CRUD)
 - add_teacher        {name, weeklyTargetHours?, notes?, subjects?:[...]}
-- update_teacher     {name, weeklyTargetHours?, notes?}
+- update_teacher     {name, newName?, weeklyTargetHours?, notes?, subjects?:[...]}   # subjects = branş setini topluca değiştirir
 - delete_teacher     {name}
 - add_subject        {name, shortCode?, color?, notes?}
-- update_subject     {name, ...}
+- update_subject     {name, newName?, shortCode?, color?, notes?}    # color = "#RRGGBB"
 - delete_subject     {name}
 - add_class          {name, year?, studentCount?, homeRoom?}     # homeRoom = ana derslik adı
-- update_class       {name, studentCount?, year?, homeRoom?, newName?}
+- update_class       {name, newName?, studentCount?, year?, homeRoom?}
 - delete_class       {name}
 - add_class_year     {name}                # kademe (örn "9. Sınıf")
+- update_class_year  {name, newName?, orderIndex?}   # kademeyi yeniden adlandır / sırasını değiştir
 - delete_class_year  {name}
-- add_room           {name, capacity?, building?}
-- update_room        {name, ...}
+- add_room           {name, capacity?, building?, notes?}
+- update_room        {name, newName?, capacity?, building?, notes?}
 - delete_room        {name}
 
 ## Aktivite (ders dağıtımı)
@@ -214,10 +215,13 @@ Kullanıcı veri ekleme/silme/güncelleme isterse. Tek mesajdan çoklu ATOMİK i
 - merge_activities    {classes:[...], subject, weeklyHours, teacher?, room?}          # birden çok sınıf tek ders
 
 ## Gün / Saat
-- add_day      {name}     # örn "Cumartesi"
-- delete_day   {name}
-- add_hour     {}         # güne saat ekle
-- delete_hour  {}
+- add_day        {name}     # örn "Cumartesi"
+- delete_day     {name}
+- set_days       {days:[...]}     # haftalık gün setini topluca ayarla (örn ["Pazartesi",...,"Cumartesi"])
+- add_hour       {}         # güne saat ekle
+- delete_hour    {}
+- set_hour_times {hours:[{name?, startTime?, endTime?}, ...]}   # ders saatlerini isim/başlangıç/bitiş ile ayarla (örn "08:30")
+- clear_day_hours {day}     # bir günün özel saatlerini kaldır, genel plana döndür
 
 ## İlişki
 - link_teacher_subject    {teacher, subject}

@@ -4,6 +4,7 @@ import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
 
 from .. import gating, rate_limit, repo
 from ..deps import current_user
@@ -20,30 +21,32 @@ async def respond(
 ) -> Any:
     user_id = int(user["id"])
 
+    # Bu handler async → uvicorn event-loop thread'inde koşar. Senkron + kilit alan
+    # SQLite çağrılarını thread havuzuna taşı ki tek yavaş yazma tüm event-loop'u dondurmasın.
     if gating.is_blocked(user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "error": "subscription_required",
-                "message": gating.resolve_block_message(user),
+                "message": await run_in_threadpool(gating.resolve_block_message, user),
             },
         )
 
-    allowed, used, limit = rate_limit.check(user)
+    allowed, used, limit = await run_in_threadpool(rate_limit.check, user)
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={
                 "error": "rate_limit",
-                "message": rate_limit.limit_message(),
+                "message": await run_in_threadpool(rate_limit.limit_message),
                 "used": used,
                 "limit": limit,
             },
             headers={"Retry-After": "3600"},
         )
-    rate_limit.record(user_id)
+    await run_in_threadpool(rate_limit.record, user_id)
 
-    repo.touch_last_seen(user_id)
+    await run_in_threadpool(repo.touch_last_seen, user_id)
 
     try:
         return await run_inference(body)

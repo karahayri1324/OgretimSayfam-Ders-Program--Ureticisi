@@ -89,6 +89,9 @@ function requireString(args: ToolArgs, key: string): string | null {
   return v.trim();
 }
 
+const userHourToSlot = (hour: number): number => hour - 1;
+const slotHourToUser = (hourIndex: number): number => hourIndex + 1;
+
 
 type ActivityView = {
   class: string;
@@ -516,7 +519,10 @@ export const tools = {
     if (!day) return { error: `Gün bulunamadı: '${dayName}'` };
 
     const slot = latest.slots.find(
-      (s) => s.classId === klass.id && s.dayIndex === day.orderIndex && s.hourIndex === hour,
+      (s) =>
+        s.classId === klass.id &&
+        s.dayIndex === day.orderIndex &&
+        s.hourIndex === userHourToSlot(hour),
     );
     if (!slot) {
       return {
@@ -569,7 +575,7 @@ export const tools = {
       if (s.classId !== klass.id) continue;
       const dayIdx = days.findIndex((d) => d.orderIndex === s.dayIndex);
       if (dayIdx < 0) continue;
-      const hourSlot = s.hourIndex - 1;
+      const hourSlot = s.hourIndex;
       if (hourSlot < 0 || hourSlot >= hoursPerDay) continue;
       grid[dayIdx]![hourSlot] = {
         subject: s.subjectName,
@@ -609,7 +615,7 @@ export const tools = {
         const dayObj = days.find((d) => d.orderIndex === s.dayIndex);
         return {
           day: dayObj?.name ?? `gün${s.dayIndex}`,
-          hour: s.hourIndex,
+          hour: slotHourToUser(s.hourIndex),
           class: s.className,
           subject: s.subjectName,
           room: s.roomName,
@@ -661,7 +667,7 @@ export const tools = {
         const dayObj = days.find((d) => d.orderIndex === s.dayIndex);
         return {
           day: dayObj?.name ?? `gün${s.dayIndex}`,
-          hour: s.hourIndex,
+          hour: slotHourToUser(s.hourIndex),
           class: s.className,
           subject: s.subjectName,
           teacher: s.teacherName,
@@ -702,7 +708,7 @@ export const tools = {
       )
       .sort((a, b) => a.hourIndex - b.hourIndex)
       .map((s) => ({
-        hour: s.hourIndex,
+        hour: slotHourToUser(s.hourIndex),
         class: s.className,
         subject: s.subjectName,
         teacher: s.teacherName,
@@ -735,7 +741,7 @@ export const tools = {
     if (!day) return { error: `Gün bulunamadı: '${dayName}'` };
 
     const assignments = latest.slots
-      .filter((s) => s.dayIndex === day.orderIndex && s.hourIndex === hour)
+      .filter((s) => s.dayIndex === day.orderIndex && s.hourIndex === userHourToSlot(hour))
       .map((s) => ({
         class: s.className,
         subject: s.subjectName,
@@ -800,9 +806,9 @@ export const tools = {
 
     const freeSlots: Array<{ day: string; hour: number }> = [];
     for (const d of days) {
-      for (let h = 1; h <= hoursPerDay; h++) {
+      for (let h = 0; h < hoursPerDay; h++) {
         if (!occupied.has(`${d.orderIndex}:${h}`)) {
-          freeSlots.push({ day: d.name, hour: h });
+          freeSlots.push({ day: d.name, hour: slotHourToUser(h) });
         }
       }
     }

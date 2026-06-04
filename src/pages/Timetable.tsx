@@ -102,24 +102,42 @@ export default function Timetable() {
 
   const pendingExport = useAIChatStore((s) => s.pendingExport);
   const consumePendingExport = useAIChatStore((s) => s.consumePendingExport);
+  const [exportAfterSelect, setExportAfterSelect] = useState<string | null>(null);
+
+  function runExport(fmt: string): void {
+    if (fmt === 'pdf') void handleExportPdf();
+    else if (fmt === 'excel' || fmt === 'xlsx') void handleExportExcel();
+    else if (fmt === 'html') void handleExportHtml();
+  }
+
   useEffect(() => {
     if (!pendingExport) return;
     if (!result || entityList.length === 0) return;
+    const fmt = pendingExport.format.toLowerCase();
+    let needSelect = false;
     if (pendingExport.class) {
       const target = entityList.find(
         (e) => e.name.toLocaleLowerCase('tr') === pendingExport.class!.toLocaleLowerCase('tr'),
       );
-      if (target) setSelectedId(target.id);
+      if (target && target.id !== selectedId) {
+        setSelectedId(target.id);
+        needSelect = true;
+      }
     }
     consumePendingExport();
-    const fmt = pendingExport.format.toLowerCase();
-    setTimeout(() => {
-      if (fmt === 'pdf') void handleExportPdf();
-      else if (fmt === 'excel' || fmt === 'xlsx') void handleExportExcel();
-      else if (fmt === 'html') void handleExportHtml();
-    }, 80);
+    // Seçim değiştiyse export'u selectedId güncellenince çalıştır (stale closure → yanlış sınıf bug'ı).
+    if (needSelect) setExportAfterSelect(fmt);
+    else runExport(fmt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingExport, result, entityList]);
+
+  useEffect(() => {
+    if (!exportAfterSelect) return;
+    const fmt = exportAfterSelect;
+    setExportAfterSelect(null);
+    runExport(fmt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, exportAfterSelect]);
 
   if (!result) {
     return (

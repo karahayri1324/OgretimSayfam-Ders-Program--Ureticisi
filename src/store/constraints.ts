@@ -5,7 +5,7 @@ type State = {
   constraints: Constraint[];
   loading: boolean;
   load: () => Promise<void>;
-  addConstraint: (input: ConstraintInput) => Promise<void>;
+  addConstraint: (input: ConstraintInput) => Promise<boolean>;
   toggleConstraint: (id: number, active: boolean) => Promise<void>;
   deleteConstraint: (id: number) => Promise<void>;
   setWeight: (id: number, weight: number) => Promise<void>;
@@ -26,7 +26,9 @@ export const useConstraintsStore = create<State>((set, get) => ({
     const res = await window.api.constraints.add(input);
     if (res.ok) {
       await get().load();
+      return true;
     }
+    return false;
   },
 
   toggleConstraint: async (id, active) => {

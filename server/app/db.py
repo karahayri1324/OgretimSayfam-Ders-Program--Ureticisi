@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS request_log (
 CREATE INDEX IF NOT EXISTS idx_request_log_user_time
     ON request_log (user_id, created_at);
 
+CREATE INDEX IF NOT EXISTS idx_request_log_created
+    ON request_log (created_at);
+
 CREATE TABLE IF NOT EXISTS app_settings (
     key   TEXT PRIMARY KEY,
     value TEXT
@@ -121,5 +124,14 @@ def set_app_setting(key: str, value: str) -> None:
     execute(
         "INSERT INTO app_settings (key, value) VALUES (?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+
+
+def insert_app_setting_if_absent(key: str, value: str) -> None:
+    """Yalnızca anahtar yoksa yaz (atomik). Çok-worker'da TOCTOU yarışını önler."""
+    execute(
+        "INSERT INTO app_settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO NOTHING",
         (key, value),
     )

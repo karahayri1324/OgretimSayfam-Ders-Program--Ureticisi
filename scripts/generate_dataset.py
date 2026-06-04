@@ -4693,19 +4693,35 @@ def gen_schedule_update(n: int) -> list[dict]:
         choice = i % 3
         if choice == 0:
             mins = random.choice([5, 10, 15, 5, 10, 20])
-            request = random.choice([
-                f"Teneffüsleri {mins} dakika uzat",
-                f"Aralara {mins} dakika ekle",
-                f"Teneffüs sürelerini {mins} dakika artır",
-                f"Molalar {mins} dakika daha uzun olsun",
-            ])
-            payload = {
-                "kind": "schedule_update",
-                "action": "extend_breaks",
-                "params": {"minutes": mins},
-                "explanation": f"Teneffüs süreleri {mins} dakika uzatılacak. Onaylıyor musunuz?",
-                "confidence": round(random.uniform(0.85, 0.95), 2),
-            }
+            if random.random() < 0.4:
+                # Kısaltma: extend_breaks negatif dakika kabul eder (GAP 15).
+                request = random.choice([
+                    f"Teneffüsleri {mins} dakika kısalt",
+                    f"Molaları {mins} dakika azalt",
+                    f"Teneffüs sürelerini {mins} dakika düşür",
+                    f"Aralar {mins} dakika daha kısa olsun",
+                ])
+                payload = {
+                    "kind": "schedule_update",
+                    "action": "extend_breaks",
+                    "params": {"minutes": -mins},
+                    "explanation": f"Teneffüs süreleri {mins} dakika kısaltılacak. Onaylıyor musunuz?",
+                    "confidence": round(random.uniform(0.85, 0.95), 2),
+                }
+            else:
+                request = random.choice([
+                    f"Teneffüsleri {mins} dakika uzat",
+                    f"Aralara {mins} dakika ekle",
+                    f"Teneffüs sürelerini {mins} dakika artır",
+                    f"Molalar {mins} dakika daha uzun olsun",
+                ])
+                payload = {
+                    "kind": "schedule_update",
+                    "action": "extend_breaks",
+                    "params": {"minutes": mins},
+                    "explanation": f"Teneffüs süreleri {mins} dakika uzatılacak. Onaylıyor musunuz?",
+                    "confidence": round(random.uniform(0.85, 0.95), 2),
+                }
         elif choice == 1:
             day = random.choice(D)
             cnt = random.choice([1, 1, 2])
@@ -5181,6 +5197,337 @@ def gen_cancel_generation(n: int) -> list[dict]:
     return out
 
 
+# ───────────────────────── Parity-gap kapatan generator'lar ─────────────────────────
+# Aşağıdaki üreticiler, executor'da var olan ama eğitimde temsil edilmeyen yetenekleri
+# ve yeni eklenen op'ları (update_class_year, set_days, set_hour_times, clear_day_hours)
+# kapsar. Böylece AI, kullanıcının manuel yapabildiği her işi öğrenir (capability parity).
+
+def gen_rename_entities(n: int) -> list[dict]:
+    """update_teacher/subject/class/room → newName ile yeniden adlandırma (GAP 8)."""
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        r = random.random()
+        if r < 0.35:
+            old = random.choice(ctx["teachers"])
+            new = random.choice([x for x in TEACHERS if x != old])
+            request = random.choice([
+                f"{first_name(old)} öğretmenin adını {new} yap",
+                f"{old} öğretmeninin ismini {new} olarak değiştir",
+                f"{first_name(old)} hocayı {new} olarak yeniden adlandır",
+            ])
+            actions = [{"op": "update_teacher", "params": {"name": old, "newName": new}, "description": f"{old} öğretmeninin adı {new} yapılacak."}]
+            expl = f"{old} öğretmeni {new} olarak yeniden adlandırılacak."
+        elif r < 0.6:
+            old = random.choice(ctx["subjects"])
+            new = random.choice([f"{old}-1", f"{old} (Seçmeli)", f"İleri {old}"])
+            request = random.choice([
+                f"{old} dersinin adını {new} yap",
+                f"{old} branşını {new} olarak yeniden adlandır",
+                f"{old} dersinin ismini {new} yap",
+            ])
+            actions = [{"op": "update_subject", "params": {"name": old, "newName": new}, "description": f"{old} dersinin adı {new} yapılacak."}]
+            expl = f"{old} dersi {new} olarak yeniden adlandırılacak."
+        elif r < 0.8:
+            old = random.choice(ctx["classes"])
+            new = random.choice([x for x in CLASSES if x != old])
+            request = random.choice([
+                f"{old} sınıfının adını {new} yap",
+                f"{old} sınıfını {new} olarak yeniden adlandır",
+                f"{old}'nın ismini {new} yap",
+            ])
+            actions = [{"op": "update_class", "params": {"name": old, "newName": new}, "description": f"{old} sınıfının adı {new} yapılacak."}]
+            expl = f"{old} sınıfı {new} olarak yeniden adlandırılacak."
+        else:
+            old = random.choice(ctx["rooms"])
+            new = random.choice([x for x in ROOMS if x != old])
+            request = random.choice([
+                f"{old} dersliğinin adını {new} yap",
+                f"{old} odasını {new} olarak yeniden adlandır",
+                f"{old}'yi {new} diye değiştir",
+            ])
+            actions = [{"op": "update_room", "params": {"name": old, "newName": new}, "description": f"{old} dersliğinin adı {new} yapılacak."}]
+            expl = f"{old} dersliği {new} olarak yeniden adlandırılacak."
+        out.append(_data_mut(ctx, request, actions, expl))
+    return out
+
+
+_COLOR_NAMES = {
+    "kırmızı": "#ef4444", "mavi": "#3b82f6", "yeşil": "#22c55e", "sarı": "#eab308",
+    "turuncu": "#f97316", "mor": "#a855f7", "pembe": "#ec4899", "gri": "#6b7280",
+    "lacivert": "#1e3a8a", "turkuaz": "#14b8a6",
+}
+
+def gen_subject_color(n: int) -> list[dict]:
+    """update_subject color — ders rengi (GAP 28)."""
+    out = []
+    items = list(_COLOR_NAMES.items())
+    for _ in range(n):
+        ctx = make_context()
+        subj = random.choice(ctx["subjects"])
+        cname, chex = random.choice(items)
+        request = random.choice([
+            f"{subj} dersini {cname} göster",
+            f"{subj} dersinin rengini {cname} yap",
+            f"{subj} {cname} renkte olsun",
+            f"{subj} dersine {cname} renk ver",
+        ])
+        actions = [{"op": "update_subject", "params": {"name": subj, "color": chex}, "description": f"{subj} dersinin rengi {cname} ({chex}) yapılacak."}]
+        out.append(_data_mut(ctx, request, actions, f"{subj} dersi {cname} renge ayarlanacak."))
+    return out
+
+
+def gen_entity_notes(n: int) -> list[dict]:
+    """update_teacher / update_room notes — not alanı güncelleme (GAP 29, GAP 19)."""
+    out = []
+    notes = ["sınıf öğretmeni", "idareci", "yarı zamanlı", "rehber öğretmen",
+             "projeksiyon var", "engelli erişimi var", "laboratuvar", "spor salonu yanında",
+             "doğum izninde", "nöbetçi"]
+    for _ in range(n):
+        ctx = make_context()
+        note = random.choice(notes)
+        if random.random() < 0.5:
+            t = random.choice(ctx["teachers"])
+            request = random.choice([
+                f"{first_name(t)} öğretmenine '{note}' notunu ekle",
+                f"{t} hocanın notuna '{note}' yaz",
+                f"{first_name(t)} için not: {note}",
+            ])
+            actions = [{"op": "update_teacher", "params": {"name": t, "notes": note}, "description": f"{t} öğretmeninin notu güncellenecek."}]
+            expl = f"{t} öğretmeninin notu '{note}' olarak güncellenecek."
+        else:
+            rm = random.choice(ctx["rooms"])
+            request = random.choice([
+                f"{rm} dersliğine '{note}' notunu ekle",
+                f"{rm} odasının notuna '{note}' yaz",
+                f"{rm} için not: {note}",
+            ])
+            actions = [{"op": "update_room", "params": {"name": rm, "notes": note}, "description": f"{rm} dersliğinin notu güncellenecek."}]
+            expl = f"{rm} dersliğinin notu '{note}' olarak güncellenecek."
+        out.append(_data_mut(ctx, request, actions, expl))
+    return out
+
+
+def gen_teacher_subjects_set(n: int) -> list[dict]:
+    """update_teacher subjects[] — branş setini topluca değiştirme (GAP 18)."""
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        t = random.choice(ctx["teachers"])
+        subs = random.sample(ctx["subjects"], random.randint(1, min(3, len(ctx["subjects"]))))
+        slist = ", ".join(subs)
+        request = random.choice([
+            f"{first_name(t)} öğretmenin branşlarını {slist} yap",
+            f"{t} hocanın derslerini {slist} olarak ayarla, diğerlerini kaldır",
+            f"{first_name(t)} sadece {slist} versin",
+            f"{t} öğretmeninin yeterlilikleri {slist} olsun",
+        ])
+        actions = [{"op": "update_teacher", "params": {"name": t, "subjects": subs}, "description": f"{t} öğretmeninin branşları {slist} olarak ayarlanacak."}]
+        out.append(_data_mut(ctx, request, actions, f"{t} öğretmeninin branş seti {slist} yapılacak."))
+    return out
+
+
+def gen_update_class_year(n: int) -> list[dict]:
+    """update_class_year — kademe adı/sırası değiştirme (GAP 2/6, yeni op)."""
+    out = []
+    yrs = ["9. Sınıf", "10. Sınıf", "11. Sınıf", "12. Sınıf", "Hazırlık", "Anaokulu", "Ortaokul", "Lise 1"]
+    for _ in range(n):
+        ctx = make_context()
+        old = random.choice(yrs)
+        if random.random() < 0.6:
+            new = random.choice(["Lise 1", "Lise 2", "Lise Hazırlık", "Ortaokul Kademesi", "Düzey A", "Üst Kademe"])
+            request = random.choice([
+                f"{old} kademesinin adını {new} yap",
+                f"{old} düzeyini {new} olarak yeniden adlandır",
+                f"{old} kademesini {new} diye değiştir",
+            ])
+            actions = [{"op": "update_class_year", "params": {"name": old, "newName": new}, "description": f"'{old}' kademesinin adı '{new}' yapılacak."}]
+            expl = f"'{old}' kademesi '{new}' olarak yeniden adlandırılacak."
+        else:
+            oi = random.choice([0, 1, 2, 3])
+            request = random.choice([
+                f"{old} kademesini en üste al",
+                f"{old} düzeyini {oi + 1}. sıraya taşı",
+                f"{old} kademesini listede yukarı çek",
+            ])
+            actions = [{"op": "update_class_year", "params": {"name": old, "orderIndex": oi}, "description": f"'{old}' kademesinin sırası güncellenecek."}]
+            expl = f"'{old}' kademesinin görüntü sırası değiştirilecek."
+        out.append(_data_mut(ctx, request, actions, expl))
+    return out
+
+
+def gen_set_days(n: int) -> list[dict]:
+    """set_days — haftalık gün setini topluca ayarlama (GAP 9/24, yeni op)."""
+    out = []
+    presets = [
+        (["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"],
+         ["haftada 6 gün ders olsun", "cumartesi de okul olsun", "Pazartesi-Cumartesi çalışalım", "haftayı 6 güne çıkar"]),
+        (["Pazartesi", "Salı", "Çarşamba", "Perşembe"],
+         ["sadece Pazartesi-Perşembe çalışalım", "cumayı kaldır, 4 gün olsun", "haftada 4 gün ders olsun"]),
+        (["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"],
+         ["normal 5 güne dön", "Pazartesi-Cuma olsun", "hafta sonu olmasın, 5 gün ders"]),
+    ]
+    for _ in range(n):
+        ctx = make_context()
+        days, reqs = random.choice(presets)
+        request = random.choice(reqs)
+        actions = [{"op": "set_days", "params": {"days": days}, "description": f"Haftalık günler {', '.join(days)} olarak ayarlanacak."}]
+        out.append(_data_mut(ctx, request, actions, f"Çalışma günleri {len(days)} güne ayarlanacak: {', '.join(days)}."))
+    return out
+
+
+def gen_set_hour_times(n: int) -> list[dict]:
+    """set_hour_times — ders saatlerinin başlangıç/bitiş/isim ayarı (GAP 3/7, yeni op)."""
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        start = random.choice(["08:00", "08:30", "09:00", "08:15"])
+        lesson = random.choice([40, 45, 50])
+        brk = random.choice([10, 5, 15])
+        count = random.choice([6, 7, 8])
+        sh, sm = map(int, start.split(":"))
+        cur = sh * 60 + sm
+        hours = []
+        for i in range(count):
+            s = f"{cur // 60:02d}:{cur % 60:02d}"
+            cur += lesson
+            e = f"{cur // 60:02d}:{cur % 60:02d}"
+            cur += brk
+            hours.append({"name": f"{i + 1}. Ders", "startTime": s, "endTime": e})
+        request = random.choice([
+            f"Okul {start}'da başlasın, dersler {lesson} dakika, teneffüsler {brk} dakika olsun",
+            f"İlk ders {start}'da başlasın; {lesson} dk ders, {brk} dk teneffüs",
+            f"Ders saatlerini {start} başlangıçla {lesson} dakikalık ayarla, {count} ders",
+        ])
+        actions = [{"op": "set_hour_times", "params": {"hours": hours}, "description": f"Ders saatleri {start} başlangıçlı, {lesson} dk ders / {brk} dk teneffüs olarak ayarlanacak."}]
+        out.append(_data_mut(ctx, request, actions, f"Ders saatleri yeniden düzenlenecek ({count} ders, {start} başlangıç)."))
+    return out
+
+
+def gen_clear_day_hours(n: int) -> list[dict]:
+    """clear_day_hours — bir günün özel saatlerini genel plana döndürme (GAP 11/16, yeni op)."""
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        day = random.choice(ctx["days"])
+        request = random.choice([
+            f"{day_phrase(day)} gününü genel plana döndür",
+            f"{day_phrase(day)} için özel saatleri kaldır, genel plan geçerli olsun",
+            f"{day_phrase(day)} gününün özel ders saatlerini sıfırla",
+        ])
+        actions = [{"op": "clear_day_hours", "params": {"day": day}, "description": f"{day} günü genel ders saati planına döndürülecek."}]
+        out.append(_data_mut(ctx, request, actions, f"{day} günü genel plana döndürülecek."))
+    return out
+
+
+def gen_schedule_settings_query(n: int) -> list[dict]:
+    """getScheduleSettings tool_call — ders saatleri/teneffüs sorgusu (GAP 17)."""
+    out = []
+    triggers = [
+        "Dersler saat kaçta başlıyor?", "İlk ders ne zaman?", "Teneffüsler kaç dakika?",
+        "Ders saatlerini söyle", "Okul kaçta başlıyor?", "Günde kaç ders var ve saatleri ne?",
+        "Son ders kaçta bitiyor?", "Ders saati planı nedir?", "Öğle arası kaçta?",
+        "Ders programının saat düzeni nasıl?",
+    ]
+    for _ in range(n):
+        ctx = make_context()
+        request = random.choice(triggers)
+        payload = _tool_call(
+            "getScheduleSettings", {},
+            "Kullanıcı ders saatleri/teneffüs sürelerini sordu — gerçek saatleri okumak için "
+            "getScheduleSettings çağırıyorum, sonucu query olarak özetleyeceğim.",
+        )
+        out.append(example(ctx, request, payload))
+    return out
+
+
+def gen_teacher_search(n: int) -> list[dict]:
+    """searchTeacher / getSubjectTeachers / getTeacherActivities tool_call (GAP 12)."""
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        r = random.random()
+        if r < 0.4:
+            q = first_name(random.choice(ctx["teachers"]))
+            request = random.choice([
+                f"{q} adında öğretmen var mı?",
+                f"{q} diye birini bul",
+                f"İsminde {q} geçen öğretmenler kim?",
+            ])
+            payload = _tool_call("searchTeacher", {"query": q},
+                                 f"Kullanıcı '{q}' adlı öğretmeni arıyor — eşleşmeleri bulmak için searchTeacher çağırıyorum.")
+        elif r < 0.7:
+            subj = random.choice(ctx["subjects"])
+            request = random.choice([
+                f"{subj} dersine kim giriyor?",
+                f"{subj} öğretmenleri kim?",
+                f"{subj} branşındaki hocalar kimler?",
+            ])
+            payload = _tool_call("getSubjectTeachers", {"subject": subj},
+                                 f"Kullanıcı {subj} dersini veren öğretmenleri sordu — getSubjectTeachers çağırıyorum (branş + aktiviteden gelenler dahil).")
+        else:
+            t = random.choice(ctx["teachers"])
+            request = random.choice([
+                f"{first_name(t)} öğretmenin dersleri neler?",
+                f"{t} hangi sınıflara giriyor?",
+                f"{first_name(t)} hocanın ders yükü ne?",
+            ])
+            payload = _tool_call("getTeacherActivities", {"teacher": t},
+                                 f"Kullanıcı {t} öğretmeninin ders atamalarını sordu — getTeacherActivities çağırıyorum.")
+        out.append(example(ctx, request, payload))
+    return out
+
+
+def gen_list_constraints(n: int) -> list[dict]:
+    """listActiveConstraints read → constraint manage (çok turlu, GAP 4/14).
+
+    Kullanıcı bir kısıtlamayı açıklayarak işlem ister; model önce
+    listActiveConstraints ile tam parametreleri okur, sonra id ile uygular.
+    """
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        pairs = make_existing_constraints(ctx, random.randint(3, 7))
+        ctx["constraints"] = [p[1] for p in pairs]
+        target = random.choice(ctx["constraints"])
+        tid = target["id"]
+        desc = target["description"]
+        action = random.choice(["weight", "active", "delete"])
+        if action == "weight":
+            request = random.choice([
+                f"{desc} kuralını biraz gevşet",
+                "Kısıtlamalardan birinin ağırlığını düşürmek istiyorum, hangileri var?",
+            ])
+        elif action == "active":
+            request = f"{desc} kuralını geçici olarak kapat"
+        else:
+            request = f"{desc} kısıtlamasını sil"
+        step1 = _tool_call(
+            "listActiveConstraints", {},
+            "Kullanıcı belirli bir kısıtlama üzerinde işlem istiyor ama id vermedi — doğru "
+            "kuralı seçmek için önce listActiveConstraints ile tam parametreleri okuyorum.",
+        )
+        tool_result = {"count": len(ctx["constraints"]), "constraints": ctx["constraints"]}
+        if action == "weight":
+            neww = random.choice([40, 50, 60, 70])
+            final = {"kind": "data_mutation",
+                     "actions": [{"op": "set_constraint_weight", "params": {"constraintId": tid, "weight": neww}, "description": f"{tid} numaralı kısıtlama ağırlığı {neww} yapılacak."}],
+                     "explanation": f"{tid} numaralı kısıtlamanın ağırlığı {neww} yapılacak.",
+                     "requiresConfirmation": True, "confidence": round(random.uniform(0.82, 0.93), 2)}
+        elif action == "active":
+            final = {"kind": "data_mutation",
+                     "actions": [{"op": "set_constraint_active", "params": {"constraintId": tid, "active": False}, "description": f"{tid} numaralı kısıtlama pasifleştirilecek."}],
+                     "explanation": f"{tid} numaralı kısıtlama pasifleştirilecek.",
+                     "requiresConfirmation": True, "confidence": round(random.uniform(0.82, 0.93), 2)}
+        else:
+            final = {"kind": "data_mutation",
+                     "actions": [{"op": "delete_constraint", "params": {"constraintId": tid}, "description": f"{tid} numaralı kısıtlama silinecek. Onaylıyor musunuz?"}],
+                     "explanation": f"{tid} numaralı kısıtlama silinecek.",
+                     "requiresConfirmation": True, "confidence": round(random.uniform(0.82, 0.93), 2)}
+        out.append(example_multiturn(ctx, request, [(step1, tool_result), (final, None)]))
+    return out
+
+
 GENERATORS = {
     "teacher_not_available":      (gen_teacher_not_available, 250),
     "class_not_available":        (gen_class_not_available, 150),
@@ -5287,6 +5634,18 @@ GENERATORS = {
     "two_activities_consecutive":                 (gen_two_activities_consecutive, 70),
     "clear_split":                                (gen_clear_split, 70),
     "cancel_generation":                          (gen_cancel_generation, 60),
+
+    "rename_entities":                            (gen_rename_entities, 140),
+    "subject_color":                              (gen_subject_color, 70),
+    "entity_notes":                               (gen_entity_notes, 70),
+    "teacher_subjects_set":                       (gen_teacher_subjects_set, 70),
+    "update_class_year":                          (gen_update_class_year, 80),
+    "set_days":                                   (gen_set_days, 80),
+    "set_hour_times":                             (gen_set_hour_times, 90),
+    "clear_day_hours":                            (gen_clear_day_hours, 70),
+    "schedule_settings_query":                    (gen_schedule_settings_query, 90),
+    "teacher_search":                             (gen_teacher_search, 100),
+    "list_constraints":                           (gen_list_constraints, 100),
 }
 
 SCALE = int(os.environ.get("DPO_DATASET_SCALE", "22"))

@@ -210,7 +210,7 @@ describe('FET büyük ölçek testi', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Simulation successful');
 
-    const slots = await parseTimetable(outDir, { bundle, fetActivityIdsByActivity });
+    const { slots } = await parseTimetable(outDir, { bundle, fetActivityIdsByActivity });
     console.log(`Üretilen slot sayısı: ${slots.length}`);
 
     expect(slots.length).toBeGreaterThan(0);

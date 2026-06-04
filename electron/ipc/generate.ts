@@ -39,14 +39,8 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
       return err('BUSY', 'Zaten bir üretim devam ediyor. Önce iptal edin.');
     }
 
-    const fetOk = await checkFetAvailable();
-    if (!fetOk) {
-      return err(
-        'BINARY_NOT_FOUND',
-        'FET motoru bulunamadı. Uygulamayı yeniden yükleyin.',
-      );
-    }
-
+    // Slot'u senkron olarak işaretle: await'ten önce claim et, yoksa iki eşzamanlı
+    // generate:run guard'ı birlikte geçip iki FET süreci başlatabilir (cancel da bozulur).
     const controller = new AbortController();
     activeController = controller;
 
@@ -60,6 +54,14 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
 
     let tmpDir: string | null = null;
     try {
+      const fetOk = await checkFetAvailable();
+      if (!fetOk) {
+        return err(
+          'BINARY_NOT_FOUND',
+          'FET motoru bulunamadı. Uygulamayı yeniden yükleyin.',
+        );
+      }
+
       const bundle = gatherSchoolData();
       if (bundle.teachers.length === 0) {
         return err(
@@ -144,6 +146,7 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
         outDir,
         bundle,
         built.fetActivityIdsByActivity,
+        built.durationByFetId,
         {
           timeLimit: effectiveTimeLimit,
           signal: controller.signal,
@@ -197,7 +200,13 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
       return err('UNKNOWN', `Beklenmeyen hata: ${message}`, message);
     } finally {
       activeController = null;
-      void tmpDir;
+      if (tmpDir) {
+        try {
+          await fs.promises.rm(tmpDir, { recursive: true, force: true });
+        } catch (e) {
+          log.warn('Geçici FET dizini silinemedi', { tmpDir, error: String(e) });
+        }
+      }
     }
   });
 

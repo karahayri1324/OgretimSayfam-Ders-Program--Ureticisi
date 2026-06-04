@@ -61,6 +61,7 @@ const OP_TO_PAGE: Record<string, string> = {
   update_class: '/classes',
   delete_class: '/classes',
   add_class_year: '/classes',
+  update_class_year: '/classes',
   delete_class_year: '/classes',
 
   add_room: '/rooms',
@@ -92,8 +93,11 @@ const OP_TO_PAGE: Record<string, string> = {
 
   add_day: '/schedule',
   delete_day: '/schedule',
+  set_days: '/schedule',
   add_hour: '/schedule',
   delete_hour: '/schedule',
+  set_hour_times: '/schedule',
+  clear_day_hours: '/schedule',
 
   set_setting: '/settings',
 };
@@ -170,9 +174,10 @@ export default function AIPanel() {
   const toastSuccess = useToastStore((s) => s.success);
   const toastError = useToastStore((s) => s.error);
   const toastInfo = useToastStore((s) => s.info);
-  const toastWarn = useToastStore((s) => s.warn);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Onay uygulanırken aynı mesajın tekrar tetiklenmesini engelle (çift tık → çift mutation).
+  const applyingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -307,17 +312,39 @@ export default function AIPanel() {
 
   async function handleConfirm(msg: Message) {
     if (!msg.response) return;
+    if (msg.status !== 'pending') return;
+    if (applyingRef.current.has(msg.id)) return;
+    applyingRef.current.add(msg.id);
+    try {
+      await doConfirm(msg);
+    } finally {
+      applyingRef.current.delete(msg.id);
+    }
+  }
+
+  async function doConfirm(msg: Message) {
+    if (!msg.response) return;
     const kind = msg.response.kind ?? 'constraint';
     if (kind === 'constraint') {
       const r = msg.response as { constraints: AIConstraint[] };
+      const failures: string[] = [];
       for (const c of r.constraints) {
-        await addConstraint({
+        const okAdded = await addConstraint({
           type: c.type,
           weight: c.weight,
           active: c.active,
           params: c.params,
           source: 'ai',
         });
+        if (!okAdded) failures.push(c.type);
+      }
+      if (failures.length > 0) {
+        toastError(
+          'Kısıtlama eklenemedi',
+          `${failures.length}/${r.constraints.length} kısıtlama reddedildi: ${failures.join(', ')}`,
+        );
+        updateMessage(msg.id, { status: 'rejected' });
+        return;
       }
     } else if (kind === 'schedule_update') {
       const r = msg.response as AIScheduleUpdateResponse;
@@ -362,26 +389,21 @@ export default function AIPanel() {
           }
           const data = res.data as DataMutationApplyResult;
           await reloadAffectedStores(otherActions);
-          if (
-            data.errors.length === 0 &&
-            exportActions.length === 0 &&
-            navActions.length === 0
-          ) {
-            toastSuccess(
-              `${data.applied} işlem uygulandı`,
-              otherActions.map((a) => a.description).join('; '),
-            );
-          } else if (data.rolledBack) {
+          // Mutation atomik: herhangi bir hata → tümü geri alınır. O yüzden 'rejected' işaretle, başarı gösterme.
+          if (data.rolledBack || data.errors.length > 0) {
             toastError(
               'Hiçbir işlem uygulanmadı (geri alındı)',
               `Bir adım başarısız olduğu için tümü iptal edildi: ${data.errors
                 .map((e) => e.message)
                 .join('; ')}`,
             );
-          } else if (data.errors.length > 0) {
-            toastWarn(
-              `${data.applied}/${otherActions.length} işlem uygulandı`,
-              data.errors.map((e) => e.message).join('; '),
+            updateMessage(msg.id, { status: 'rejected' });
+            return;
+          }
+          if (exportActions.length === 0 && navActions.length === 0) {
+            toastSuccess(
+              `${data.applied} işlem uygulandı`,
+              otherActions.map((a) => a.description).join('; '),
             );
           }
 

@@ -34,8 +34,10 @@ def _ensure_jwt_secret() -> None:
         )
     stored = db.get_app_setting("jwt_secret", "")
     if not stored:
-        stored = secrets.token_hex(32)
-        db.set_app_setting("jwt_secret", stored)
+        # Atomik: yalnızca yoksa yaz, sonra kalıcı değeri tekrar oku. Çok-worker'da
+        # her worker'ın farklı secret üretip token'ları geçersiz kılmasını (TOCTOU) önler.
+        db.insert_app_setting_if_absent("jwt_secret", secrets.token_hex(32))
+        stored = db.get_app_setting("jwt_secret", "")
         log.warning(
             "JWT_SECRET ayarlı değil — DB'de otomatik secret üretildi. "
             "Üretim için ortam değişkeni olarak açıkça verin."
@@ -45,6 +47,12 @@ def _ensure_jwt_secret() -> None:
 
 def _bootstrap_admin() -> None:
     if not (settings.admin_email and settings.admin_password):
+        return
+    if len(settings.admin_password) < 8:
+        log.error(
+            "ADMIN_PASSWORD en az 8 karakter olmalı — admin bootstrap atlandı. "
+            "Servis çalışmaya devam ediyor; lütfen .env'deki ADMIN_PASSWORD'ü düzeltin."
+        )
         return
     existing = repo.get_user_by_email(settings.admin_email)
     if existing is None:

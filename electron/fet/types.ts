@@ -52,6 +52,7 @@ export type FetResultErr = {
   ok: false;
   errorCode:
     | 'NO_SOLUTION'
+    | 'PARTIAL'
     | 'BINARY_NOT_FOUND'
     | 'TIMEOUT'
     | 'CANCELLED'
@@ -84,6 +85,7 @@ export type BuilderContext = {
   activityGroupIdById: Map<number, number>;
   activityGroupBySubjectClass: Map<string, number>;
   fetActivityIdsByActivity: Map<number, number[]>;
+  durationByFetId: Map<number, number>;
   studentsNameByActivity: Map<number, string>;
   skipped: SkippedConstraint[];
 };

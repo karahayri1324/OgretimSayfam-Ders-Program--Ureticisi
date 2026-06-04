@@ -724,12 +724,36 @@ function teacherMinRestBetweenDays(c: Constraint, ctx: BuilderContext): HandlerR
   const minRest = getNum(c.params, 'minRestHours');
   if (minRest === null) return skip(ctx, c, 'minRestHours eksik');
   const totalHours = ctx.hours.length;
-  const restrictHours = Math.min(Math.floor(minRest), totalHours);
+  const k = Math.min(Math.floor(minRest), totalHours);
+  if (k <= 0) return skip(ctx, c, 'minRestHours geçersiz');
+  // Yaklaşım (NotAvailableTimes ile): her gece sınırında (gün N → gün N+1) gün N'in
+  // son `eveningBlock` saatini ve gün N+1'in ilk `morningBlock` saatini kapat; toplam = k.
+  // Böylece gün N'in son dersi ile gün N+1'in ilk dersi arasında en az k saat kalır.
+  // İlk günün sabahı ve son günün akşamı (gece sınırı olmadığından) kısıtlanmaz.
+  const eveningBlock = Math.ceil(k / 2);
+  const morningBlock = Math.floor(k / 2);
+  const days = ctx.days;
+  const seen = new Set<string>();
   const slots: FetSlot[] = [];
-  for (const d of ctx.days) {
-    for (let i = 0; i < restrictHours; i++) {
-      const hourObj = ctx.hours[totalHours - 1 - i];
-      if (hourObj) slots.push({ Day: d.name, Hour: hourObj.name });
+  const push = (dayName: string, hourName: string): void => {
+    const key = `${dayName}|${hourName}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    slots.push({ Day: dayName, Hour: hourName });
+  };
+  for (let di = 0; di < days.length; di++) {
+    const d = days[di]!;
+    if (di < days.length - 1) {
+      for (let i = 0; i < eveningBlock; i++) {
+        const hourObj = ctx.hours[totalHours - 1 - i];
+        if (hourObj) push(d.name, hourObj.name);
+      }
+    }
+    if (di > 0) {
+      for (let i = 0; i < morningBlock; i++) {
+        const hourObj = ctx.hours[i];
+        if (hourObj) push(d.name, hourObj.name);
+      }
     }
   }
   if (slots.length === 0) return skip(ctx, c, 'Geçerli slot yok');

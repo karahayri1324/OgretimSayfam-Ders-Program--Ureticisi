@@ -141,7 +141,7 @@ describe.skipIf(!haveFet)('FET entegrasyon — split + per-day', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('Simulation successful');
 
-    const slots = await parseTimetable(outDir, {
+    const { slots } = await parseTimetable(outDir, {
       bundle,
       fetActivityIdsByActivity: out.fetActivityIdsByActivity,
     });
@@ -179,7 +179,7 @@ describe.skipIf(!haveFet)('FET entegrasyon — split + per-day', () => {
     ], { encoding: 'utf-8', timeout: 60_000 });
     expect(r.status).toBe(0);
 
-    const slots = await parseTimetable(outDir, {
+    const { slots } = await parseTimetable(outDir, {
       bundle,
       fetActivityIdsByActivity: out.fetActivityIdsByActivity,
     });

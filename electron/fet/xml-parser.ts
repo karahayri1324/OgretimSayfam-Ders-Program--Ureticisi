@@ -8,13 +8,20 @@ import type { SchoolBundle } from './types.js';
 export type ParseContext = {
   bundle: SchoolBundle;
   fetActivityIdsByActivity: Map<number, number[]>;
+  durationByFetId?: Map<number, number>;
   dbActivityIdByFetId?: Map<number, number>;
+};
+
+export type ParseResult = {
+  slots: TimetableSlot[];
+  placedFetIds: Set<number>;
+  unplacedFetIds: number[];
 };
 
 export async function parseTimetable(
   outputDir: string,
   ctx: ParseContext,
-): Promise<TimetableSlot[]> {
+): Promise<ParseResult> {
   const activitiesXmlPath = await findActivitiesXml(outputDir);
   if (!activitiesXmlPath) {
     throw new Error('FET çıktısında activities.xml bulunamadı');
@@ -43,7 +50,7 @@ type RawActivity = {
   Room?: string;
 };
 
-function mapActivities(rawActs: RawActivity[], ctx: ParseContext): TimetableSlot[] {
+function mapActivities(rawActs: RawActivity[], ctx: ParseContext): ParseResult {
   const { bundle } = ctx;
   const dayIndexByName = new Map<string, number>();
   bundle.days
@@ -56,6 +63,7 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): TimetableSlot
     .slice()
     .sort((a, b) => a.orderIndex - b.orderIndex)
     .forEach((h, i) => hourIndexByName.set(h.name, i));
+  const hoursCount = hourIndexByName.size;
 
   const dbIdByFetId = ctx.dbActivityIdByFetId
     ?? invertFetIdMap(ctx.fetActivityIdsByActivity);
@@ -67,6 +75,11 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): TimetableSlot
   const roomByName = new Map(bundle.rooms.map(r => [r.name, r]));
 
   const slots: TimetableSlot[] = [];
+  const placedFetIds = new Set<number>();
+  const allFetIds = new Set<number>();
+  for (const ids of ctx.fetActivityIdsByActivity.values()) {
+    for (const id of ids) allFetIds.add(id);
+  }
 
   for (const raw of rawActs) {
     const fetId = typeof raw.Id === 'string' ? parseInt(raw.Id, 10) : raw.Id;
@@ -80,6 +93,7 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): TimetableSlot
     const hourName = (raw.Hour ?? '').toString();
     const dayIndex = dayIndexByName.get(dayName);
     const hourIndex = hourIndexByName.get(hourName);
+    // Yerleştirilemeyen aktiviteler boş <Day>/<Hour> ile gelir → atlanır (placedFetIds'e eklenmez).
     if (dayIndex === undefined || hourIndex === undefined) continue;
 
     const subj = subjectById.get(act.subjectId);
@@ -88,12 +102,16 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): TimetableSlot
     const roomName = (raw.Room ?? '').toString().trim();
     const room = roomName ? roomByName.get(roomName) : null;
 
-    const block = Math.max(1, act.blockDuration || 1);
-    for (let i = 0; i < block; i++) {
+    // Bu FET aktivitesinin gerçek süresi (split kalan blokları için blockDuration yanlış olur).
+    const duration = ctx.durationByFetId?.get(fetId) ?? Math.max(1, act.blockDuration || 1);
+    placedFetIds.add(fetId);
+    for (let i = 0; i < duration; i++) {
+      const hi = hourIndex + i;
+      if (hi >= hoursCount) break; // gün sınırını taşan blokları üretme
       slots.push({
         activityId: fetId,
         dayIndex,
-        hourIndex: hourIndex + i,
+        hourIndex: hi,
         classId: cls?.id ?? null,
         className: cls?.name ?? '',
         teacherId: teacher?.id ?? null,
@@ -106,7 +124,8 @@ function mapActivities(rawActs: RawActivity[], ctx: ParseContext): TimetableSlot
     }
   }
 
-  return slots;
+  const unplacedFetIds = [...allFetIds].filter((id) => !placedFetIds.has(id));
+  return { slots, placedFetIds, unplacedFetIds };
 }
 
 function invertFetIdMap(map: Map<number, number[]>): Map<number, number> {

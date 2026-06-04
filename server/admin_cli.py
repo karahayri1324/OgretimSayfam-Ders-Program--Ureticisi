@@ -101,6 +101,9 @@ def cmd_set_message(args) -> None:
 
 
 def cmd_set_limit(args) -> None:
+    if args.limit < -1 or args.limit > 1_000_000:
+        print("Hata: limit -1 (global) veya 0..1000000 olmalı.")
+        return
     u = _find(args.user)
     value = None if args.limit < 0 else args.limit
     repo.update_user(int(u["id"]), {"rate_limit_per_hour": value})
@@ -134,6 +137,9 @@ def cmd_settings(_args) -> None:
 
 
 def cmd_set_default_limit(args) -> None:
+    if args.limit < 0 or args.limit > 1_000_000:
+        print("Hata: global kota 0..1000000 arası olmalı (0 = sınırsız).")
+        return
     db.set_app_setting("default_rate_limit_per_hour", str(args.limit))
     print(f"Global saatlik kota = {args.limit}")
 

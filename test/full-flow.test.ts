@@ -150,7 +150,7 @@ describe('Full-flow E2E: boş veri → XML → FET → doğrulama', () => {
       expect(result.stdout).toContain('Simulation successful');
       expect(result.stdout.length).toBeGreaterThan(20);
 
-      const slots = await parseTimetable(outDir, {
+      const { slots } = await parseTimetable(outDir, {
         bundle,
         fetActivityIdsByActivity,
       });

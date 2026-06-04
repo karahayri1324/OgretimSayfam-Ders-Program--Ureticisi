@@ -12,6 +12,7 @@ import { settingsRepo, WRITABLE_SETTING_KEYS } from '../db/repositories/settings
 import { timetablesRepo } from '../db/repositories/timetables.js';
 import { getDb } from '../db/connection.js';
 import type { ConstraintType, TimetableSlot } from '../../src/lib/types.js';
+import { ConstraintTypeEnum } from './schema.js';
 import { log } from '../utils/logger.js';
 import type {
   DataMutationAction,
@@ -60,6 +61,15 @@ function requireString(params: Record<string, unknown>, key: string): string {
   return v.trim();
 }
 
+function requireConstraintType(params: Record<string, unknown>): ConstraintType {
+  const type = requireString(params, 'type');
+  const parsed = ConstraintTypeEnum.safeParse(type);
+  if (!parsed.success) {
+    throw new Error(`Geçersiz kısıtlama tipi: '${type}'`);
+  }
+  return parsed.data as ConstraintType;
+}
+
 function optString(params: Record<string, unknown>, key: string): string | undefined {
   const v = params[key];
   if (typeof v !== 'string' || !v.trim()) return undefined;
@@ -75,6 +85,8 @@ function optInt(params: Record<string, unknown>, key: string): number | undefine
   }
   return undefined;
 }
+
+const userHourToSlotIndex = (hour: number): number => hour - 1;
 
 function ensureSubject(name: string): number {
   const existing = findByName(name, subjectsRepo.list());
@@ -197,6 +209,12 @@ const handlers: Record<DataMutationOp, Handler> = {
     if (wth !== undefined) patch['weeklyTargetHours'] = wth;
     const notes = optString(params, 'notes');
     if (notes !== undefined) patch['notes'] = notes;
+    if (Array.isArray(params['subjects'])) {
+      const names = (params['subjects'] as unknown[]).filter(
+        (s): s is string => typeof s === 'string' && s.trim().length > 0,
+      );
+      patch['subjectIds'] = names.map((s) => ensureSubject(s));
+    }
     teachersRepo.update(teacher.id, patch);
     return `'${teacher.name}' öğretmeni güncellendi.`;
   },
@@ -314,6 +332,21 @@ const handlers: Record<DataMutationOp, Handler> = {
     return `'${name}' kademesi eklendi (id=${id}).`;
   },
 
+  update_class_year(params) {
+    const name = requireString(params, 'name');
+    const year = findByName(name, classYearsRepo.list());
+    if (!year) throw new Error(`Kademe bulunamadı: '${name}'`);
+    const patch: { name?: string; orderIndex?: number } = {};
+    if (params['newName']) patch.name = String(params['newName']).trim();
+    const oi = optInt(params, 'orderIndex');
+    if (oi !== undefined) patch.orderIndex = oi;
+    if (patch.name === undefined && patch.orderIndex === undefined) {
+      throw new Error("Güncellenecek alan yok ('newName' veya 'orderIndex' verin).");
+    }
+    classYearsRepo.update(year.id, patch);
+    return `'${year.name}' kademesi güncellendi${patch.name ? ` → '${patch.name}'` : ''}.`;
+  },
+
   delete_class_year(params) {
     const name = requireString(params, 'name');
     const year = findByName(name, classYearsRepo.list());
@@ -343,6 +376,8 @@ const handlers: Record<DataMutationOp, Handler> = {
     if (cap !== undefined) patch['capacity'] = cap;
     const building = optString(params, 'building');
     if (building !== undefined) patch['building'] = building;
+    const notes = optString(params, 'notes');
+    if (notes !== undefined) patch['notes'] = notes;
     roomsRepo.update(room.id, patch);
     return `'${room.name}' dersliği güncellendi.`;
   },
@@ -462,6 +497,23 @@ const handlers: Record<DataMutationOp, Handler> = {
     return `'${name}' günü programdan kaldırıldı.`;
   },
 
+  set_days(params) {
+    const raw = params['days'];
+    if (!Array.isArray(raw) || raw.length === 0) {
+      throw new Error("'days' en az 1 gün adı içeren bir dizi olmalı.");
+    }
+    const names: string[] = [];
+    for (const d of raw) {
+      if (typeof d !== 'string' || !d.trim()) {
+        throw new Error('days içinde geçersiz değer var.');
+      }
+      const n = d.trim();
+      if (!names.some((x) => deburr(x) === deburr(n))) names.push(n);
+    }
+    daysRepo.replaceAll(names);
+    return `Haftalık günler ayarlandı (${names.length} gün): ${names.join(', ')}.`;
+  },
+
   add_hour(params) {
     const current = hoursRepo.list();
     const name = optString(params, 'name') ?? `${current.length + 1}. Ders`;
@@ -499,6 +551,37 @@ const handlers: Record<DataMutationOp, Handler> = {
     );
     const cleared = clearDayHourOverrides();
     return `'${removedName}' ders saati kaldırıldı.${cleared}`;
+  },
+
+  set_hour_times(params) {
+    const raw = params['hours'];
+    if (!Array.isArray(raw) || raw.length === 0) {
+      throw new Error("'hours' en az 1 ders saati içeren bir dizi olmalı.");
+    }
+    const entries: { name: string; startTime: string | null; endTime: string | null }[] = [];
+    for (let i = 0; i < raw.length; i++) {
+      const h = raw[i] as Record<string, unknown> | null;
+      if (!h || typeof h !== 'object') throw new Error(`hours[${i}] obje değil.`);
+      const name = optString(h, 'name') ?? `${i + 1}. Ders`;
+      const startTime = optString(h, 'startTime') ?? null;
+      const endTime = optString(h, 'endTime') ?? null;
+      entries.push({ name, startTime, endTime });
+    }
+    hoursRepo.replaceAll(entries);
+    const cleared = clearDayHourOverrides();
+    return `${entries.length} ders saati güncellendi (isim/başlangıç/bitiş).${cleared}`;
+  },
+
+  clear_day_hours(params) {
+    const dayName = requireString(params, 'day');
+    const day = findByName(dayName, daysRepo.list());
+    if (!day) throw new Error(`Gün bulunamadı: '${dayName}'`);
+    const had = dayHoursRepo.listByDay(day.id).length > 0;
+    if (!had) {
+      return `'${day.name}' zaten genel ders saati planını kullanıyor. Atlandı.`;
+    }
+    dayHoursRepo.replaceForDay(day.id, []);
+    return `'${day.name}' günü genel ders saati planına döndürüldü.`;
   },
 
   link_teacher_subject(params) {
@@ -564,7 +647,7 @@ const handlers: Record<DataMutationOp, Handler> = {
   },
 
   add_constraint(params) {
-    const type = requireString(params, 'type') as ConstraintType;
+    const type = requireConstraintType(params);
     const weight = Number(params.weight ?? 100);
     if (!Number.isFinite(weight) || weight < 0 || weight > 100) {
       throw new Error('weight 0-100 arası olmalı.');
@@ -598,7 +681,7 @@ const handlers: Record<DataMutationOp, Handler> = {
   },
 
   add_activity_constraint(params) {
-    const type = requireString(params, 'type') as ConstraintType;
+    const type = requireConstraintType(params);
     const filter =
       typeof params.filter === 'object' && params.filter !== null
         ? (params.filter as Record<string, unknown>)
@@ -857,7 +940,7 @@ const handlers: Record<DataMutationOp, Handler> = {
       (s: TimetableSlot) =>
         s.classId === klass.id &&
         s.dayIndex === dayObj.orderIndex &&
-        s.hourIndex === hour,
+        s.hourIndex === userHourToSlotIndex(hour),
     );
     if (!slot) {
       throw new Error(
@@ -1119,13 +1202,13 @@ const handlers: Record<DataMutationOp, Handler> = {
       (s: TimetableSlot) =>
         s.classId === klass1.id &&
         s.dayIndex === dayObj1.orderIndex &&
-        s.hourIndex === hour1,
+        s.hourIndex === userHourToSlotIndex(hour1),
     );
     const slotB = latest.slots.find(
       (s: TimetableSlot) =>
         s.classId === klass2.id &&
         s.dayIndex === dayObj2.orderIndex &&
-        s.hourIndex === hour2,
+        s.hourIndex === userHourToSlotIndex(hour2),
     );
     if (!slotA || !slotB) {
       throw new Error(

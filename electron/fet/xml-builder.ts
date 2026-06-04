@@ -14,6 +14,7 @@ export type BuildResult = {
   xml: string;
   skipped: SkippedConstraint[];
   fetActivityIdsByActivity: Map<number, number[]>;
+  durationByFetId: Map<number, number>;
   activityGroupIdById: Map<number, number>;
 };
 
@@ -50,6 +51,7 @@ export function buildFetXml(school: SchoolBundle): BuildResult {
     xml,
     skipped: ctx.skipped,
     fetActivityIdsByActivity: ctx.fetActivityIdsByActivity,
+    durationByFetId: ctx.durationByFetId,
     activityGroupIdById: ctx.activityGroupIdById,
   };
 }
@@ -106,6 +108,7 @@ function buildContext(school: SchoolBundle): BuilderContext {
   const roomByName = new Map(school.rooms.map(r => [r.name, r]));
 
   const fetActivityIdsByActivity = new Map<number, number[]>();
+  const durationByFetId = new Map<number, number>();
   const activityGroupIdById = new Map<number, number>();
   let nextId = 1;
   let nextGroup = 1;
@@ -116,7 +119,12 @@ function buildContext(school: SchoolBundle): BuilderContext {
     const remainder = total - fullBlocks * block;
     const count = fullBlocks + (remainder > 0 ? 1 : 0);
     const ids: number[] = [];
-    for (let i = 0; i < count; i++) ids.push(nextId++);
+    for (let i = 0; i < count; i++) {
+      const id = nextId++;
+      ids.push(id);
+      const isLastWithRemainder = remainder > 0 && i === count - 1;
+      durationByFetId.set(id, isLastWithRemainder ? remainder : block);
+    }
     fetActivityIdsByActivity.set(a.id, ids);
     activityGroupIdById.set(a.id, nextGroup++);
   }
@@ -182,6 +190,7 @@ function buildContext(school: SchoolBundle): BuilderContext {
     activityGroupIdById,
     activityGroupBySubjectClass,
     fetActivityIdsByActivity,
+    durationByFetId,
     studentsNameByActivity,
     skipped: [],
   };
@@ -313,11 +322,8 @@ function buildActivitiesList(root: XmlNode, ctx: BuilderContext): void {
     const studentsName =
       ctx.studentsNameByActivity.get(a.id) ?? classMap.get(a.classId) ?? '';
 
-    const fullBlocks = Math.floor(total / block);
-    const remainder = total - fullBlocks * block;
     for (let i = 0; i < fetIds.length; i++) {
-      const isLastWithRemainder = remainder > 0 && i === fetIds.length - 1;
-      const duration = isLastWithRemainder ? remainder : block;
+      const duration = ctx.durationByFetId.get(fetIds[i]!) ?? block;
 
       const act = list.ele('Activity');
       if (teacherName) act.ele('Teacher').txt(teacherName).up();

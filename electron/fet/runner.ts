@@ -10,13 +10,13 @@ import type {
   FetRunOptions,
   SchoolBundle,
 } from './types.js';
-import type { TimetableSlot } from '../../src/lib/types.js';
 
 export async function runFet(
   fetFilePath: string,
   outputDir: string,
   bundle: SchoolBundle,
   fetActivityIdsByActivity: Map<number, number[]>,
+  durationByFetId: Map<number, number>,
   opts: FetRunOptions = {},
 ): Promise<FetResult> {
   const start = Date.now();
@@ -150,26 +150,43 @@ export async function runFet(
       }
 
       if (code === 0) {
-        if (/could not (generate|find)/i.test(stdoutBuf)) {
+        // FET çözümsüz/imkansız durumda da 0 ile çıkabilir; stdout + logs/result dosyalarına bak.
+        const resultText = `${stdoutBuf}\n${await readErrorFiles(outputDir)}`;
+        if (/could not (generate|find)|impossible|imkans|olanaks/i.test(resultText)) {
           resolve({
             ok: false,
             errorCode: 'NO_SOLUTION',
             message:
               'Kısıtlamalar çok sert, çözüm bulunamadı. Bazı kısıtlamaları kaldırın veya esnetin.',
             outputDir,
-            rawError: stdoutBuf,
+            rawError: resultText,
             durationMs: duration,
           });
           return;
         }
 
         try {
-          const timetable: TimetableSlot[] = await parseTimetable(outputDir, {
+          const parsed = await parseTimetable(outputDir, {
             bundle,
             fetActivityIdsByActivity,
+            durationByFetId,
           });
+          if (parsed.unplacedFetIds.length > 0) {
+            const total = parsed.placedFetIds.size + parsed.unplacedFetIds.length;
+            resolve({
+              ok: false,
+              errorCode: 'PARTIAL',
+              message:
+                `Program tamamlanamadı: ${parsed.unplacedFetIds.length}/${total} ders yerleştirilemedi. ` +
+                'Kısıtlamaları gevşetin ya da gün/saat ekleyin.',
+              outputDir,
+              rawError: resultText,
+              durationMs: duration,
+            });
+            return;
+          }
           opts.onProgress?.({ kind: 'done', message: 'Program başarıyla üretildi' });
-          resolve({ ok: true, outputDir, timetable, durationMs: duration });
+          resolve({ ok: true, outputDir, timetable: parsed.slots, durationMs: duration });
         } catch (e) {
           resolve({
             ok: false,
@@ -260,7 +277,7 @@ async function readErrorFiles(outputDir: string): Promise<string> {
 type ErrCode = Extract<FetResult, { ok: false }>['errorCode'];
 
 function classifyError(raw: string): { code: ErrCode; message: string } {
-  if (/could not (generate|find)/i.test(raw)) {
+  if (/could not (generate|find)|impossible|imkans|olanaks/i.test(raw)) {
     return {
       code: 'NO_SOLUTION',
       message:

@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { useAIChatStore } from './ai-chat';
+import { useGenerateStore } from './generate';
 
 export type AuthUser = {
   id: number;
@@ -58,6 +60,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       await window.api.auth.logout();
     } finally {
       set({ authed: false, user: null });
+      // Oturum kapanınca önceki oturumun bellekteki AI sohbeti ve üretim sonucu kalmasın.
+      try {
+        useAIChatStore.getState().clear();
+        useGenerateStore.getState().reset();
+      } catch {
+        // store erişilemezse yok say
+      }
     }
   },
 }));
