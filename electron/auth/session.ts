@@ -36,20 +36,36 @@ export type RegisterInput = {
   school?: string | null;
 };
 
-export type LoginInput = { email: string; password: string };
+export type LoginInput = { email: string; password: string; remember?: boolean };
 
-function persist(token: string, user: SessionUser): void {
-  settingsRepo.setMany({
-    [TOKEN_KEY]: token,
-    [USER_KEY]: JSON.stringify(user),
-  });
+// "Bu cihazda oturumumu açık tut" KAPALI iken token yalnız bellekte tutulur (kalıcı DB'ye
+// yazılmaz); uygulama yeniden açılınca oturum kapanır (#7). Eskiden onay kutusu yok sayılıp
+// her zaman kalıcı saklanıyordu.
+let memToken: string | null = null;
+let memUser: SessionUser | null = null;
+
+function persist(token: string, user: SessionUser, remember: boolean): void {
+  memToken = token;
+  memUser = user;
+  if (remember) {
+    settingsRepo.setMany({
+      [TOKEN_KEY]: token,
+      [USER_KEY]: JSON.stringify(user),
+    });
+  } else {
+    // Önceden "hatırla" ile kalmış kalıcı token varsa temizle ki kapanışta oturum gerçekten bitsin.
+    settingsRepo.setMany({ [TOKEN_KEY]: '', [USER_KEY]: '' });
+  }
 }
 
 export function clearSession(): void {
+  memToken = null;
+  memUser = null;
   settingsRepo.setMany({ [TOKEN_KEY]: '', [USER_KEY]: '' });
 }
 
 export function getToken(): string | null {
+  if (memToken && memToken.trim()) return memToken.trim();
   try {
     const v = settingsRepo.get(TOKEN_KEY);
     return v && v.trim() ? v.trim() : null;
@@ -73,6 +89,9 @@ function normalizeUser(raw: unknown): SessionUser | null {
 }
 
 export function getSession(): SessionView {
+  if (memToken && memToken.trim()) {
+    return { authed: true, user: memUser };
+  }
   const token = getToken();
   if (!token) return { authed: false, user: null };
   try {
@@ -130,7 +149,7 @@ export async function register(input: RegisterInput): Promise<SessionUser> {
       name: input.name ?? null,
       school: input.school ?? null,
     });
-    persist(token, user);
+    persist(token, user, true);
     log.info('Kayıt başarılı', { email: user.email });
     return user;
   } catch (e) {
@@ -145,7 +164,7 @@ export async function login(input: LoginInput): Promise<SessionUser> {
       email: input.email,
       password: input.password,
     });
-    persist(token, user);
+    persist(token, user, input.remember ?? true);
     log.info('Giriş başarılı', { email: user.email });
     return user;
   } catch (e) {

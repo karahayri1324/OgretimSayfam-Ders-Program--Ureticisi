@@ -56,6 +56,28 @@ export const activitiesRepo = {
     const schoolId = schoolsRepo.getActiveId();
 
     if (input.id !== undefined && input.id !== null) {
+      // Hedef (sınıf+ders+öğretmen) dörtlüsü BAŞKA bir satırda zaten varsa, düz UPDATE
+      // UNIQUE kısıtını çökertir (cryptic SQLITE_CONSTRAINT + tüm batch rollback). Önce
+      // kontrol edip anlaşılır bir hata ver (örn. öğretmen birleştirme/ikame çakışması).
+      const clash = db
+        .prepare(
+          `SELECT id FROM activities
+           WHERE school_id = ? AND class_id = ? AND subject_id = ?
+             AND teacher_id IS ? AND id != ?`,
+        )
+        .get(
+          schoolId,
+          input.classId,
+          input.subjectId,
+          input.teacherId ?? null,
+          input.id,
+        ) as { id: number } | undefined;
+      if (clash) {
+        throw new Error(
+          'Bu sınıf + ders + öğretmen kombinasyonu zaten başka bir aktivitede mevcut; ' +
+            'aynı dersi aynı öğretmene ikinci kez atayamazsınız.',
+        );
+      }
       db.prepare(
         `UPDATE activities SET
            class_id = ?, subject_id = ?, teacher_id = ?,

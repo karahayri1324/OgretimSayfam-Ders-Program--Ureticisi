@@ -484,7 +484,14 @@ function ClassDialog({
           <Button variant="secondary" onClick={onClose}>
             {tr.common.cancel}
           </Button>
-          <Button onClick={submit} disabled={submitting || parsedNames.length === 0}>
+          <Button
+            onClick={submit}
+            disabled={
+              submitting ||
+              parsedNames.length === 0 ||
+              (homeRoomMode === 'custom' && customRoomId == null)
+            }
+          >
             {parsedNames.length > 1
               ? `${parsedNames.length} sınıf ekle`
               : tr.common.save}

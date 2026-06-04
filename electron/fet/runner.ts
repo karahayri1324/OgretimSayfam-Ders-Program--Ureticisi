@@ -50,7 +50,9 @@ export async function runFet(
   return new Promise<FetResult>(resolve => {
     let proc;
     try {
-      proc = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      // windowsHide: Windows'ta fet-cl.exe (console-subsystem) spawn edilince açılan siyah
+      // konsol penceresini bastırır; yoksa her üretimde ekranda yanıp söner (#1).
+      proc = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     } catch (e) {
       resolve({
         ok: false,
@@ -279,11 +281,18 @@ async function readErrorFiles(outputDir: string): Promise<string> {
 type ErrCode = Extract<FetResult, { ok: false }>['errorCode'];
 
 function classifyError(raw: string): { code: ErrCode; message: string } {
-  if (/could not (generate|find)|impossible|imkans|olanaks/i.test(raw)) {
+  // FET çözülemez veriyi "Cannot optimize/generate/precompute ... because the number of hours ..."
+  // gibi ifadelerle bildirir; eski regex yalnızca "could not" yakalayıp bunları UNKNOWN'a
+  // düşürüyordu (#17). Infeasibility kalıplarını NO_SOLUTION olarak sınıflandır.
+  if (
+    /could not (generate|find)|cannot (generate|optimize|precompute|schedule)|impossib|imkans|olanaks|not enough|number of (hours|activities|sub-?activities)|inconsistent/i.test(
+      raw,
+    )
+  ) {
     return {
       code: 'NO_SOLUTION',
       message:
-        'Kısıtlamalar çok sert, çözüm bulunamadı. Bazı kısıtlamaları kaldırın veya esnetin.',
+        'Kısıtlamalar çok sert veya veriler tutarsız (ör. bir sınıfa haftalık slot sayısından fazla ders). Bazı kısıtlamaları kaldırın/esnetin ya da ders saatlerini azaltın.',
     };
   }
   if (/xml|parse|invalid/i.test(raw)) {

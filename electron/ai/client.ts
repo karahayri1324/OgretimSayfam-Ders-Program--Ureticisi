@@ -156,22 +156,14 @@ async function singleRoundtrip(
   const raw = await post();
   try {
     return validateAIResponse(coerceJson(raw));
-  } catch (firstErr) {
-    log.warn('AI yanıtı doğrulanamadı, yeniden deneniyor', {
-      error: firstErr instanceof Error ? firstErr.message : String(firstErr),
-    });
-    let raw2: unknown;
-    try {
-      raw2 = await post();
-    } catch (e) {
-      throw e;
-    }
-    try {
-      return validateAIResponse(coerceJson(raw2));
-    } catch (secondErr) {
-      const msg = secondErr instanceof Error ? secondErr.message : String(secondErr);
-      throw new AIError('AI_INVALID_RESPONSE', `AI yanıtı doğrulanamadı: ${msg}`, secondErr);
-    }
+  } catch (err) {
+    // Önceden burada ikinci bir post() yapılıyordu; bu sunucuda İKİNCİ bir saatlik kota
+    // birimi tüketiyordu (#8) — aynı (genelde deterministik) çıktı için kullanıcı 2 hak
+    // kaybediyordu. coerceJson zaten fence/fazla-metin toleranslı; doğrulama başarısızsa
+    // kotayı yeniden harcamadan net hata ver.
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn('AI yanıtı doğrulanamadı', { error: msg });
+    throw new AIError('AI_INVALID_RESPONSE', `AI yanıtı doğrulanamadı: ${msg}`, err);
   }
 }
 
@@ -187,8 +179,14 @@ export const aiClient = {
   }: ParseRequest): Promise<ParseWithToolsResult> {
     const toolHistory: ToolHistoryEntry[] = [];
     const maxIterations = readMaxToolIterations();
+    // Çok-turlu tool döngüsü için TOPLAM süre bütçesi: her post()'un kendi timeout'u var ama
+    // turların toplamı kullanıcıyı dakikalarca bekletebilir (#9). Toplam aşılırsa durdur.
+    const deadline = Date.now() + readTimeoutMs() * maxIterations;
 
     for (let i = 0; i < maxIterations; i++) {
+      if (Date.now() > deadline) {
+        throw new AIError('AI_TIMEOUT', 'AI işlemi toplam süre sınırını aştı.');
+      }
       const isLastTurn = i === maxIterations - 1;
       const response = await singleRoundtrip(text, context, toolHistory, history, {
         noMoreTools: isLastTurn,

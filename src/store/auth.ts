@@ -16,7 +16,7 @@ type AuthState = {
   ready: boolean;
   user: AuthUser | null;
   init: () => Promise<void>;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, remember?: boolean) => Promise<void>;
   register: (input: {
     email: string;
     password: string;
@@ -43,8 +43,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ authed: false, user: null, ready: true });
   },
 
-  login: async (email, password) => {
-    const res = await window.api.auth.login({ email, password });
+  login: async (email, password, remember = true) => {
+    const res = await window.api.auth.login({ email, password, remember });
     if (!res.ok) throw new Error(res.error.message);
     set({ authed: true, user: res.data as AuthUser });
   },

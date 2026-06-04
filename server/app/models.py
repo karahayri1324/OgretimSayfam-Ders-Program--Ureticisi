@@ -36,35 +36,37 @@ class MeResponse(BaseModel):
 
 
 class AIContext(BaseModel):
-    teachers: list[str] = Field(default_factory=list)
-    classes: list[str] = Field(default_factory=list)
-    subjects: list[str] = Field(default_factory=list)
-    rooms: list[str] = Field(default_factory=list)
-    days: list[str] = Field(default_factory=list)
-    hoursPerDay: int = 8
-    constraints: list[dict[str, Any]] = Field(default_factory=list)
+    teachers: list[str] = Field(default_factory=list, max_length=5000)
+    classes: list[str] = Field(default_factory=list, max_length=5000)
+    subjects: list[str] = Field(default_factory=list, max_length=5000)
+    rooms: list[str] = Field(default_factory=list, max_length=5000)
+    days: list[str] = Field(default_factory=list, max_length=60)
+    hoursPerDay: int = Field(default=8, ge=0, le=100)
+    constraints: list[dict[str, Any]] = Field(default_factory=list, max_length=5000)
 
 
 class HistoryEntry(BaseModel):
-    role: str
-    text: str
+    role: str = Field(max_length=32)
+    text: str = Field(max_length=8000)
 
 
 class ToolHistoryEntry(BaseModel):
-    role: str = "tool"
-    tool: str
+    role: str = Field(default="tool", max_length=32)
+    tool: str = Field(max_length=200)
     args: dict[str, Any] = Field(default_factory=dict)
     result: Any = None
-    reasoning: str = ""
+    reasoning: str = Field(default="", max_length=8000)
 
 
 class AIRequest(BaseModel):
     """Electron `client.ts` gövdesiyle birebir (INFERENCE_CONTRACT.md §1)."""
 
+    # Liste alanlarına üst sınır: aksi halde devasa history/toolHistory ile bellek + upstream
+    # token maliyeti şişirilip DoS yapılabilir (kimliği doğrulanmış/demo kullanıcı bile).
     text: str = Field(min_length=1, max_length=8000)
     context: AIContext
-    history: list[HistoryEntry] = Field(default_factory=list)
-    toolHistory: list[ToolHistoryEntry] = Field(default_factory=list)
+    history: list[HistoryEntry] = Field(default_factory=list, max_length=200)
+    toolHistory: list[ToolHistoryEntry] = Field(default_factory=list, max_length=200)
     noMoreTools: bool = False
 
 

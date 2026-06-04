@@ -36,9 +36,16 @@ function viewLabel(v: ViewMode): string {
   return 'Derslik';
 }
 
-function buildSlotMap(slots: TimetableSlot[]): Map<string, TimetableSlot> {
-  const m = new Map<string, TimetableSlot>();
-  for (const s of slots) m.set(`${s.dayIndex}_${s.hourIndex}`, s);
+function buildSlotMap(slots: TimetableSlot[]): Map<string, TimetableSlot[]> {
+  // Aynı (gün, saat) hücresinde birden çok aktivite olabilir (split/eşli sınıf, farklı derslik).
+  // Eskiden Map tek slot tutuyordu → ikinci aktivite sessizce kayboluyordu (#8). Dizi tut.
+  const m = new Map<string, TimetableSlot[]>();
+  for (const s of slots) {
+    const key = `${s.dayIndex}_${s.hourIndex}`;
+    const arr = m.get(key);
+    if (arr) arr.push(s);
+    else m.set(key, [s]);
+  }
   return m;
 }
 
@@ -55,7 +62,11 @@ export function buildHtml(ctx: ExportContext): string {
   const { days, hours, viewMode, entityName, schoolName, generatedAt, filteredSlots, subjects } =
     ctx;
   const subjectColor = new Map<number, string>();
-  for (const s of subjects) subjectColor.set(s.id, s.color ?? '#3b82f6');
+  // AI add_subject/update_subject rastgele 'color' string'i kabul edebiliyor; bu string burada
+  // style attribute'una enjekte ediliyordu (CSS/markup injection). Yalnız geçerli hex'e izin ver (E1).
+  const safeHexColor = (c: string | null | undefined): string =>
+    c && /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : '#3b82f6';
+  for (const s of subjects) subjectColor.set(s.id, safeHexColor(s.color));
   const slotMap = buildSlotMap(filteredSlots);
 
   const tableHead = `
@@ -75,19 +86,25 @@ export function buildHtml(ctx: ExportContext): string {
           : '';
       const cells = days
         .map((_d, di) => {
-          const slot = slotMap.get(`${di}_${hi}`);
-          if (!slot) return '<td class="empty">—</td>';
+          const cellSlots = slotMap.get(`${di}_${hi}`) ?? [];
+          if (cellSlots.length === 0) return '<td class="empty">—</td>';
+          const first = cellSlots[0]!;
           const color =
-            slot.subjectId != null
-              ? subjectColor.get(slot.subjectId) ?? '#3b82f6'
+            first.subjectId != null
+              ? subjectColor.get(first.subjectId) ?? '#3b82f6'
               : '#3b82f6';
-          const parts = cellText(slot, viewMode);
-          return `<td class="cell" style="background:${color}1f;border-left:3px solid ${color};">${parts
-            .map(
-              (p, idx) =>
-                `<div class="${idx === 0 ? 'subj' : 'meta'}">${escapeHtml(p)}</div>`,
+          // Aynı hücredeki tüm aktiviteleri istifle (split/eşli) — ikincisi düşmesin (#8).
+          const inner = cellSlots
+            .map((slot) =>
+              cellText(slot, viewMode)
+                .map(
+                  (p, idx) =>
+                    `<div class="${idx === 0 ? 'subj' : 'meta'}">${escapeHtml(p)}</div>`,
+                )
+                .join(''),
             )
-            .join('')}</td>`;
+            .join('<div class="split-sep"></div>');
+          return `<td class="cell" style="background:${color}1f;border-left:3px solid ${color};">${inner}</td>`;
         })
         .join('');
       return `<tr><th class="hd row">${escapeHtml(label)}${time}</th>${cells}</tr>`;
@@ -147,12 +164,15 @@ export function downloadXlsx(ctx: ExportContext, filename: string): void {
     const time = h.startTime && h.endTime ? ` (${h.startTime}–${h.endTime})` : '';
     const row: (string | number)[] = [`${label}${time}`];
     days.forEach((_d, di) => {
-      const slot = slotMap.get(`${di}_${hi}`);
-      if (!slot) {
+      const cellSlots = slotMap.get(`${di}_${hi}`) ?? [];
+      if (cellSlots.length === 0) {
         row.push('');
         return;
       }
-      row.push(cellText(slot, viewMode).join('\n'));
+      // Aynı hücredeki tüm aktiviteleri (split/eşli) birleştir — ikincisi düşmesin (#8, Excel yolu).
+      row.push(
+        cellSlots.map((slot) => cellText(slot, viewMode).join('\n')).join('\n— — —\n'),
+      );
     });
     rows.push(row);
   });

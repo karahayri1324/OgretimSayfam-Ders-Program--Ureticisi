@@ -44,6 +44,11 @@ def get_user_by_email(email: str) -> sqlite3.Row | None:
     )
 
 
+def count_admins() -> int:
+    row = db.query_one("SELECT COUNT(*) AS c FROM users WHERE is_admin = 1", ())
+    return int(row["c"]) if row else 0
+
+
 def touch_last_seen(user_id: int) -> None:
     db.execute(
         "UPDATE users SET last_seen_at = ? WHERE id = ?", (db.utcnow_iso(), user_id)

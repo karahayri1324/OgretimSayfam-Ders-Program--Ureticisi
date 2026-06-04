@@ -77,25 +77,52 @@ def try_consume(user: sqlite3.Row) -> tuple[bool, int, int]:
     user_id = int(user["id"])
     now = datetime.now(timezone.utc)
     since = _iso(now - _WINDOW)
-    with db._lock:  # noqa: SLF001 — kasıtlı: tek atomik kritik bölge
+    with db._lock:  # noqa: SLF001 — proc-içi serileştirme
+        conn = db.get_conn()
+        # BEGIN IMMEDIATE: SQLite write-lock'ı SELECT'ten ÖNCE alır → --workers N altında (ayrı
+        # process'ler, ayrı bağlantılar) read-modify-write'ı süreçler arası serileştirir.
+        # In-process RLock tek başına süreçler arası TOCTOU'yu engellemiyordu (#4).
+        if conn.in_transaction:
+            conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM request_log WHERE user_id = ? AND created_at > ?",
+                (user_id, since),
+            ).fetchone()
+            used = int(row["c"]) if row else 0
+            if limit > 0 and used >= limit:
+                conn.commit()
+                return False, used, limit
+            conn.execute(
+                "INSERT INTO request_log (user_id, created_at) VALUES (?, ?)",
+                (user_id, _iso(now)),
+            )
+            conn.execute(
+                "DELETE FROM request_log WHERE created_at < ?",
+                (_iso(now - _CLEANUP_OLDER_THAN),),
+            )
+            conn.commit()
+            return True, used + 1, limit
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def refund(user_id: int) -> None:
+    """Upstream çağrısı başarısızsa try_consume ile tüketilen son kota birimini iade et (#5).
+
+    Kullanıcı, vLLM erişilemez/timeout/5xx olduğunda boşa saatlik hak kaybetmesin.
+    """
+    with db._lock:  # noqa: SLF001 — try_consume ile aynı kritik-bölge disiplini
         conn = db.get_conn()
         row = conn.execute(
-            "SELECT COUNT(*) AS c FROM request_log WHERE user_id = ? AND created_at > ?",
-            (user_id, since),
+            "SELECT rowid AS rid FROM request_log WHERE user_id = ? ORDER BY rowid DESC LIMIT 1",
+            (user_id,),
         ).fetchone()
-        used = int(row["c"]) if row else 0
-        if limit > 0 and used >= limit:
-            return False, used, limit
-        conn.execute(
-            "INSERT INTO request_log (user_id, created_at) VALUES (?, ?)",
-            (user_id, _iso(now)),
-        )
-        conn.execute(
-            "DELETE FROM request_log WHERE created_at < ?",
-            (_iso(now - _CLEANUP_OLDER_THAN),),
-        )
-        conn.commit()
-        return True, used + 1, limit
+        if row:
+            conn.execute("DELETE FROM request_log WHERE rowid = ?", (row["rid"],))
+            conn.commit()
 
 
 def reset_usage(user_id: int) -> None:

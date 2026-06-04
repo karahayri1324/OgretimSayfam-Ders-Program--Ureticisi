@@ -222,7 +222,8 @@ function SubjectDialog({
     for (const n of parsedNames) {
       await onSubmit({
         name: n,
-        shortCode: code.trim() || null,
+        // Toplu ekleme: tek girilen kodu HER derse kopyalama (yinelenen/yanlış kod) → çoklu'da boş bırak (#27).
+        shortCode: parsedNames.length > 1 ? null : code.trim() || null,
         color: parsedNames.length > 1 ? randomColor() : color,
         notes: notes.trim() || null,
       });

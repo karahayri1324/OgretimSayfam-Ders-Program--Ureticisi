@@ -16,9 +16,11 @@ router = APIRouter(prefix="/v1/auth", tags=["auth"])
 def _client_ip(request: Request) -> str:
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
+        # Ters proxy (Caddy/nginx) gerçek istemci IP'sini başa DEĞİL SONA ekler; ilk segment
+        # istemci tarafından sahte gönderilebilir → brute-force throttle baypası. Son segmenti al.
+        last = xff.split(",")[-1].strip()
+        if last:
+            return last
     return request.client.host if request.client else "?"
 
 

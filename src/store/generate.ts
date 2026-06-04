@@ -70,6 +70,12 @@ export const useGenerateStore = create<State>((set, get) => ({
 
     const res = await window.api.generate.run({ timeLimitSec });
     if (!res.ok) {
+      // Kullanıcı iptal ettiyse cancel() status'u zaten 'cancelled' yaptı → sahte hata gösterme.
+      if (get().status === 'cancelled') {
+        get().unsubscribe?.();
+        set({ unsubscribe: null });
+        return;
+      }
       set({
         status: 'error',
         error: res.error.message,

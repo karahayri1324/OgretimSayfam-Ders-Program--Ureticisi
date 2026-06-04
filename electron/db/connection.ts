@@ -37,17 +37,48 @@ function migrateLegacyDbIfNeeded(newPath: string): void {
           from: old,
           to: newPath,
         });
-        fs.copyFileSync(old, newPath);
-        for (const suffix of ['-wal', '-shm']) {
-          const oldSide = `${old}${suffix}`;
-          if (fs.existsSync(oldSide)) {
+        // Atomik-benzeri taşıma: önce temp'e kopyala, yan dosya (WAL/SHM) kopyası başarısız
+        // olursa kısmi çıktıyı SİL ve newPath OLUŞTURMA → sonraki açılışta yeniden denenir.
+        // Eskiden main kopyalanıp WAL kopyası sessizce yutuluyordu → checkpoint'lenmemiş WAL
+        // verisi kaybolur + newPath var olduğu için bir daha denenmezdi (#3).
+        const tmp = `${newPath}.migrating`;
+        const cleanupTmp = () => {
+          for (const s of ['', '-wal', '-shm']) {
             try {
-              fs.copyFileSync(oldSide, `${newPath}${suffix}`);
-            } catch (e) {
-              log.warn('Yan dosya kopyalanamadı', { side: oldSide, error: String(e) });
+              if (fs.existsSync(`${tmp}${s}`)) fs.rmSync(`${tmp}${s}`);
+            } catch {
+              /* yoksay */
             }
           }
+        };
+        cleanupTmp();
+        fs.copyFileSync(old, tmp);
+        let sidesOk = true;
+        for (const suffix of ['-wal', '-shm']) {
+          const oldSide = `${old}${suffix}`;
+          if (!fs.existsSync(oldSide)) continue;
+          try {
+            fs.copyFileSync(oldSide, `${tmp}${suffix}`);
+          } catch (e) {
+            log.warn('Yan dosya kopyalanamadı, taşıma iptal (yeniden denenecek)', {
+              side: oldSide,
+              error: String(e),
+            });
+            sidesOk = false;
+            break;
+          }
         }
+        if (!sidesOk) {
+          cleanupTmp();
+          continue;
+        }
+        // Yan dosyaları ÖNCE, main'i SON taşı: main yalnız WAL/SHM hazırken belirir.
+        for (const suffix of ['-wal', '-shm']) {
+          if (fs.existsSync(`${tmp}${suffix}`)) {
+            fs.renameSync(`${tmp}${suffix}`, `${newPath}${suffix}`);
+          }
+        }
+        fs.renameSync(tmp, newPath);
         log.info('Eski DB başarıyla taşındı. Eski dosya yedek olarak duruyor.');
         return;
       } catch (e) {

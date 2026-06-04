@@ -27,6 +27,15 @@ def _env_int(key: str, default: int) -> int:
         return default
 
 
+def _env_float(key: str, default: float) -> float:
+    # Geçersiz UPSTREAM_TEMPERATURE (ör. 'low', '0,2') import anında ValueError ile servisi
+    # düşürüyordu; güvenli dönüşüm, hatada default (#6).
+    try:
+        return float(_env(key, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 def _env_list(key: str, default: list[str]) -> list[str]:
     raw = _env(key, "")
     if not raw:
@@ -70,7 +79,7 @@ class Settings:
         default_factory=lambda: _env_int("UPSTREAM_TIMEOUT_SEC", 120)
     )
     upstream_temperature: float = field(
-        default_factory=lambda: float(_env("UPSTREAM_TEMPERATURE", "0.1"))
+        default_factory=lambda: _env_float("UPSTREAM_TEMPERATURE", 0.1)
     )
     upstream_max_tokens: int = field(
         default_factory=lambda: _env_int("UPSTREAM_MAX_TOKENS", 1536)

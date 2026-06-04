@@ -46,8 +46,21 @@ def get_user(user_id: int) -> AdminUserView:
 
 @router.patch("/users/{user_id}", response_model=AdminUserView)
 def patch_user(user_id: int, body: AdminUserPatch) -> AdminUserView:
-    _get_user_or_404(user_id)
+    target = _get_user_or_404(user_id)
     fields = body.model_dump(exclude_unset=True)
+    # Son yöneticinin admin yetkisini kaldırmak tüm web-panel erişimini kilitler (#29).
+    if (
+        fields.get("is_admin") is False
+        and bool(target["is_admin"])
+        and repo.count_admins() <= 1
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "last_admin",
+                "message": "Son yöneticinin admin yetkisi kaldırılamaz.",
+            },
+        )
     repo.update_user(user_id, fields)
     return admin_user_view(_get_user_or_404(user_id))
 
@@ -78,7 +91,13 @@ def reset_usage(user_id: int) -> AdminUserView:
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(user_id: int) -> None:
-    _get_user_or_404(user_id)
+    target = _get_user_or_404(user_id)
+    # Son yöneticiyi silmek tüm web-panel erişimini kilitler (#29).
+    if bool(target["is_admin"]) and repo.count_admins() <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"error": "last_admin", "message": "Son yönetici silinemez."},
+        )
     repo.delete_user(user_id)
 
 

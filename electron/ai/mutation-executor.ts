@@ -235,10 +235,12 @@ const handlers: Record<DataMutationOp, Handler> = {
     if (existing) {
       return `Branş zaten var: ${existing.name} (id=${existing.id}). Atlandı.`;
     }
+    const rawColor = optString(params, 'color');
+    const color = rawColor && /^#[0-9a-fA-F]{3,8}$/.test(rawColor) ? rawColor : null;
     const id = subjectsRepo.create({
       name,
       shortCode: optString(params, 'shortCode') ?? null,
-      color: optString(params, 'color') ?? null,
+      color,
       notes: optString(params, 'notes') ?? null,
     });
     return `'${name}' branşı eklendi (id=${id}).`;
@@ -253,7 +255,10 @@ const handlers: Record<DataMutationOp, Handler> = {
     const sc = optString(params, 'shortCode');
     if (sc !== undefined) patch['shortCode'] = sc;
     const color = optString(params, 'color');
-    if (color !== undefined) patch['color'] = color;
+    if (color !== undefined) {
+      // Geçersiz/zararlı renk string'i export'a enjekte edilmesin (E1) → yalnız hex kabul.
+      patch['color'] = color && /^#[0-9a-fA-F]{3,8}$/.test(color) ? color : null;
+    }
     const notes = optString(params, 'notes');
     if (notes !== undefined) patch['notes'] = notes;
     subjectsRepo.update(subject.id, patch);
@@ -398,6 +403,8 @@ const handlers: Record<DataMutationOp, Handler> = {
     const teacherName = optString(params, 'teacher');
     const weeklyHours = optInt(params, 'weeklyHours') ?? 1;
     const blockDuration = optInt(params, 'blockDuration') ?? 1;
+    if (weeklyHours < 1) throw new Error(`Haftalık ders saati en az 1 olmalı (verilen: ${weeklyHours}).`);
+    if (blockDuration < 1) throw new Error(`Blok süresi en az 1 olmalı (verilen: ${blockDuration}).`);
     const notes = optString(params, 'notes') ?? null;
 
     const classId = ensureClass(className, optString(params, 'year'));
@@ -475,6 +482,8 @@ const handlers: Record<DataMutationOp, Handler> = {
     }
     const weeklyHours = optInt(params, 'weeklyHours') ?? existing.weeklyHours;
     const blockDuration = optInt(params, 'blockDuration') ?? existing.blockDuration;
+    if (weeklyHours < 1) throw new Error(`Haftalık ders saati en az 1 olmalı (verilen: ${weeklyHours}).`);
+    if (blockDuration < 1) throw new Error(`Blok süresi en az 1 olmalı (verilen: ${blockDuration}).`);
     const teacherName = optString(params, 'teacher');
     let teacherId: number | null = existing.teacherId;
     if (teacherName !== undefined) {
@@ -822,6 +831,8 @@ const handlers: Record<DataMutationOp, Handler> = {
     const className = requireString(params, 'class');
     const weeklyHours = optInt(params, 'weeklyHours') ?? 1;
     const blockDuration = optInt(params, 'blockDuration') ?? 1;
+    if (weeklyHours < 1) throw new Error(`Haftalık ders saati en az 1 olmalı (verilen: ${weeklyHours}).`);
+    if (blockDuration < 1) throw new Error(`Blok süresi en az 1 olmalı (verilen: ${blockDuration}).`);
     const groupsRaw = params.groups;
     if (!Array.isArray(groupsRaw) || groupsRaw.length < 2) {
       throw new Error("'groups' en az 2 elemanlı dizi olmalı (split anlamlı olsun).");
@@ -908,7 +919,11 @@ const handlers: Record<DataMutationOp, Handler> = {
     const teacherName = optString(params, 'teacher');
     let teacherId: number | null | undefined = undefined;
     if (teacherName) {
-      teacherId = ensureTeacher(teacherName);
+      // teacher burada mevcut aktiviteyi SEÇMEK için filtredir; ensureTeacher kullanmak
+      // eşleşmeyen adda HAYALET öğretmen yaratıyordu (#4). Var olanı ara, yoksa net hata.
+      const t = findByName(teacherName, teachersRepo.list());
+      if (!t) throw new Error(`Öğretmen bulunamadı: '${teacherName}'`);
+      teacherId = t.id;
     }
     const matches = activitiesRepo
       .list()
@@ -922,11 +937,19 @@ const handlers: Record<DataMutationOp, Handler> = {
     }
     const act = matches[0]!;
 
+    // FET ACTIVITY_FIXED_TIME handler'ı gün adını KANONIK days tablosu adıyla (tam) eşler;
+    // ham AI/kullanıcı string'i ('pazartesi') saklanırsa kilit FET-build'de sessizce düşer.
+    const dayObj =
+      daysRepo.list().find((d) => d.name === day) ??
+      daysRepo.list().find((d) => deburr(d.name) === deburr(day));
+    if (!dayObj) throw new Error(`Gün bulunamadı: '${day}'`);
+    const canonicalDay = dayObj.name;
+
     const existing = constraintsRepo.list().find(
       (c) =>
         c.type === 'ACTIVITY_FIXED_TIME' &&
         (c.params as { activityId?: number }).activityId === act.id &&
-        (c.params as { day?: string }).day === day &&
+        (c.params as { day?: string }).day === canonicalDay &&
         (c.params as { hour?: number }).hour === hour,
     );
     if (existing) {
@@ -946,7 +969,7 @@ const handlers: Record<DataMutationOp, Handler> = {
       type: 'ACTIVITY_FIXED_TIME',
       weight: 100,
       active: true,
-      params: { activityId: act.id, day, hour },
+      params: { activityId: act.id, day: canonicalDay, hour },
       source: 'ai',
       notes: `Slot kilidi: ${className} × ${subjectName}`,
     });
@@ -1012,7 +1035,7 @@ const handlers: Record<DataMutationOp, Handler> = {
       (c) =>
         c.type === 'ACTIVITY_FIXED_TIME' &&
         (c.params as { activityId?: number }).activityId === dbActivityId &&
-        (c.params as { day?: string }).day === day &&
+        (c.params as { day?: string }).day === dayObj.name &&
         (c.params as { hour?: number }).hour === hour,
     );
     if (existing) {
@@ -1023,9 +1046,9 @@ const handlers: Record<DataMutationOp, Handler> = {
       type: 'ACTIVITY_FIXED_TIME',
       weight: 100,
       active: true,
-      params: { activityId: dbActivityId, day, hour },
+      params: { activityId: dbActivityId, day: dayObj.name, hour },
       source: 'ai',
-      notes: `Slot kilidi (mevcut): ${className} ${day} ${hour}. → ${slot.subjectName}`,
+      notes: `Slot kilidi (mevcut): ${className} ${dayObj.name} ${hour}. → ${slot.subjectName}`,
     });
     return (
       `${className} ${day} ${hour}. ders (${slot.subjectName}) kilitlendi — ` +
@@ -1099,13 +1122,26 @@ const handlers: Record<DataMutationOp, Handler> = {
         );
       }
       if (matches.length > 1) {
+        // Belirsizlikte sessizce matches[0]'ı seçmek YANLIŞ öğretmenin dersini değiştiriyordu (#3).
+        // fromTeacher yoksa veya çözülemiyorsa net hata ver (update_activity ile aynı desen).
         const fromName = optString(params, 'fromTeacher');
-        if (fromName) {
-          const ft = findByName(fromName, teachersRepo.list());
-          act = ft ? matches.find((m) => m.teacherId === ft.id) : matches[0];
-        } else {
-          act = matches[0];
+        if (!fromName) {
+          const names = matches
+            .map((m) => (m.teacherId ? teachersRepo.get(m.teacherId)?.name ?? '?' : 'atanmamış'))
+            .join(', ');
+          throw new Error(
+            `${className} × ${subjectName} için birden fazla aktivite var (öğretmenler: ${names}). ` +
+              `Hangisini değiştireceğinizi 'fromTeacher' ile belirtin.`,
+          );
         }
+        const ft = findByName(fromName, teachersRepo.list());
+        const found = ft ? matches.find((m) => m.teacherId === ft.id) : undefined;
+        if (!found) {
+          throw new Error(
+            `'${fromName}' adlı öğretmen ${className} × ${subjectName} aktivitesinde bulunamadı.`,
+          );
+        }
+        act = found;
       } else {
         act = matches[0];
       }
@@ -1291,7 +1327,7 @@ const handlers: Record<DataMutationOp, Handler> = {
       type: 'ACTIVITY_FIXED_TIME',
       weight: 100,
       active: true,
-      params: { activityId: dbActivityA, day: day2, hour: hour2 },
+      params: { activityId: dbActivityA, day: dayObj2.name, hour: hour2 },
       source: 'ai',
       notes: `Swap: ${class1} ${day1}/${hour1} ↔ ${class2} ${day2}/${hour2}`,
     });
@@ -1299,7 +1335,7 @@ const handlers: Record<DataMutationOp, Handler> = {
       type: 'ACTIVITY_FIXED_TIME',
       weight: 100,
       active: true,
-      params: { activityId: dbActivityB, day: day1, hour: hour1 },
+      params: { activityId: dbActivityB, day: dayObj1.name, hour: hour1 },
       source: 'ai',
       notes: `Swap: ${class2} ${day2}/${hour2} ↔ ${class1} ${day1}/${hour1}`,
     });

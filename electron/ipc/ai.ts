@@ -53,13 +53,6 @@ export function registerAiHandlers(): void {
       log.warn('AI geçmişi okunamadı', { error: String(e) });
     }
 
-    let userMsgId: number | null = null;
-    try {
-      userMsgId = aiMessagesRepo.add({ role: 'user', text });
-    } catch (e) {
-      log.warn('AI kullanıcı mesajı kaydedilemedi', { error: String(e) });
-    }
-
     let context;
     try {
       context = buildAIContext();
@@ -77,6 +70,15 @@ export function registerAiHandlers(): void {
         context,
         history: conversationHistory,
       });
+
+      // Mesajları yalnızca BAŞARILI çağrıdan sonra kalıcılaştır; aksi halde başarısız çağrı
+      // DB'de yanıtsız bir 'user' mesajı bırakıp sonraki turda sarkık geçmiş üretiyordu (#21).
+      let userMsgId: number | null = null;
+      try {
+        userMsgId = aiMessagesRepo.add({ role: 'user', text });
+      } catch (e) {
+        log.warn('AI kullanıcı mesajı kaydedilemedi', { error: String(e) });
+      }
 
       for (const tc of toolCalls) {
         try {

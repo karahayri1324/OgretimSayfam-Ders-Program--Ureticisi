@@ -72,10 +72,14 @@ export default function Schedule() {
     if (initialized) return;
     if (days.length > 0 || hours.length > 0) {
       if (days.length > 0) {
-        const ids = days.map((d) => d.name?.toLowerCase()).filter(Boolean);
-        const known = DAY_DEFS.map((d) => d.id);
-        const matched = ids.filter((i) => known.includes(i as string));
-        if (matched.length > 0) setSelectedDays(new Set(matched as string[]));
+        // DB gün adları Türkçe ('Pazartesi'...) tutulur; seçim için DAY_DEFS slug id'sine eşle.
+        const nameToId = new Map(
+          DAY_DEFS.map((d) => [d.name.toLocaleLowerCase('tr'), d.id]),
+        );
+        const matched = days
+          .map((d) => nameToId.get((d.name ?? '').toLocaleLowerCase('tr')))
+          .filter((x): x is string => Boolean(x));
+        if (matched.length > 0) setSelectedDays(new Set(matched));
       }
       if (hours.length > 0) {
         setHoursPerDay(hours.length);
@@ -146,7 +150,7 @@ export default function Schedule() {
     }
     setSaving(true);
     const dayPayload = orderedSelected.map((d, i) => ({
-      name: d.id,
+      name: d.name,
       orderIndex: i,
     }));
     const hourPayload = hourRows.map((h, i) => ({
@@ -168,8 +172,22 @@ export default function Schedule() {
       'break',
       scope === 'global' ? undefined : [scope],
     );
-    if (ok) toast.success(tr.common.saved);
-    else toast.error(tr.common.error);
+    if (ok) {
+      toast.success(tr.common.saved);
+      // Global kapsamda store.hours güncellendi ama tablo yerel hourRows'tan çiziliyor;
+      // senkronize et — yoksa değişiklik görünmez ve sonraki "Kaydet" eski saatleri geri
+      // yazıp toplu teneffüsü sessizce iptal ediyordu (#23).
+      if (scope === 'global') {
+        const fresh = useScheduleStore.getState().hours;
+        setHourRows(
+          fresh.map((h) => ({
+            name: h.name ?? '',
+            startTime: h.startTime ?? '',
+            endTime: h.endTime ?? '',
+          })),
+        );
+      }
+    } else toast.error(tr.common.error);
   }
 
   return (
@@ -383,7 +401,7 @@ function PerDayEditor({
     entries: { orderIndex: number; name: string | null; startTime: string | null; endTime: string | null }[],
   ) => Promise<void>;
   onRevert: (dayId: number) => Promise<void>;
-  onApplyBulkToDay: (dayId: number) => void;
+  onApplyBulkToDay: (dayId: number) => void | Promise<void>;
 }) {
   const [editing, setEditing] = useState<Map<number, HourRow[]>>(new Map());
 
@@ -519,7 +537,17 @@ function PerDayEditor({
                   </Button>
                   <Button
                     variant="secondary"
-                    onClick={() => onApplyBulkToDay(d.id)}
+                    onClick={async () => {
+                      await onApplyBulkToDay(d.id);
+                      // Bulk store'u güncelledi; bu günün kaydedilmemiş yerel düzenlemesini
+                      // temizle ki bulk sonucu görünsün/kaydedilsin — yoksa eski edit'ler
+                      // bulk'ı sessizce eziyordu (#9, #23'ün per-gün tamamlaması).
+                      setEditing((m) => {
+                        const n = new Map(m);
+                        n.delete(d.id);
+                        return n;
+                      });
+                    }}
                   >
                     <Timer size={14} />
                     {bulkDelta >= 0 ? '+' : ''}

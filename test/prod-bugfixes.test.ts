@@ -137,3 +137,70 @@ describe('Uzun gün saat listesi parser\'a aktarılır (#6)', () => {
     expect(built.hours.map((h) => h.name)).toContain('5. Ders');
   });
 });
+
+describe('Round-3: FET geçersiz tag/alan adları (#10-#16)', () => {
+  it('TEACHER_MAX_BUILDING_CHANGES_PER_DAY space-kısıtı <Teacher> kullanır (Teacher_Name DEĞİL)', () => {
+    const xml = buildFetXml(
+      makeBundle({
+        constraints: [
+          constraint('TEACHER_MAX_BUILDING_CHANGES_PER_DAY', { teacher: 'Ahmet Yılmaz', maxChanges: 1 }),
+        ],
+      }),
+    ).xml;
+    const block = xml.match(
+      /<ConstraintTeacherMaxBuildingChangesPerDay>[\s\S]*?<\/ConstraintTeacherMaxBuildingChangesPerDay>/,
+    )?.[0];
+    expect(block).toBeTruthy();
+    expect(block).toContain('<Teacher>Ahmet Yılmaz</Teacher>');
+    expect(block).not.toContain('Teacher_Name');
+    expect(block).toContain('<Max_Building_Changes_Per_Day>');
+  });
+
+  it('TEACHER_MIN_GAPS_BETWEEN_BUILDING_CHANGES → <Teacher> + <Min_Gaps_Between_Building_Changes>', () => {
+    const xml = buildFetXml(
+      makeBundle({
+        constraints: [
+          constraint('TEACHER_MIN_GAPS_BETWEEN_BUILDING_CHANGES', { teacher: 'Ahmet Yılmaz', minGaps: 1 }),
+        ],
+      }),
+    ).xml;
+    const block = xml.match(
+      /<ConstraintTeacherMinGapsBetweenBuildingChanges>[\s\S]*?<\/ConstraintTeacherMinGapsBetweenBuildingChanges>/,
+    )?.[0];
+    expect(block).toBeTruthy();
+    expect(block).toContain('<Teacher>Ahmet Yılmaz</Teacher>');
+    expect(block).toContain('<Min_Gaps_Between_Building_Changes>');
+    expect(block).not.toContain('Teacher_Name');
+  });
+
+  it('ACTIVITIES_OCCUPY_MAX_DIFFERENT_ROOMS → <Max_Number_of_Different_Rooms> (yanlış Max_Different_Rooms DEĞİL)', () => {
+    const xml = buildFetXml(
+      makeBundle({
+        constraints: [
+          constraint('ACTIVITIES_OCCUPY_MAX_DIFFERENT_ROOMS', { activityIds: [1], maxDifferentRooms: 1 }),
+        ],
+      }),
+    ).xml;
+    expect(xml).toContain('<Max_Number_of_Different_Rooms>');
+    expect(xml).not.toContain('<Max_Different_Rooms>');
+  });
+
+  it('SUBJECT_PREFERRED_HOURS (sınıfsız) hayalet ConstraintSubjectPreferredTimeSlots ÜRETMEZ', () => {
+    const xml = buildFetXml(
+      makeBundle({
+        constraints: [constraint('SUBJECT_PREFERRED_HOURS', { subject: 'Matematik', preferredHours: [1, 2] })],
+      }),
+    ).xml;
+    expect(xml).not.toContain('ConstraintSubjectPreferredTimeSlots');
+    expect(countTag(xml, 'ConstraintActivityPreferredTimeSlots')).toBeGreaterThan(0);
+  });
+
+  it('SUBJECT_MAX_HOURS_DAILY hayalet ConstraintActivitiesMaxHoursDaily ÜRETMEZ', () => {
+    const xml = buildFetXml(
+      makeBundle({
+        constraints: [constraint('SUBJECT_MAX_HOURS_DAILY', { subject: 'Matematik', maxHours: 2 })],
+      }),
+    ).xml;
+    expect(xml).not.toContain('ConstraintActivitiesMaxHoursDaily');
+  });
+});

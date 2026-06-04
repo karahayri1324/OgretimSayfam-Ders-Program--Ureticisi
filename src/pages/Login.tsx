@@ -59,6 +59,7 @@ export default function Login() {
         await login(
           String(fd.get('email') ?? '').trim(),
           String(fd.get('password') ?? ''),
+          fd.get('remember') != null,
         );
       } else {
         await register({

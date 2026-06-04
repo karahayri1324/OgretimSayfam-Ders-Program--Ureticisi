@@ -324,6 +324,7 @@ export default function AIPanel() {
     if (kind === 'constraint') {
       const r = msg.response as { constraints: AIConstraint[] };
       const failures: string[] = [];
+      let added = 0;
       for (const c of r.constraints) {
         const okAdded = await addConstraint({
           type: c.type,
@@ -332,14 +333,25 @@ export default function AIPanel() {
           params: c.params,
           source: 'ai',
         });
-        if (!okAdded) failures.push(c.type);
+        if (okAdded) added++;
+        else failures.push(c.type);
       }
       if (failures.length > 0) {
-        toastError(
-          'Kısıtlama eklenemedi',
-          `${failures.length}/${r.constraints.length} kısıtlama reddedildi: ${failures.join(', ')}`,
-        );
-        updateMessage(msg.id, { status: 'rejected' });
+        const total = r.constraints.length;
+        if (added > 0) {
+          // Kısmi başarı: eklenenler DB'de KALDI → tümünü 'rejected' işaretlemek yanıltıcı (#24).
+          toastError(
+            'Kısmi ekleme',
+            `${added}/${total} kısıtlama eklendi, ${failures.length} reddedildi: ${failures.join(', ')}`,
+          );
+          updateMessage(msg.id, { status: 'confirmed' });
+        } else {
+          toastError(
+            'Kısıtlama eklenemedi',
+            `${total} kısıtlama reddedildi: ${failures.join(', ')}`,
+          );
+          updateMessage(msg.id, { status: 'rejected' });
+        }
         return;
       }
     } else if (kind === 'schedule_update') {

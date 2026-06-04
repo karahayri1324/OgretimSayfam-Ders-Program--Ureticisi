@@ -91,8 +91,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   abortActiveGeneration();
-  closeDatabase();
+  // macOS'ta uygulama Dock'ta canlı kalır (app.quit yok); DB'yi burada kapatmak canlı bağlantıyı
+  // gereksiz kapatıp her yeniden-açılışta churn yaratıyordu (#2). Gerçek çıkışta before-quit kapatır.
   if (process.platform !== 'darwin') {
+    closeDatabase();
     app.quit();
   }
 });

@@ -43,8 +43,10 @@ function shiftClock(time: string, deltaMinutes: number): string {
   const mm = Number(match[2]);
   if (!Number.isFinite(hh) || !Number.isFinite(mm)) return time;
   let totalMin = hh * 60 + mm + deltaMinutes;
-  while (totalMin < 0) totalMin += 24 * 60;
-  totalMin = totalMin % (24 * 60);
+  // Gün-içi saat: ertesi güne SARMA (eski %1440 → sonraki dersi öncekinden erken başlatıyordu)
+  // ya da negatife düşme yerine [00:00, 23:59] aralığına sınırla (#6).
+  if (totalMin < 0) totalMin = 0;
+  if (totalMin > 23 * 60 + 59) totalMin = 23 * 60 + 59;
   const nh = Math.floor(totalMin / 60);
   const nm = totalMin % 60;
   return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`;
@@ -80,12 +82,64 @@ function extendBreaks(params: Record<string, unknown>): ScheduleUpdateApplyResul
   if (cur.length === 0) {
     throw new Error('Henüz tanımlı ders saati yok — önce ders saatlerini ekleyin.');
   }
+  // Kümülatif uzatma hiçbir günü (global VEYA güne-özel) 24 saati taşırmamalı; aksi halde
+  // son dersler saçma saatlere kayar / sessizce 23:59'a clamp'lenir (#6, #10).
+  if (minutes > 0) {
+    const overflows = (
+      rows: { startTime: string | null; endTime: string | null }[],
+    ): boolean => {
+      if (rows.length === 0) return false;
+      const last = rows[rows.length - 1];
+      const ref = last?.endTime ?? last?.startTime ?? null;
+      const m = ref ? /^(\d{1,2}):(\d{2})$/.exec(ref.trim()) : null;
+      return !!m && Number(m[1]) * 60 + Number(m[2]) + minutes * (rows.length - 1) > 23 * 60 + 59;
+    };
+    if (overflows(cur)) {
+      throw new Error('Bu kadar uzatma günü (24 saat) taşırıyor; daha küçük bir değer deneyin.');
+    }
+    const dhCheck = dayHoursRepo.list();
+    const byDayCheck = new Map<number, typeof dhCheck>();
+    for (const r of dhCheck) {
+      const arr = byDayCheck.get(r.dayId) ?? [];
+      arr.push(r);
+      byDayCheck.set(r.dayId, arr);
+    }
+    for (const rows of byDayCheck.values()) {
+      const sorted = [...rows].sort((a, b) => a.orderIndex - b.orderIndex);
+      if (overflows(sorted)) {
+        throw new Error('Bu kadar uzatma bazı günlerin saatlerini 24 saati taşırıyor; daha küçük değer deneyin.');
+      }
+    }
+  }
   const next = cur.map((h, i) => ({
     name: h.name,
     startTime: h.startTime ? shiftClock(h.startTime, minutes * i) : h.startTime,
     endTime: h.endTime ? shiftClock(h.endTime, minutes * i) : h.endTime,
   }));
   hoursRepo.replaceAll(next);
+  // Güne-özel saat (day_hours) override'larına da aynı kaydırmayı uygula; yoksa override'lı
+  // günlerde uzatma sessizce uygulanmaz, bayat saatler kalır (#7).
+  const overrides = dayHoursRepo.list();
+  if (overrides.length > 0) {
+    const byDay = new Map<number, typeof overrides>();
+    for (const r of overrides) {
+      const arr = byDay.get(r.dayId) ?? [];
+      arr.push(r);
+      byDay.set(r.dayId, arr);
+    }
+    for (const [dayId, rows] of byDay) {
+      const sorted = [...rows].sort((a, b) => a.orderIndex - b.orderIndex);
+      dayHoursRepo.replaceForDay(
+        dayId,
+        sorted.map((r, i) => ({
+          orderIndex: r.orderIndex,
+          name: r.name,
+          startTime: r.startTime ? shiftClock(r.startTime, minutes * i) : r.startTime,
+          endTime: r.endTime ? shiftClock(r.endTime, minutes * i) : r.endTime,
+        })),
+      );
+    }
+  }
   return {
     ok: true,
     action: 'extend_breaks',
@@ -131,8 +185,11 @@ function addHoursToDay(params: Record<string, unknown>): ScheduleUpdateApplyResu
 
   const last = baseline[baseline.length - 1];
   let nextStart: string | null = last?.endTime ?? null;
+  // Yeni orderIndex'i mevcutların MAX'ından devam ettir; baseline.length kullanmak süreksiz
+  // (gap'li) orderIndex'lerde UNIQUE(day_id, hour_order_index) çakışmasına yol açıyordu (#20).
+  let maxOrder = baseline.reduce((m, r) => Math.max(m, r.orderIndex), -1);
   for (let i = 0; i < count; i++) {
-    const order = baseline.length;
+    const order = ++maxOrder;
     const start = nextStart;
     const end = start ? shiftClock(start, 40) : null;
     baseline.push({

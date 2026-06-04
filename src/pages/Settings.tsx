@@ -26,15 +26,19 @@ export default function Settings() {
   const [aiTimeout, setAiTimeout] = useState(30);
   const [fetTimeLimit, setFetTimeLimit] = useState(120);
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     load();
   }, [load]);
 
   useEffect(() => {
+    // Kullanıcı düzenlediyse (dirty), settings'in değişmesi (ör. tema güncellemesi yeni nesne
+    // referansı üretir) kaydedilmemiş timeout düzenlemelerini EZMESİN (#25).
+    if (dirty) return;
     setAiTimeout(settings.aiTimeoutSec);
     setFetTimeLimit(settings.fetTimeLimitSec);
-  }, [settings]);
+  }, [settings, dirty]);
 
   async function handleSave() {
     setSaving(true);
@@ -43,8 +47,10 @@ export default function Settings() {
       fetTimeLimitSec: Math.max(10, Math.floor(fetTimeLimit)),
     });
     setSaving(false);
-    if (ok) toast.success(tr.common.saved);
-    else toast.error(tr.common.error);
+    if (ok) {
+      setDirty(false);
+      toast.success(tr.common.saved);
+    } else toast.error(tr.common.error);
   }
 
   async function changeTheme(t: 'light' | 'dark') {
@@ -111,7 +117,10 @@ export default function Settings() {
               type="number"
               min={1}
               value={aiTimeout}
-              onChange={(e) => setAiTimeout(Number(e.target.value))}
+              onChange={(e) => {
+                setAiTimeout(Number(e.target.value));
+                setDirty(true);
+              }}
             />
           </div>
         </CardBody>
@@ -127,7 +136,10 @@ export default function Settings() {
               type="number"
               min={10}
               value={fetTimeLimit}
-              onChange={(e) => setFetTimeLimit(Number(e.target.value))}
+              onChange={(e) => {
+                setFetTimeLimit(Number(e.target.value));
+                setDirty(true);
+              }}
             />
           </div>
         </CardBody>

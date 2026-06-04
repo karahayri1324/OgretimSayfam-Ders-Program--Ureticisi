@@ -352,20 +352,10 @@ function subjectPreferredHours(c: Constraint, ctx: BuilderContext): HandlerResul
   }
 
   const preferredSlots = toPreferredSlots(slots);
-  if (!cls) {
-    return [{
-      section: 'time',
-      tag: 'ConstraintSubjectPreferredTimeSlots',
-      body: {
-        Weight_Percentage: c.weight,
-        Subject: subj,
-        Number_of_Preferred_Time_Slots: preferredSlots.length,
-        Preferred_Time_Slot: preferredSlots,
-        ...commonTail(c),
-      },
-    }];
-  }
 
+  // FET'te sınıfsız "ders X şu saatlerde" için geçerli bir tag yoktur
+  // (ConstraintSubjectPreferredTimeSlots tanımsızdır → fet-cl yok sayar). Dersin TÜM
+  // aktivitelerini (sınıf verilmişse yalnız o sınıfınkini) per-aktivite kısıtla.
   const { fetIds } = activitiesForSubject(ctx, subj, cls);
   if (fetIds.length === 0) return skip(ctx, c, 'Eşleşen aktivite yok');
   return fetIds.map(id => ({
@@ -414,17 +404,10 @@ function subjectMaxHoursDaily(c: Constraint, ctx: BuilderContext): HandlerResult
   const { fetIds } = activitiesForSubject(ctx, subj, cls);
   if (fetIds.length === 0) return skip(ctx, c, 'Eşleşen aktivite yok');
 
-  return [{
-    section: 'time',
-    tag: 'ConstraintActivitiesMaxHoursDaily',
-    body: {
-      Weight_Percentage: c.weight,
-      Number_of_Activities: fetIds.length,
-      Activity_Id: fetIds,
-      Maximum_Hours_Daily: Math.floor(max),
-      ...commonTail(c),
-    },
-  }];
+  // FET'te bir aktivite KÜMESİ için doğrudan "günde azami saat" kısıtı yoktur
+  // (ConstraintActivitiesMaxHoursDaily geçersiz tag; FET yalnız teacher/students-set/activity-tag
+  // bazlı destekler). Activity-tag altyapısı gerektirir → geçersiz XML üretmek yerine temiz atla.
+  return skip(ctx, c, `FET ders-bazlı günlük azami saat kısıtını doğrudan desteklemiyor (maxHours=${Math.floor(max)})`);
 }
 
 function subjectConsecutiveHours(c: Constraint, ctx: BuilderContext): HandlerResult {
@@ -634,7 +617,7 @@ function teacherMaxBuildingChangesPerDay(c: Constraint, ctx: BuilderContext): Ha
     tag: 'ConstraintTeacherMaxBuildingChangesPerDay',
     body: {
       Weight_Percentage: c.weight,
-      Teacher_Name: name,
+      Teacher: name,
       Max_Building_Changes_Per_Day: Math.floor(max),
       ...commonTail(c),
     },
@@ -652,7 +635,7 @@ function teacherMaxBuildingChangesPerWeek(c: Constraint, ctx: BuilderContext): H
     tag: 'ConstraintTeacherMaxBuildingChangesPerWeek',
     body: {
       Weight_Percentage: c.weight,
-      Teacher_Name: name,
+      Teacher: name,
       Max_Building_Changes_Per_Week: Math.floor(max),
       ...commonTail(c),
     },
@@ -670,7 +653,7 @@ function teacherMinGapsBetweenBuildingChanges(c: Constraint, ctx: BuilderContext
     tag: 'ConstraintTeacherMinGapsBetweenBuildingChanges',
     body: {
       Weight_Percentage: c.weight,
-      Teacher_Name: name,
+      Teacher: name,
       Min_Gaps_Between_Building_Changes: Math.floor(min),
       ...commonTail(c),
     },
@@ -1342,7 +1325,7 @@ function activitiesOccupyMaxDifferentRooms(c: Constraint, ctx: BuilderContext): 
       Weight_Percentage: c.weight,
       Number_of_Activities: ids.length,
       Activity_Id: ids,
-      Max_Different_Rooms: Math.floor(max),
+      Max_Number_of_Different_Rooms: Math.floor(max),
       ...commonTail(c),
     },
   }];
@@ -1470,17 +1453,9 @@ function maxTotalActivitiesFromSet(c: Constraint, ctx: BuilderContext): HandlerR
   const max = getNum(c.params, 'maxHours');
   if (max === null) return skip(ctx, c, 'maxHours eksik');
   if (ids.length === 0) return skip(ctx, c, 'activityIds boş');
-  return [{
-    section: 'time',
-    tag: 'ConstraintActivitiesMaxHoursDaily',
-    body: {
-      Weight_Percentage: c.weight,
-      Number_of_Activities: ids.length,
-      Activity_Id: ids,
-      Maximum_Hours_Daily: Math.floor(max),
-      ...commonTail(c),
-    },
-  }];
+  // Aynı geçersiz tag sorunu (bkz. subjectMaxHoursDaily): FET aktivite-kümesi için günlük
+  // azami saat kısıtını doğrudan desteklemiyor → geçersiz XML üretme, temiz atla.
+  return skip(ctx, c, `FET aktivite-kümesi günlük azami saat kısıtını doğrudan desteklemiyor (maxHours=${Math.floor(max)})`);
 }
 
 

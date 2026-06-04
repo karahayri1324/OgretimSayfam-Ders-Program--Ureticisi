@@ -12,7 +12,24 @@ export function registerActivitiesHandlers(): void {
     const v = validate(ActivityInputSchema, raw);
     if (!v.ok) return v.error;
     return safeHandler('activities:upsert', () => {
-      const id = activitiesRepo.upsert(v.data);
+      const input = v.data;
+      // Manuel ekleme: öğretmensiz (teacher_id NULL) aynı sınıf+ders zaten varsa, SQLite NULL'ları
+      // UNIQUE'te ayrı saydığı için INSERT ikinci bir satır yaratıp haftalık saati ikiye
+      // katlıyordu (#18). Mevcut öğretmensiz non-split satırı güncelle (idempotent). AI'ın
+      // split akışı repo.upsert'i doğrudan çağırdığı için bu yoldan etkilenmez.
+      if (input.id == null && input.teacherId == null) {
+        const dup = activitiesRepo
+          .list()
+          .find(
+            (a) =>
+              a.classId === input.classId &&
+              a.subjectId === input.subjectId &&
+              a.teacherId == null &&
+              a.splitGroupId == null,
+          );
+        if (dup) return { id: activitiesRepo.upsert({ ...input, id: dup.id }) };
+      }
+      const id = activitiesRepo.upsert(input);
       return { id };
     });
   });
