@@ -97,4 +97,12 @@ export const constraintsRepo = {
       .prepare('UPDATE constraints SET weight = ? WHERE id = ?')
       .run(w, id);
   },
+
+  // Gün/saat kaldırılınca bayatlayan kısıt params'larını yerinde güncellemek için (örn. days[]/
+  // slots[] dizisinden silinen güne ait elemanları çıkarmak). school_id ile sınırlı.
+  updateParams(id: number, params: Record<string, unknown>): void {
+    getDb()
+      .prepare('UPDATE constraints SET params_json = ? WHERE id = ? AND school_id = ?')
+      .run(JSON.stringify(params ?? {}), id, schoolsRepo.getActiveId());
+  },
 };

@@ -156,6 +156,8 @@ export default function AIPanel() {
   }, [panelWidth]);
   const navigate = useNavigate();
   const runSolver = useGenerateStore((s) => s.run);
+  const genStatus = useGenerateStore((s) => s.status);
+  const genError = useGenerateStore((s) => s.error);
   const messages = useAIChatStore((s) => s.messages);
   const addMessage = useAIChatStore((s) => s.addMessage);
   const updateMessage = useAIChatStore((s) => s.updateMessage);
@@ -189,6 +191,27 @@ export default function AIPanel() {
   useEffect(() => {
     if (panelOpenSignal > 0) setCollapsed(false);
   }, [panelOpenSignal]);
+
+  // Program üretimi başarısız olunca AI'a otomatik köprü kur: paneli aç ve kullanıcıyı sohbete
+  // davet et. Başarısızlık bilgisi (LAST_GENERATION_FAILURE) main process tarafından AI bağlamına
+  // zaten yazıldı; kullanıcı "düzelt" yazınca model gerçek nedeni bilerek somut çözüm önerir.
+  const prevGenStatusRef = useRef(genStatus);
+  useEffect(() => {
+    const prev = prevGenStatusRef.current;
+    prevGenStatusRef.current = genStatus;
+    if (prev !== 'error' && genStatus === 'error' && genError) {
+      setCollapsed(false);
+      addMessage({
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        text:
+          `⚠️ Program üretilemedi: ${genError}\n\n` +
+          'Nedenini açıklayıp birlikte düzeltebiliriz — "neden olmadı?" ya da "düzelt" yazman yeterli; ' +
+          'kısıtları gevşetip ya da gün/saat ekleyip tekrar üretelim.',
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genStatus, genError]);
 
   useEffect(() => {
     if (!pendingPrompt) return;
@@ -459,14 +482,14 @@ export default function AIPanel() {
       const tl = r.timeLimitSec ?? 120;
       try {
         navigate('/generate');
-        // Toast'ı GERÇEK başlatmaya bağla: run() zaten bir üretim sürüyorsa başlatmadan false
-        // döner; eskiden koşulsuz 'Üretim başlatıldı' gösterip kullanıcıyı yanıltıyordu (#16).
+        // runSolver() üretimin TAMAMLANMASINI bekler. Nihai başarı/hata/iptal bildirimini TEK
+        // kaynaktan — Generate sayfasının status effect'i — yapar; burada ayrıca toast atmak aynı
+        // üretim için ÇİFT bildirime yol açıyordu. Burada yalnız Generate'in bilemeyeceği durumları
+        // bildir: üretim zaten sürüyor (başlatılamadı) veya istek hatası.
         setTimeout(() => {
           runSolver(tl)
             .then((started) => {
-              if (started) {
-                toastSuccess('Üretim başlatıldı', `FET çalışıyor (${tl} sn)`);
-              } else {
+              if (!started) {
                 toastError(
                   'Üretim zaten sürüyor',
                   'Mevcut üretim bitince (veya iptal edince) tekrar deneyin.',

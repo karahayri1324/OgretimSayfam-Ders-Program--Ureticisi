@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { roomsRepo } from '../db/repositories/rooms.js';
 import { safeHandler, validate, err } from './_common.js';
+import { isGenerationActive } from './generate.js';
 import { RoomInputSchema, RoomPatchSchema } from './_schemas.js';
 
 export function registerRoomsHandlers(): void {
@@ -34,6 +35,10 @@ export function registerRoomsHandlers(): void {
   ipcMain.handle('rooms:delete', async (_e, id: number) => {
     if (typeof id !== 'number' || !Number.isInteger(id) || id < 1) {
       return err('VALIDATION', 'Geçersiz derslik kimliği.');
+    }
+    // Üretim sürerken silme → biterken FK INSERT çökmesi/program kaybı (bkz. teachers.ts).
+    if (isGenerationActive()) {
+      return err('BUSY', 'Program üretimi sürerken veri silinemez. Üretim bitince (veya iptal edince) tekrar deneyin.');
     }
     return safeHandler('rooms:delete', () => {
       roomsRepo.delete(id);

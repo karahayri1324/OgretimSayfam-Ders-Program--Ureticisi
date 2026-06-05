@@ -22,6 +22,14 @@ export type AIContext = {
     active: boolean;
     description: string;
   }>;
+  /** Son program üretimi başarısızsa, AI'ın teşhis+çözüm için kullanacağı kompakt hata bilgisi.
+   *  Üretim başarılıysa / hiç denenmediyse alan YOK (undefined). */
+  lastGenerationFailure?: {
+    reason: string;
+    message: string;
+    unplaced?: number;
+    total?: number;
+  };
 };
 
 const DAY_NORMALIZE: Record<string, string> = {
@@ -2139,10 +2147,29 @@ const extendedDetectors: Detector[] = [
   detectAllTeachersMaxDays,
 ];
 
+/** Bağlamdaki son-üretim-hatasını sade Türkçe bir teşhis cümlesine çevirir. */
+function buildFailurePrefix(
+  failure: NonNullable<AIContext['lastGenerationFailure']>,
+): string {
+  switch (failure.reason) {
+    case 'NO_SOLUTION':
+      return 'Son üretim başarısız oldu: FET tüm kısıtları aynı anda sağlayamadı (çözüm bulunamadı). ';
+    case 'PARTIAL':
+      return typeof failure.unplaced === 'number' && typeof failure.total === 'number'
+        ? `Son üretimde ${failure.total} dersten ${failure.unplaced} tanesi yerleştirilemedi. `
+        : 'Son üretim kısmen tamamlandı; bazı dersler yerleştirilemedi. ';
+    case 'TIMEOUT':
+      return 'Son üretim zaman aşımına uğradı — çözüm uzayı çok karmaşık. ';
+    default:
+      return `Son üretim başarısız oldu: ${failure.message} `;
+  }
+}
+
 function detectRelaxRequest(
   lowerDeburr: string,
   ctx: AIContext,
 ): AIResponse | null {
+  const failure = ctx.lastGenerationFailure ?? null;
   const isRelaxKeyword =
     /(gevset|gevşet|esnet|esnek|ağirlik\s+(dusur|düşür)|onem.{0,15}(dusur|düşür|azalt)|kisitlama.{0,15}(dusur|düşür|azalt))/.test(
       lowerDeburr,
@@ -2151,24 +2178,52 @@ function detectRelaxRequest(
     /(cozum\s+bulunamadi|çözüm\s+bulunamadı|cozulmedi|çözülmedi|fet\s+hata|fet\s+olmadi|fet\s+olmadı|program(i|ı)?\s+(uret|üret).{0,20}(calismadi|çalışmadı|olmadi|olmadı)|oneri\s+ver|öneri\s+ver|nasil\s+cozeyim|nasıl\s+çözeyim)/.test(
       lowerDeburr,
     );
-  if (!isRelaxKeyword && !isFailureKeyword) return null;
+  // Bağlamda GERÇEK bir başarısızlık varsa, kullanıcının "neden / düzelt / çöz / yardım"
+  // gibi kısa tepkilerinde de teşhis+çözüm üret. (Saf "üret" komutunu KAÇIRMA: bu kelimeler
+  // run_solver tetikleyicileriyle örtüşmez.)
+  const isFollowupOnFailure =
+    failure != null &&
+    /(\bneden\b|\bniye\b|nicin|niçin|olmadi|olmadı|olmuyor|duzelt|düzelt|\bcoz\b|\bçöz\b|yardim|yardım|ne\s+yap|nasil\s+(cozeyim|çözeyim|duzelt|düzelt|yapayim)|oneri|öneri)/.test(
+      lowerDeburr,
+    );
+  if (!isRelaxKeyword && !isFailureKeyword && !isFollowupOnFailure) return null;
 
+  // Pre-flight başarısızlıkları (veri eksik): gevşetme değil, ne ekleneceği rehberliği.
+  if (failure) {
+    const dataGuide: Record<string, string> = {
+      NO_ACTIVITIES:
+        'Henüz hiç ders ataması yok. Önce her sınıfa hangi dersten kaç saat verileceğini ekle (örn "9A sınıfına 5 saat Matematik ekle"), sonra tekrar üretelim.',
+      NO_TEACHERS:
+        'Henüz öğretmen tanımlı değil. Önce öğretmenleri ekleyelim (örn "Ahmet Yılmaz, Matematik öğretmeni ekle"), sonra üretiriz.',
+      NO_CLASSES:
+        'Henüz sınıf tanımlı değil. Önce sınıfları ekle (örn "9A, 9B, 10A sınıflarını ekle"), sonra üretelim.',
+      NO_SCHEDULE:
+        'Gün/saat planı eksik. Önce hangi günler ve günde kaç ders saati olduğunu belirle, sonra üretiriz.',
+    };
+    const guide = dataGuide[failure.reason];
+    if (guide) {
+      return { kind: 'query', answer: guide, confidence: 0.85 };
+    }
+  }
+
+  const prefix = failure ? buildFailurePrefix(failure) : '';
   const list = (ctx.constraints ?? []).filter((c) => c.active && c.weight >= 90);
+
   if (list.length === 0) {
+    const tail =
+      'Şu an gevşetilebilecek katı kısıtlama yok (aktif tüm kısıtlamalar 90 altında). ' +
+      'Muhtemel sebep ders dağıtımı: bir öğretmenin/sınıfın haftalık ders saati toplam slot sayısını aşıyor olabilir, ' +
+      'ya da bir güne sığmayacak kadar çok ders var. Çözüm için günlere ders saati ekleyebilir (örn "Cuma gününe 1 saat ekle") ' +
+      'veya bir sınıfın ders saatini azaltabilirsin. İstersen birlikte bakalım.';
     return {
       kind: 'query',
-      answer:
-        'Şu an gevşetilebilecek katı kısıtlama yok. Aktif tüm kısıtlamalar zaten 90 altında. ' +
-        'Yine de programı üretemiyorsan: ders dağıtımında bir öğretmenin haftalık saati sınıf kapasitesini aşıyor olabilir, ' +
-        'ya da bir sınıfın bir günlük ders saati günün toplam saatinden fazla. Ders Dağılımı ekranını gözden geçirir misin?',
+      answer: prefix + tail,
       confidence: 0.8,
     };
   }
 
   const top = [...list]
-    .sort(
-      (a, b) => b.weight - a.weight || b.type.length - a.type.length,
-    )
+    .sort((a, b) => b.weight - a.weight || b.type.length - a.type.length)
     .slice(0, 5);
 
   const actions = top.map((c) => ({
@@ -2178,7 +2233,8 @@ function detectRelaxRequest(
   }));
 
   const explanation =
-    `Programın üretilememesinin en muhtemel sebebi, ağırlığı 100 (katı/zorunlu) olan ${list.length} kısıtlama. ` +
+    prefix +
+    `Bunun en muhtemel sebebi, ağırlığı 100 (katı/zorunlu) olan ${list.length} kısıtlama. ` +
     `Aşağıdaki ${top.length} kısıtlamanın ağırlığını 70'e düşürürsek FET bunları "tercih" olarak görür, ` +
     `tam tatmin edemese bile size en yakın çözümü bulur. Onayla, programı tekrar üretelim.`;
 

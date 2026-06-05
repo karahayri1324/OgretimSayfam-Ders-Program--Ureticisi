@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron';
 import { subjectsRepo } from '../db/repositories/subjects.js';
 import { safeHandler, validate, err } from './_common.js';
+import { isGenerationActive } from './generate.js';
 import { SubjectInputSchema, SubjectPatchSchema } from './_schemas.js';
 
 export function registerSubjectsHandlers(): void {
@@ -34,6 +35,10 @@ export function registerSubjectsHandlers(): void {
   ipcMain.handle('subjects:delete', async (_e, id: number) => {
     if (typeof id !== 'number' || !Number.isInteger(id) || id < 1) {
       return err('VALIDATION', 'Geçersiz ders kimliği.');
+    }
+    // Üretim sürerken silme → biterken FK INSERT çökmesi/program kaybı (bkz. teachers.ts).
+    if (isGenerationActive()) {
+      return err('BUSY', 'Program üretimi sürerken veri silinemez. Üretim bitince (veya iptal edince) tekrar deneyin.');
     }
     return safeHandler('subjects:delete', () => {
       subjectsRepo.delete(id);

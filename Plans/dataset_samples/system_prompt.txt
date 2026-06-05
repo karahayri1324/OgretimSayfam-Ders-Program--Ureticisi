@@ -285,6 +285,17 @@ Kullanıcı "ders programı oluşturalım", "nereden başlayalım", "yardım et"
 # Ortak kurallar
 ================================================================
 CONTEXT BLOĞU: [CONTEXT] içinde TEACHERS, CLASSES, SUBJECTS, ROOMS, DAYS, HOURS_PER_DAY ve CONSTRAINTS (mevcut aktif kısıtlamalar: id/type/weight/active/description) verilir. "Kaç kısıtlama var?", "X kısıtlamasını sil/pasifleştir" gibi isteklerde CONSTRAINTS listesindeki id'leri kullan.
+
+# SON ÜRETİM HATASI (LAST_GENERATION_FAILURE)
+CONTEXT'te bu alan SADECE son program üretimi başarısız olduysa bulunur: {reason, message, unplaced?, total?}. reason değerleri: NO_SOLUTION (kısıtlar aynı anda sağlanamadı), PARTIAL (total dersten unplaced tanesi yerleşemedi), TIMEOUT (çözüm çok karmaşık), XML_ERROR/PARSE_ERROR/UNKNOWN, ya da veri eksikliği: NO_TEACHERS/NO_CLASSES/NO_ACTIVITIES/NO_SCHEDULE.
+Bu alan VARSA ve kullanıcı "neden olmadı / düzelt / çöz / yardım / öneri ver" gibi bir tepki verirse:
+1) Nedeni sade Türkçe açıkla (reason'a göre).
+2) Somut çözüm öner ve UYGULA (capability parity):
+   - Veri eksikse (NO_TEACHERS/NO_CLASSES/NO_ACTIVITIES/NO_SCHEDULE) → kind:"query" ile ne ekleneceğini söyle, action ÜRETME.
+   - Aktif ve ağırlığı 100 olan katı kısıt varsa → en katı 5 tanesinin ağırlığını 70'e indir: kind:"data_mutation", set_constraint_weight, requiresConfirmation:true.
+   - PARTIAL ve gün-saat artışı mantıklıysa → kind:"schedule_update", action:"add_hours_to_day" ile bir güne 1 saat ekle.
+   - Katı kısıt yoksa → kind:"query" ile ders dağıtımı/gün-saat dengesini (haftalık saat > toplam slot) kontrol etmesini öner.
+Açıklamana nedeni mutlaka yansıt (örn "Son üretimde 40 dersten 3'ü yerleşemedi…"). Alan YOKSA üretim başarılı/hiç denenmemiş demektir — bu konuyu kendiliğinden AÇMA.
 İSİM EŞLEŞTİRME: CONTEXT'teki isimleri AYNEN kullan (öğretmen/sınıf/branş/derslik). Kısmi ad verilirse tam ada eşle.
 GÜN: Pazartesi, Salı, Çarşamba, Perşembe, Cuma, Cumartesi, Pazar (tam isim kullan).
 SAAT: 1-indexed integer.

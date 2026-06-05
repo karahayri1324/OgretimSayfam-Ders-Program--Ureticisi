@@ -26,6 +26,21 @@ function effectiveHoursPerDay(): number {
   return Math.max(global, maxDay);
 }
 
+/** Bir günün GERÇEK ders saati sayısı: day_hours override'ı varsa o günün override sayısı,
+ *  yoksa global hours.length. xml-builder'ın per-gün efektif saatiyle (ve bloke ettiği trailing
+ *  saatlerle) AYNI. effectiveHoursPerDay() (=max) tüm günlere tek değer uyguladığından kısa
+ *  günlerde FET'in bloke ettiği saatleri 'boş/uygun' gösteriyordu — slot/boşluk/grid hesapları
+ *  bunun yerine per-gün sayıyı kullanmalı. */
+function perDayHourCounts(): { global: number; byDay: Map<number, number> } {
+  const global = hoursRepo.list().length;
+  const byDay = new Map<number, number>();
+  for (const r of dayHoursRepo.list()) byDay.set(r.dayId, (byDay.get(r.dayId) ?? 0) + 1);
+  return { global, byDay };
+}
+function hoursForDay(dayId: number, pd: { global: number; byDay: Map<number, number> }): number {
+  return pd.byDay.get(dayId) ?? pd.global;
+}
+
 
 export type ToolArgs = Record<string, unknown>;
 export type ToolResult = { result: unknown } | { error: string };
@@ -457,24 +472,28 @@ export const tools = {
     }
 
     const days = daysRepo.list();
-    const hoursPerDay = effectiveHoursPerDay() || 8;
-    const totalCapacity = days.length * hoursPerDay;
+    const pd = perDayHourCounts();
 
     const byDay = new Map<number, number>();
     for (const s of slots) {
       byDay.set(s.dayIndex, (byDay.get(s.dayIndex) ?? 0) + 1);
     }
-    const dayStats = days.map((d) => ({
-      day: d.name,
-      slots: byDay.get(d.orderIndex) ?? 0,
-    }));
+    // Kapasiteyi per-gün topla; kısa günler (day_hours override) daha az slot içerir. Sabit
+    // max saat kullanmak gaps'i şişiriyor ve emptiestDay'i yanıltıyordu.
+    const dayStats = days.map((d) => {
+      const capacity = hoursForDay(d.id, pd);
+      const used = byDay.get(d.orderIndex) ?? 0;
+      return { day: d.name, slots: used, capacity, fillRatio: capacity > 0 ? used / capacity : 0 };
+    });
+    const totalCapacity = dayStats.reduce((sum, s) => sum + s.capacity, 0);
     const busiest = [...dayStats].sort((a, b) => b.slots - a.slots)[0];
-    const emptiest = [...dayStats].sort((a, b) => a.slots - b.slots)[0];
+    // emptiest: mutlak slot yerine doluluk oranına göre (az saatli kısa gün 'en boş' sanılmasın).
+    const emptiest = [...dayStats].sort((a, b) => a.fillRatio - b.fillRatio)[0];
 
     const expectedSlots = className
       ? totalCapacity
       : classesRepo.list().length * totalCapacity;
-    const gaps = expectedSlots - slots.length;
+    const gaps = Math.max(0, expectedSlots - slots.length);
 
     const teacherLoad = new Map<string, number>();
     for (const s of slots) {
@@ -579,12 +598,15 @@ export const tools = {
     if (!klass) return { error: `Sınıf bulunamadı: '${className}'` };
 
     const days = daysRepo.list();
-    const hoursPerDay = effectiveHoursPerDay() || 8;
+    const pd = perDayHourCounts();
 
     const grid: Array<Array<{ subject: string; teacher: string; room: string | null } | null>> = [];
     for (let d = 0; d < days.length; d++) {
       const row: typeof grid[number] = [];
-      for (let h = 1; h <= hoursPerDay; h++) row.push(null);
+      // Her günün satırı yalnız o günün gerçek saat sayısı kadar; kısa günlerde bloke saatler
+      // için hayalet boş hücre üretme.
+      const dayHours = hoursForDay(days[d]!.id, pd) || pd.global || 8;
+      for (let h = 0; h < dayHours; h++) row.push(null);
       grid.push(row);
     }
     for (const s of latest.slots) {
@@ -592,7 +614,7 @@ export const tools = {
       const dayIdx = days.findIndex((d) => d.orderIndex === s.dayIndex);
       if (dayIdx < 0) continue;
       const hourSlot = s.hourIndex;
-      if (hourSlot < 0 || hourSlot >= hoursPerDay) continue;
+      if (hourSlot < 0 || hourSlot >= grid[dayIdx]!.length) continue;
       grid[dayIdx]![hourSlot] = {
         subject: s.subjectName,
         teacher: s.teacherName,
@@ -605,7 +627,7 @@ export const tools = {
         generated: true,
         class: klass.name,
         days: days.map((d) => d.name),
-        hoursPerDay,
+        hoursPerDay: pd.global || 8,
         grid,
         totalSlots: latest.slots.filter((s) => s.classId === klass.id).length,
       },
@@ -789,7 +811,7 @@ export const tools = {
       return { result: { generated: false, message: 'Henüz program üretilmedi.' } };
     }
     const days = daysRepo.list();
-    const hoursPerDay = effectiveHoursPerDay() || 8;
+    const pd = perDayHourCounts();
 
     let entity: string;
     let entityType: 'class' | 'teacher' | 'room';
@@ -822,7 +844,9 @@ export const tools = {
 
     const freeSlots: Array<{ day: string; hour: number }> = [];
     for (const d of days) {
-      for (let h = 0; h < hoursPerDay; h++) {
+      // Kısa günlerde FET bloke saatleri 'boş' gösterme: o günün gerçek saat sayısıyla sınırla.
+      const dayHours = hoursForDay(d.id, pd) || pd.global || 8;
+      for (let h = 0; h < dayHours; h++) {
         if (!occupied.has(`${d.orderIndex}:${h}`)) {
           freeSlots.push({ day: d.name, hour: slotHourToUser(h) });
         }

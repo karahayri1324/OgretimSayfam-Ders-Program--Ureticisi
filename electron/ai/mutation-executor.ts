@@ -8,11 +8,17 @@ import { daysRepo } from '../db/repositories/days.js';
 import { hoursRepo } from '../db/repositories/hours.js';
 import { dayHoursRepo } from '../db/repositories/day_hours.js';
 import { constraintsRepo } from '../db/repositories/constraints.js';
+import {
+  pruneFixedTimeLocksBeyondHour,
+  pruneConstraintsForRemovedDays,
+} from '../db/constraint-maintenance.js';
+import { planConstraintRename } from '../db/constraint-prune-logic.js';
 import { settingsRepo, WRITABLE_SETTING_KEYS } from '../db/repositories/settings.js';
 import { timetablesRepo } from '../db/repositories/timetables.js';
 import { getDb } from '../db/connection.js';
 import type { ConstraintType, TimetableSlot } from '../../src/lib/types.js';
 import { ConstraintTypeEnum } from './schema.js';
+import { decideGroupActivity } from './group-activity-decision.js';
 import { log } from '../utils/logger.js';
 import type {
   DataMutationAction,
@@ -41,7 +47,20 @@ function findByName<T extends { id: number; name: string }>(
   if (!target) return null;
   for (const item of list) if (deburr(item.name) === target) return item;
   for (const item of list) if (deburr(item.name).includes(target)) return item;
-  for (const item of list) if (target.includes(deburr(item.name))) return item;
+  // 3. fallback (aranan ad, entity adını ALT-DİZE olarak içeriyor — örn. "Matematik dersi" →
+  // "Matematik"): kısa adlı entity'ler ("M" odası, "9" sınıfı) bu kuralla YANLIŞ eşleşiyordu
+  // (örn. "Matematik 1" → 'm' içerdiği için "M" odası). Yalnız >=3 karakterlik adları değerlendir
+  // ve birden çok aday varsa EN UZUN (en spesifik) olanı seç.
+  let best: T | null = null;
+  let bestLen = 0;
+  for (const item of list) {
+    const n = deburr(item.name);
+    if (n.length >= 3 && target.includes(n) && n.length > bestLen) {
+      best = item;
+      bestLen = n.length;
+    }
+  }
+  if (best) return best;
   const parts = target.split(/\s+/).filter((p) => p.length >= 3);
   for (const item of list) {
     const lowName = deburr(item.name);
@@ -146,6 +165,58 @@ function requireConstraintType(params: Record<string, unknown>): ConstraintType 
   return parsed.data as ConstraintType;
 }
 
+// merge_activities / add_split_activity için: id'siz activitiesRepo.upsert, ON CONFLICT
+// (sınıf+ders+öğretmen) DO UPDATE ile MEVCUT bağımsız bir aktivitenin weekly_hours/notes
+// değerini SESSİZCE ezer (örn. 9A Matematik 4 saat → grup varsayılanı 1 saate düşer). Bu
+// veri bozulmasını önle: aynı kombinasyon zaten varsa, saat AYNIYSA mevcut kaydı koru (yalnız
+// gruba al), saat FARKLIYSA net hatayla reddet — kullanıcı mevcut müfredat saatini bilerek
+// değiştirsin. Yeni kombinasyon ise normal upsert ile oluştur.
+function upsertGroupActivity(
+  input: {
+    classId: number;
+    subjectId: number;
+    teacherId: number | null;
+    weeklyHours: number;
+    blockDuration: number;
+    notes: string;
+  },
+  className: string,
+  subjectName: string,
+): number {
+  const existing = activitiesRepo
+    .list()
+    .find(
+      (a) =>
+        a.classId === input.classId &&
+        a.subjectId === input.subjectId &&
+        (a.teacherId ?? null) === (input.teacherId ?? null),
+    );
+  const decision = decideGroupActivity(
+    existing ? { id: existing.id, weeklyHours: existing.weeklyHours } : null,
+    input.weeklyHours,
+  );
+  if (decision.kind === 'conflict') {
+    throw new Error(
+      `'${className}' sınıfı '${subjectName}' dersini zaten ${decision.existingHours} saat alıyor; ` +
+        `bu işlem ${input.weeklyHours} saat istiyor. Mevcut aktivitenin saatini eşitleyin ya da ` +
+        `silin, sonra tekrar deneyin (mevcut müfredat saatini sessizce değiştirmiyorum).`,
+    );
+  }
+  if (decision.kind === 'reuse') return decision.id;
+  return activitiesRepo.upsert(input);
+}
+
+// delete_hour/set_hour_times saatleri 0..n-1 yeniden indeksler. ACTIVITY_FIXED_TIME kısıtları
+// hour'u 1-tabanlı sıra no olarak saklar; saat sayısı azalınca aralık DIŞINDA kalan kilitler
+// FET-build'de sessizce kaybolur (kullanıcıya hiç bildirilmeden). Aralık dışı kilitleri buda ve
+// kaç tanesinin kaldırıldığını bildir (sessiz kayıp yerine açık bilgi).
+function pruneFixedTimeLocksBeyond(hourCount: number): string {
+  const removed = pruneFixedTimeLocksBeyondHour(hourCount);
+  return removed > 0
+    ? ` ${removed} adet artık geçersiz saat-kilidi (ACTIVITY_FIXED_TIME) kaldırıldı; kalan kilitleri kontrol edin.`
+    : '';
+}
+
 function optString(params: Record<string, unknown>, key: string): string | undefined {
   const v = params[key];
   if (typeof v !== 'string' || !v.trim()) return undefined;
@@ -217,6 +288,21 @@ function pruneConstraintsByName(field: 'teacher' | 'class' | 'subject' | 'room',
     }
   }
   return removed;
+}
+
+// Entity YENİDEN ADLANDIRILINCA, kısıtlar adı snapshot olarak params_json'da sakladığından
+// (FET handler'ları referansları ADA göre çözer, eşleşmezse sessizce skip eder), eski ada atıf
+// yapan kısıtları YENİ ada güncelle. Aksi halde zararsız görünen bir rename, kullanıcının açıkça
+// koyduğu kısıtları sessizce ölü bırakıyordu. delete yolundaki pruneConstraintsByName'in rename
+// karşılığı. Güncellenen kısıt sayısını döner.
+function renameConstraintReferences(
+  field: 'teacher' | 'class' | 'subject' | 'room',
+  oldName: string,
+  newName: string,
+): number {
+  const updates = planConstraintRename(constraintsRepo.list(), field, oldName, newName);
+  for (const u of updates) constraintsRepo.updateParams(u.id, u.params);
+  return updates.length;
 }
 
 function pruneConstraintsByActivityIds(ids: number[]): number {
@@ -306,7 +392,11 @@ const handlers: Record<DataMutationOp, Handler> = {
       patch['subjectIds'] = names.map((s) => ensureSubject(s));
     }
     teachersRepo.update(teacher.id, patch);
-    return `'${teacher.name}' öğretmeni güncellendi.`;
+    const renamed = patch['name']
+      ? renameConstraintReferences('teacher', teacher.name, String(patch['name']))
+      : 0;
+    const extra = renamed > 0 ? ` ${renamed} ilgili kısıtlama yeni ada güncellendi.` : '';
+    return `'${teacher.name}' öğretmeni güncellendi.${extra}`;
   },
 
   delete_teacher(params) {
@@ -352,7 +442,11 @@ const handlers: Record<DataMutationOp, Handler> = {
     const notes = optString(params, 'notes');
     if (notes !== undefined) patch['notes'] = notes;
     subjectsRepo.update(subject.id, patch);
-    return `'${subject.name}' branşı güncellendi.`;
+    const renamed = patch['name']
+      ? renameConstraintReferences('subject', subject.name, String(patch['name']))
+      : 0;
+    const extra = renamed > 0 ? ` ${renamed} ilgili kısıtlama yeni ada güncellendi.` : '';
+    return `'${subject.name}' branşı güncellendi.${extra}`;
   },
 
   delete_subject(params) {
@@ -402,7 +496,11 @@ const handlers: Record<DataMutationOp, Handler> = {
       patch['homeRoomId'] = resolveHomeRoomId(params);
     }
     classesRepo.update(klass.id, patch);
-    return `'${klass.name}' sınıfı güncellendi.`;
+    const renamed = patch['name']
+      ? renameConstraintReferences('class', klass.name, String(patch['name']))
+      : 0;
+    const extra = renamed > 0 ? ` ${renamed} ilgili kısıtlama yeni ada güncellendi.` : '';
+    return `'${klass.name}' sınıfı güncellendi.${extra}`;
   },
 
   delete_class(params) {
@@ -474,7 +572,11 @@ const handlers: Record<DataMutationOp, Handler> = {
     const notes = optString(params, 'notes');
     if (notes !== undefined) patch['notes'] = notes;
     roomsRepo.update(room.id, patch);
-    return `'${room.name}' dersliği güncellendi.`;
+    const renamed = patch['name']
+      ? renameConstraintReferences('room', room.name, String(patch['name']))
+      : 0;
+    const extra = renamed > 0 ? ` ${renamed} ilgili kısıtlama yeni ada güncellendi.` : '';
+    return `'${room.name}' dersliği güncellendi.${extra}`;
   },
 
   delete_room(params) {
@@ -650,8 +752,12 @@ const handlers: Record<DataMutationOp, Handler> = {
     if (next.length === current.length) {
       throw new Error(`Gün bulunamadı: '${name}'`);
     }
+    const removed = current.filter((d) => deburr(d) === deburr(name));
     daysRepo.replaceAll(next);
-    return `'${name}' günü programdan kaldırıldı.`;
+    // O güne bağlı kilit/kural kısıtları aksi halde FET-build'de sessizce skip ediliyordu.
+    const pruned = pruneConstraintsForRemovedDays(removed);
+    const extra = pruned > 0 ? ` ${pruned} ilgili kısıtlama (o güne bağlı kilit/kural) temizlendi.` : '';
+    return `'${name}' günü programdan kaldırıldı.${extra}`;
   },
 
   set_days(params) {
@@ -667,8 +773,12 @@ const handlers: Record<DataMutationOp, Handler> = {
       const n = d.trim();
       if (!names.some((x) => deburr(x) === deburr(n))) names.push(n);
     }
+    const current = daysRepo.list().map((d) => d.name);
+    const removed = current.filter((d) => !names.some((n) => deburr(n) === deburr(d)));
     daysRepo.replaceAll(names);
-    return `Haftalık günler ayarlandı (${names.length} gün): ${names.join(', ')}.`;
+    const pruned = pruneConstraintsForRemovedDays(removed);
+    const extra = pruned > 0 ? ` ${pruned} ilgili kısıtlama temizlendi.` : '';
+    return `Haftalık günler ayarlandı (${names.length} gün): ${names.join(', ')}.${extra}`;
   },
 
   add_hour(params) {
@@ -707,7 +817,8 @@ const handlers: Record<DataMutationOp, Handler> = {
       next.map((h) => ({ name: h.name, startTime: h.startTime, endTime: h.endTime })),
     );
     const cleared = clearDayHourOverrides();
-    return `'${removedName}' ders saati kaldırıldı.${cleared}`;
+    const prunedLocks = pruneFixedTimeLocksBeyond(next.length);
+    return `'${removedName}' ders saati kaldırıldı.${cleared}${prunedLocks}`;
   },
 
   set_hour_times(params) {
@@ -726,7 +837,8 @@ const handlers: Record<DataMutationOp, Handler> = {
     }
     hoursRepo.replaceAll(entries);
     const cleared = clearDayHourOverrides();
-    return `${entries.length} ders saati güncellendi (isim/başlangıç/bitiş).${cleared}`;
+    const prunedLocks = pruneFixedTimeLocksBeyond(entries.length);
+    return `${entries.length} ders saati güncellendi (isim/başlangıç/bitiş).${cleared}${prunedLocks}`;
   },
 
   clear_day_hours(params) {
@@ -958,14 +1070,18 @@ const handlers: Record<DataMutationOp, Handler> = {
         }
       }
 
-      const actId = activitiesRepo.upsert({
-        classId,
-        subjectId,
-        teacherId,
-        weeklyHours,
-        blockDuration,
-        notes: `Split grubu — ${className} aynı saatte`,
-      });
+      const actId = upsertGroupActivity(
+        {
+          classId,
+          subjectId,
+          teacherId,
+          weeklyHours,
+          blockDuration,
+          notes: `Split grubu — ${className} aynı saatte`,
+        },
+        className,
+        subjectName,
+      );
       createdIds.push(actId);
 
       if (roomName) {
@@ -1015,6 +1131,26 @@ const handlers: Record<DataMutationOp, Handler> = {
     const day = requireString(params, 'day');
     const hour = optInt(params, 'hour');
     if (hour == null || hour < 1) throw new Error("'hour' 1+ olmalı.");
+    // ÜST SINIR: hour, programın günlük ders saati sayısını aşamaz. Aşarsa ACTIVITY_FIXED_TIME
+    // kısıtı DB'ye yazılır, "uygulandı" denir AMA FET-build'de "Bilinmeyen saat" diye SESSİZCE
+    // düşer (handlers.ts) — AI uyguladığını sanır, kural hiç işlemez. FET effectiveHoursPerDay =
+    // max(global saat, güne-özel override). Bu üst sınırı aşan saati baştan reddet.
+    const maxHour = (() => {
+      let maxDay = 0;
+      const byDay = new Map<number, number>();
+      for (const r of dayHoursRepo.list()) {
+        const c = (byDay.get(r.dayId) ?? 0) + 1;
+        byDay.set(r.dayId, c);
+        if (c > maxDay) maxDay = c;
+      }
+      return Math.max(hoursRepo.list().length, maxDay);
+    })();
+    if (maxHour > 0 && hour > maxHour) {
+      throw new Error(
+        `Saat ${hour} geçersiz: program günde en fazla ${maxHour} ders saati içeriyor. ` +
+          `Önce gün/saat planına saat ekleyin ya da 1-${maxHour} arası bir saat verin.`,
+      );
+    }
 
     const klass = findByName(className, classesRepo.list());
     if (!klass) throw new Error(`Sınıf bulunamadı: '${className}'`);
@@ -1336,14 +1472,18 @@ const handlers: Record<DataMutationOp, Handler> = {
       }
       const classId = ensureClass(raw.trim());
       classNames.push(raw.trim());
-      const actId = activitiesRepo.upsert({
-        classId,
-        subjectId,
-        teacherId,
-        weeklyHours,
-        blockDuration,
-        notes: `Birleşik aktivite: ${classesRaw.join(' + ')} → ${subjectName}`,
-      });
+      const actId = upsertGroupActivity(
+        {
+          classId,
+          subjectId,
+          teacherId,
+          weeklyHours,
+          blockDuration,
+          notes: `Birleşik aktivite: ${classesRaw.join(' + ')} → ${subjectName}`,
+        },
+        raw.trim(),
+        subjectName,
+      );
       createdIds.push(actId);
 
       if (roomName) {
@@ -1510,23 +1650,31 @@ const handlers: Record<DataMutationOp, Handler> = {
     if (!subj1) throw new Error(`Branş bulunamadı: '${subject1}'`);
     if (!subj2) throw new Error(`Branş bulunamadı: '${subject2}'`);
 
+    // Aynı sınıf×branş birden çok öğretmende olabilir (UNIQUE(school,class,subject,teacher)).
+    // .find() ile sessizce İLKİNİ seçmek yanlış aktiviteyi eşleştirip diğerini eşsiz bırakıyordu
+    // (update_activity/delete_activity/set_timetable_slot hepsi belirsizlikte hata fırlatır;
+    // pair tek istisnaydı). Birden çoksa netleştir.
     const allActs = activitiesRepo.list();
-    const act1 = allActs.find(
-      (a) => a.classId === klass.id && a.subjectId === subj1.id,
-    );
-    const act2 = allActs.find(
-      (a) => a.classId === klass.id && a.subjectId === subj2.id,
-    );
-    if (!act1) {
-      throw new Error(
-        `${className} × ${subject1} aktivitesi bulunamadı. Önce add_activity ile ekleyin.`,
-      );
-    }
-    if (!act2) {
-      throw new Error(
-        `${className} × ${subject2} aktivitesi bulunamadı. Önce add_activity ile ekleyin.`,
-      );
-    }
+    const resolveSingle = (subjId: number, subjLabel: string) => {
+      const m = allActs.filter((a) => a.classId === klass.id && a.subjectId === subjId);
+      if (m.length === 0) {
+        throw new Error(
+          `${className} × ${subjLabel} aktivitesi bulunamadı. Önce add_activity ile ekleyin.`,
+        );
+      }
+      if (m.length > 1) {
+        const names = m
+          .map((a) => (a.teacherId ? teachersRepo.get(a.teacherId)?.name ?? '?' : 'atanmamış'))
+          .join(', ');
+        throw new Error(
+          `${className} × ${subjLabel} için birden fazla aktivite var (öğretmenler: ${names}). ` +
+            `Ardışıklık kuralı belirsiz; bu branşı tek öğretmene indirin veya ilgili aktiviteleri birleştirin.`,
+        );
+      }
+      return m[0]!;
+    };
+    const act1 = resolveSingle(subj1.id, subject1);
+    const act2 = resolveSingle(subj2.id, subject2);
 
     const existing = constraintsRepo.list().find(
       (c) =>

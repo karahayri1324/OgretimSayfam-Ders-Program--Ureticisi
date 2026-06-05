@@ -56,6 +56,10 @@ export default function Schedule() {
 
   const [tab, setTab] = useState<'global' | 'perDay'>('global');
   const [selectedDays, setSelectedDays] = useState<Set<string>>(DEFAULT_SELECTED);
+  // DB'de olup DAY_DEFS'e (Pazartesi..Pazar) eşlenemeyen, AI'ın eklediği standart-dışı gün adları
+  // (örn. 'Cumartesi Telafi'). Bunlar grid'de gösterilemez ama Kaydet'te KORUNMALI — yoksa
+  // sessizce silinir (gün + güne özel saatleri kaybolur).
+  const [extraDays, setExtraDays] = useState<string[]>([]);
   const [hoursPerDay, setHoursPerDay] = useState(8);
   const [hourRows, setHourRows] = useState<HourRow[]>(() =>
     buildDefaultHours(8),
@@ -80,6 +84,13 @@ export default function Schedule() {
           .map((d) => nameToId.get((d.name ?? '').toLocaleLowerCase('tr')))
           .filter((x): x is string => Boolean(x));
         if (matched.length > 0) setSelectedDays(new Set(matched));
+        // Eşlenemeyen (standart-dışı) gün adlarını sakla ki Kaydet onları silmesin.
+        setExtraDays(
+          days
+            .filter((d) => !nameToId.has((d.name ?? '').toLocaleLowerCase('tr')))
+            .map((d) => d.name ?? '')
+            .filter((n) => n.length > 0),
+        );
       }
       if (hours.length > 0) {
         setHoursPerDay(hours.length);
@@ -144,15 +155,16 @@ export default function Schedule() {
   }
 
   async function handleSave() {
-    if (orderedSelected.length === 0) {
+    if (orderedSelected.length === 0 && extraDays.length === 0) {
       toast.warn('En az bir gün seçilmelidir.');
       return;
     }
     setSaving(true);
-    const dayPayload = orderedSelected.map((d, i) => ({
-      name: d.name,
-      orderIndex: i,
-    }));
+    // Grid'deki seçili standart günler + grid'de gösterilemeyen standart-dışı günler (korunur).
+    const dayPayload = [
+      ...orderedSelected.map((d, i) => ({ name: d.name, orderIndex: i })),
+      ...extraDays.map((name, i) => ({ name, orderIndex: orderedSelected.length + i })),
+    ];
     const hourPayload = hourRows.map((h, i) => ({
       name: h.name.trim() || `${i + 1}. ${tr.schedule.hourLabel}`,
       orderIndex: i,

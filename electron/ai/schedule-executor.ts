@@ -2,13 +2,12 @@ import { daysRepo } from '../db/repositories/days.js';
 import { hoursRepo } from '../db/repositories/hours.js';
 import { dayHoursRepo } from '../db/repositories/day_hours.js';
 import { timetablesRepo } from '../db/repositories/timetables.js';
+import {
+  pruneFixedTimeLocksBeyondHour,
+  pruneConstraintsForRemovedDays,
+} from '../db/constraint-maintenance.js';
+import { shiftClock, parseHM } from '../utils/clock.js';
 import { log } from '../utils/logger.js';
-
-/** "HH:MM" → dakika; geçersizse null. */
-function parseHM(t: string | null | undefined): number | null {
-  const m = t ? /^(\d{1,2}):(\d{2})$/.exec(t.trim()) : null;
-  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
-}
 import type { AIScheduleUpdateResponse, Hour } from '../../src/lib/types.js';
 
 
@@ -41,22 +40,6 @@ function snapshot(): ScheduleUpdateApplyResult['data'] {
     hours: hoursRepo.list(),
     dayHours: dayHoursRepo.list(),
   };
-}
-
-function shiftClock(time: string, deltaMinutes: number): string {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
-  if (!match) return time;
-  const hh = Number(match[1]);
-  const mm = Number(match[2]);
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return time;
-  let totalMin = hh * 60 + mm + deltaMinutes;
-  // Gün-içi saat: ertesi güne SARMA (eski %1440 → sonraki dersi öncekinden erken başlatıyordu)
-  // ya da negatife düşme yerine [00:00, 23:59] aralığına sınırla (#6).
-  if (totalMin < 0) totalMin = 0;
-  if (totalMin > 23 * 60 + 59) totalMin = 23 * 60 + 59;
-  const nh = Math.floor(totalMin / 60);
-  const nm = totalMin % 60;
-  return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`;
 }
 
 function requireNumber(params: Record<string, unknown>, ...keys: string[]): number | null {
@@ -305,10 +288,17 @@ function setHoursPerDay(params: Record<string, unknown>): ScheduleUpdateApplyRes
 
   const overrideNote =
     affectedDays > 0 ? ` (${affectedDays} güne özel saat ayarı sıfırlandı)` : '';
+  // Saat sayısı azaldıysa aralık-dışı ACTIVITY_FIXED_TIME kilitleri FET-build'de sessizce
+  // düşerdi (delete_hour/set_hour_times'taki budamanın paralel yolu). Buda ve bildir.
+  const prunedLocks = pruneFixedTimeLocksBeyondHour(n);
+  const lockNote =
+    prunedLocks > 0
+      ? ` ${prunedLocks} adet artık geçersiz saat-kilidi kaldırıldı.`
+      : '';
   return {
     ok: true,
     action: 'set_hours_per_day',
-    message: `Günlük ders saati sayısı ${n} olarak ayarlandı${overrideNote}.${staleWarning}`,
+    message: `Günlük ders saati sayısı ${n} olarak ayarlandı${overrideNote}.${staleWarning}${lockNote}`,
     data: snapshot(),
   };
 }
@@ -324,11 +314,15 @@ function removeDay(params: Record<string, unknown>): ScheduleUpdateApplyResult {
   if (next.length === 0) {
     throw new Error('Tüm günleri silemezsiniz — en az bir gün kalmalı.');
   }
+  const removed = cur.filter((d) => deburr(d) === deburr(dayName));
   daysRepo.replaceAll(next);
+  // O güne bağlı kilit/kural kısıtları aksi halde sessizce skip ediliyordu (mutation delete_day ile paralel).
+  const pruned = pruneConstraintsForRemovedDays(removed);
+  const extra = pruned > 0 ? ` ${pruned} ilgili kısıtlama (o güne bağlı kilit/kural) temizlendi.` : '';
   return {
     ok: true,
     action: 'remove_day',
-    message: `'${dayName}' günü programdan kaldırıldı.`,
+    message: `'${dayName}' günü programdan kaldırıldı.${extra}`,
     data: snapshot(),
   };
 }

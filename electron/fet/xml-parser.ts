@@ -53,6 +53,12 @@ type RawActivity = {
 
 function mapActivities(rawActs: RawActivity[], ctx: ParseContext): ParseResult {
   const { bundle } = ctx;
+  // INVARIANT: slot.dayIndex = günlerin orderIndex'e göre sıralı DİZİ POZİSYONU (0-tabanlı).
+  // daysRepo TÜM gün mutasyonlarını replaceAll() üzerinden yapar ve order_index'i daima
+  // 0..n-1 bitişik atar; bu yüzden dayIndex == day.orderIndex her zaman tutar ve tools.ts'teki
+  // `s.dayIndex === day.orderIndex` karşılaştırmaları doğrudur. Eğer ileride order_index gap'li
+  // (ör. 1-tabanlı veya silme sonrası boşluklu) hale gelirse bu eşitlik bozulur — o durumda
+  // tools.ts dizinleme mantığı da güncellenmeli.
   const dayIndexByName = new Map<string, number>();
   bundle.days
     .slice()

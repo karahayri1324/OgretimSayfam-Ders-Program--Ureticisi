@@ -48,6 +48,19 @@ class MeResponse(BaseModel):
     user: PublicUser
 
 
+class GenerationFailureContext(BaseModel):
+    """Son FET üretim başarısızlığı — AI'ın teşhis+çözüm için kullandığı kompakt bilgi.
+
+    Yalnız üretim başarısızsa gönderilir; başarılı/temizken alan hiç gelmez. inference.py
+    bunu [CONTEXT] içinde KOŞULLU bir LAST_GENERATION_FAILURE satırı olarak yazar — bu yüzden
+    alan yokken prompt mevcut eğitim formatıyla byte-eş kalır (regen gerekmez)."""
+
+    reason: str = Field(max_length=64)
+    message: str = Field(max_length=2000)
+    unplaced: int | None = Field(default=None, ge=0, le=1_000_000)
+    total: int | None = Field(default=None, ge=0, le=1_000_000)
+
+
 class AIContext(BaseModel):
     teachers: list[EntityName] = Field(default_factory=list, max_length=5000)
     classes: list[EntityName] = Field(default_factory=list, max_length=5000)
@@ -56,6 +69,7 @@ class AIContext(BaseModel):
     days: list[EntityName] = Field(default_factory=list, max_length=60)
     hoursPerDay: int = Field(default=8, ge=0, le=100)
     constraints: list[dict[str, Any]] = Field(default_factory=list, max_length=5000)
+    lastGenerationFailure: GenerationFailureContext | None = None
 
     @field_validator("constraints")
     @classmethod
@@ -129,8 +143,9 @@ class AdminUserPatch(BaseModel):
     status: str | None = Field(default=None, pattern="^(active|blocked)$")
     is_admin: bool | None = None
     rate_limit_per_hour: int | None = Field(default=None, ge=0, le=1_000_000)
-    block_message: str | None = None
-    demo_expires_at: str | None = None
+    # Sınırsız string DB'ye yazılıp her blokta okunuyordu → sınırsız depolama/yanıt şişmesi (DoS).
+    block_message: str | None = Field(default=None, max_length=2000)
+    demo_expires_at: str | None = Field(default=None, max_length=64)
 
 
 class AdminSettingsView(BaseModel):
@@ -141,5 +156,6 @@ class AdminSettingsView(BaseModel):
 
 class AdminSettingsPatch(BaseModel):
     default_rate_limit_per_hour: int | None = Field(default=None, ge=0, le=1_000_000)
-    default_block_message: str | None = None
-    rate_limit_message: str | None = None
+    # Global ayarlar — sınırsız string her isteğe/bloğa yansıyacağından üst sınır şart (DoS).
+    default_block_message: str | None = Field(default=None, max_length=2000)
+    rate_limit_message: str | None = Field(default=None, max_length=2000)

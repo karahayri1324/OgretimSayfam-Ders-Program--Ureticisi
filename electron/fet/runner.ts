@@ -12,6 +12,22 @@ import type {
   SchoolBundle,
 } from './types.js';
 
+// FET, çözülemez veriyi/kısıtı çeşitli kalıplarla bildirir. KRİTİK: precompute aşamasında
+// reddederse ("Cannot precompute - data is wrong - aborting", "Cannot optimize for subgroup ...
+// number of hours ... is X and you have only Y free slots") EXIT KODU 0 ile çıkar ve
+// timetables/<base>/ dizinini BOŞ bırakır. Bu kalıplar hem code===0 dalında (parse'tan önce)
+// hem code!==0 dalında (classifyError) NO_SOLUTION'a sınıflanmalı; aksi halde sıradan bir
+// veri/kısıt hatası kullanıcıya PARSE_ERROR "geliştiriciye bildirin" olarak gösterilir ve
+// AI düzeltme döngüsüne yanlış reason gider.
+const INFEASIBLE_RE =
+  /could not (generate|find)|cannot (generate|optimize|precompute|schedule)|data is wrong|impossib|imkans|olanaks|not enough|number of (hours|activities|sub-?activities)|(available|free) slots|inconsistent/i;
+
+/** FET çıktı metni (stdout + logs) çözülemez veri/kısıt mı işaretliyor? Test edilebilirlik için
+ *  dışa açık (FET infeasibility'yi exit 0 ile de bildirebildiğinden bu sınıflandırma kritiktir). */
+export function isInfeasibleFetOutput(text: string): boolean {
+  return INFEASIBLE_RE.test(text);
+}
+
 export async function runFet(
   fetFilePath: string,
   outputDir: string,
@@ -155,7 +171,7 @@ export async function runFet(
 
       if (code === 0) {
         const resultText = `${stdoutBuf}\n${await readErrorFiles(outputDir)}`;
-        if (/could not (generate|find)|impossible|imkans|olanaks/i.test(resultText)) {
+        if (INFEASIBLE_RE.test(resultText)) {
           resolve({
             ok: false,
             errorCode: 'NO_SOLUTION',
@@ -192,6 +208,21 @@ export async function runFet(
           opts.onProgress?.({ kind: 'done', message: 'Program başarıyla üretildi' });
           resolve({ ok: true, outputDir, timetable: parsed.slots, durationMs: duration });
         } catch (e) {
+          // FET 0 ile çıkıp boş timetables dizini bırakmış olabilir (precompute reddi). Çıktı
+          // metni infeasibility işaretliyse bu PARSE_ERROR değil NO_SOLUTION'dır — kullanıcıya
+          // "geliştiriciye bildirin" yerine "kısıtları gevşetin/saat ekleyin" göster.
+          if (INFEASIBLE_RE.test(resultText)) {
+            resolve({
+              ok: false,
+              errorCode: 'NO_SOLUTION',
+              message:
+                'Kısıtlamalar çok sert veya veriler tutarsız (ör. bir sınıfa haftalık slot sayısından fazla ders). Bazı kısıtlamaları kaldırın/esnetin ya da ders saatlerini azaltın.',
+              outputDir,
+              rawError: `${resultText}\n${String(e)}`,
+              durationMs: duration,
+            });
+            return;
+          }
           resolve({
             ok: false,
             errorCode: 'PARSE_ERROR',
@@ -283,12 +314,8 @@ type ErrCode = Extract<FetResult, { ok: false }>['errorCode'];
 function classifyError(raw: string): { code: ErrCode; message: string } {
   // FET çözülemez veriyi "Cannot optimize/generate/precompute ... because the number of hours ..."
   // gibi ifadelerle bildirir; eski regex yalnızca "could not" yakalayıp bunları UNKNOWN'a
-  // düşürüyordu (#17). Infeasibility kalıplarını NO_SOLUTION olarak sınıflandır.
-  if (
-    /could not (generate|find)|cannot (generate|optimize|precompute|schedule)|impossib|imkans|olanaks|not enough|number of (hours|activities|sub-?activities)|inconsistent/i.test(
-      raw,
-    )
-  ) {
+  // düşürüyordu (#17). Infeasibility kalıplarını NO_SOLUTION olarak sınıflandır (paylaşılan regex).
+  if (INFEASIBLE_RE.test(raw)) {
     return {
       code: 'NO_SOLUTION',
       message:

@@ -551,6 +551,12 @@ function teacherMinHoursDaily(c: Constraint, ctx: BuilderContext): HandlerResult
   if (!ctx.teacherByName.has(name)) return skip(ctx, c, `Bilinmeyen öğretmen: "${name}"`);
   const min = getNum(c.params, 'minHours');
   if (min === null) return skip(ctx, c, 'minHours eksik');
+  // FET, "boş günlere izinli" min-günlük-saat kısıtında değerin >=2 olmasını ŞART koşar; <2 ise
+  // fet-cl "data is wrong" deyip TÜM üretimi abort eder (e2e ile doğrulandı). min<2 zaten önemsiz
+  // (çalışılan günde >=1 saat daima sağlanır) → üretimi kilitleyen XML yerine temiz atla.
+  if (Math.floor(min) < 2) {
+    return skip(ctx, c, `FET min-günlük-saat kısıtı için >=2 ister (verilen=${Math.floor(min)}); 1 zaten daima sağlandığından atlandı`);
+  }
   return [{
     section: 'time',
     tag: 'ConstraintTeacherMinHoursDaily',
@@ -796,6 +802,11 @@ function classMinHoursDaily(c: Constraint, ctx: BuilderContext): HandlerResult {
   if (!ctx.classByName.has(cls)) return skip(ctx, c, `Bilinmeyen sınıf: "${cls}"`);
   const min = getNum(c.params, 'minHours');
   if (min === null) return skip(ctx, c, 'minHours eksik');
+  // Bkz. teacherMinHoursDaily: FET <2 değerde "data is wrong" deyip tüm üretimi abort eder; min<2
+  // önemsiz olduğundan (çalışılan günde >=1 daima sağlanır) üretimi kilitlemek yerine temiz atla.
+  if (Math.floor(min) < 2) {
+    return skip(ctx, c, `FET min-günlük-saat kısıtı için >=2 ister (verilen=${Math.floor(min)}); 1 zaten daima sağlandığından atlandı`);
+  }
   return [{
     section: 'time',
     tag: 'ConstraintStudentsSetMinHoursDaily',
@@ -1150,29 +1161,17 @@ function twoActivitiesConsecutive(c: Constraint, ctx: BuilderContext): HandlerRe
 }
 
 function maxGapsBetweenActivities(c: Constraint, ctx: BuilderContext): HandlerResult {
-  const rawIds = getArr(c.params, 'activityIds');
-  const ids: number[] = [];
-  for (const v of rawIds) {
-    const n = typeof v === 'number' ? v : Number(v);
-    if (Number.isFinite(n)) {
-      const expanded = ctx.fetActivityIdsByActivity.get(n) ?? [];
-      ids.push(...expanded);
-    }
-  }
+  // ConstraintMaxGapsBetweenActivities FET'in VARSAYILAN modunda DESTEKLENMİYOR: fet-cl
+  // "You have constraints which are incompatible with the current mode ... data is wrong - aborting"
+  // deyip TÜM üretimi kilitliyor. İzole testte (auto-MinDaysBetween olmadan, yalnız 2 tekil
+  // aktiviteyle) de doğrulandı → tipin kendisi mod-uyumsuz, veriyle ilgili değil. MinGaps sürümü
+  // sorunsuz çalışır. Geçersiz/üretimi-kilitleyen XML üretmek yerine açık gerekçeyle temiz atla.
   const max = getNum(c.params, 'maxGaps');
-  if (max === null) return skip(ctx, c, 'maxGaps eksik');
-  if (ids.length < 2) return skip(ctx, c, 'En az 2 aktivite gerekli');
-  return [{
-    section: 'time',
-    tag: 'ConstraintMaxGapsBetweenActivities',
-    body: {
-      Weight_Percentage: c.weight,
-      Number_of_Activities: ids.length,
-      Activity_Id: ids,
-      MaxGaps: Math.floor(max),
-      ...commonTail(c),
-    },
-  }];
+  return skip(
+    ctx,
+    c,
+    `FET bu kısıtı (aktiviteler-arası azami boşluk) varsayılan modda desteklemiyor, üretimi kilitliyor${max !== null ? ` (maxGaps=${Math.floor(max)})` : ''}`,
+  );
 }
 
 function activityPreferredStartingTimes(c: Constraint, ctx: BuilderContext): HandlerResult {

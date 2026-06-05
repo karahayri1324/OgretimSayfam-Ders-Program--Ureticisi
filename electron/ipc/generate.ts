@@ -12,6 +12,12 @@ import { settingsRepo } from '../db/repositories/settings.js';
 import { buildFetXml } from '../fet/xml-builder.js';
 import { runFet } from '../fet/runner.js';
 import { checkFetAvailable } from '../fet/binary-path.js';
+import {
+  recordGenerationFailure,
+  clearGenerationFailure,
+  parseUnplacedFromMessage,
+  type GenerationFailureReason,
+} from '../ai/generation-feedback.js';
 import { log } from '../utils/logger.js';
 import type { FetProgressEvent } from '../fet/types.js';
 import type { GenerateProgress, TimetableResult } from '../../src/lib/types.js';
@@ -66,11 +72,22 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
       }
     };
 
+    // Başarısızlığı hem AI bağlamına kaydet hem standart hata döndür. Böylece kullanıcı
+    // AI'a "neden olmadı / düzelt" dediğinde model gerçek nedeni (context) bilir.
+    const failGenerate = (
+      reason: GenerationFailureReason,
+      message: string,
+      details?: unknown,
+    ) => {
+      recordGenerationFailure({ reason, message });
+      return err(reason, message, details);
+    };
+
     let tmpDir: string | null = null;
     try {
       const fetOk = await checkFetAvailable();
       if (!fetOk) {
-        return err(
+        return failGenerate(
           'BINARY_NOT_FOUND',
           'FET motoru bulunamadı. Uygulamayı yeniden yükleyin.',
         );
@@ -78,25 +95,25 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
 
       const bundle = gatherSchoolData();
       if (bundle.teachers.length === 0) {
-        return err(
+        return failGenerate(
           'NO_TEACHERS',
           'Henüz öğretmen tanımlı değil. Önce "Öğretmenler" ekranından öğretmen ekleyin.',
         );
       }
       if (bundle.classes.length === 0) {
-        return err(
+        return failGenerate(
           'NO_CLASSES',
           'Henüz sınıf tanımlı değil. Önce "Sınıflar" ekranından sınıf ekleyin.',
         );
       }
       if (bundle.activities.length === 0) {
-        return err(
+        return failGenerate(
           'NO_ACTIVITIES',
           'Henüz ders ataması (aktivite) tanımlı değil. Önce "Dersler" ekranından sınıf × ders × öğretmen ataması yapın.',
         );
       }
       if (bundle.days.length === 0 || bundle.hours.length === 0) {
-        return err(
+        return failGenerate(
           'NO_SCHEDULE',
           'Önce gün ve saat tanımlarını yapın. "Gelişmiş → Gün/Saat Planı" ekranı.',
         );
@@ -171,6 +188,19 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
 
       if (!fetResult.ok) {
         emit({ kind: 'error', message: fetResult.message });
+        // İptal (CANCELLED) bir başarısızlık değil — kullanıcı bilinçli durdurdu; AI bağlamına
+        // hata olarak yazma. Diğer tüm kodlar gerçek üretim başarısızlığı → AI'a taşı.
+        if (fetResult.errorCode !== 'CANCELLED') {
+          const counts =
+            fetResult.errorCode === 'PARTIAL'
+              ? parseUnplacedFromMessage(fetResult.message)
+              : null;
+          recordGenerationFailure({
+            reason: fetResult.errorCode as GenerationFailureReason,
+            message: fetResult.message,
+            ...(counts ?? {}),
+          });
+        }
         return err(fetResult.errorCode, fetResult.message, {
           outputDir: fetResult.outputDir,
           rawError: fetResult.rawError,
@@ -207,12 +237,14 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
       emit({ kind: 'progress', value: 1, message: 'Tamamlandı' });
       emit({ kind: 'done', result });
 
+      // Başarı: eski başarısızlık bilgisini temizle ki AI bayat bir hatayı bağlamda taşımasın.
+      clearGenerationFailure();
       return ok(result);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       log.error('generate:run beklenmeyen hata', { error: message });
       emit({ kind: 'error', message });
-      return err('UNKNOWN', `Beklenmeyen hata: ${message}`, message);
+      return failGenerate('UNKNOWN', `Beklenmeyen hata: ${message}`, message);
     } finally {
       activeController = null;
       if (tmpDir) {

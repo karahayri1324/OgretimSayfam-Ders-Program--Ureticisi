@@ -95,6 +95,13 @@ export function registerAiHandlers(): void {
         log.warn('AI kullanıcı mesajı kaydedilemedi', { error: String(e) });
       }
 
+      // Kullanıcı mesajı yazılamadıysa, tool/assistant satırlarını parentId=null ile yazmak
+      // YETİM kayıt bırakıyordu (buildHistory'de öncesinde 'user' olmayan sarkık 'assistant').
+      // Kullanıcı satırı yoksa bu turun kalıcılaştırmasını tümden atla; yanıt yine döndürülür.
+      if (userMsgId === null) {
+        return { ok: true, data: response };
+      }
+
       for (const tc of toolCalls) {
         try {
           aiMessagesRepo.add({

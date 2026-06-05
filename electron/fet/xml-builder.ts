@@ -494,17 +494,24 @@ function appendShortDayBlockedSlots(
 
 function appendHomeRoomConstraints(
   spaceNodes: ConstraintNode[],
-  _ctx: BuilderContext,
+  ctx: BuilderContext,
   school: SchoolBundle,
 ): void {
-  const roomById = new Map(school.rooms.map((r) => [r.id, r.name]));
+  // KRİTİK: ad/oda referansları ctx (xmlSafe edilmiş) üzerinden alınmalı — buildStudentsList ve
+  // buildRoomsList de ctx kullanır. Eskiden raw school.classes/school.rooms okunuyordu; bir ad
+  // XML-yasak kontrol karakteri içeriyorsa buradaki Students/Room adı listelerdekiyle UYUŞMUYOR,
+  // FET var olmayan kümeye/odaya atıf görüp dosyayı reddediyordu (#6/#7 sözleşmesinin ihlali).
+  const roomById = new Map(ctx.rooms.map((r) => [r.id, r.name]));
   const explicit = new Set<string>();
   for (const c of school.constraints) {
-    if (c.type !== 'CLASS_HOME_ROOM') continue;
+    // CLASS_HOME_ROOM (tek oda) VE STUDENTS_SET_HOME_ROOMS (çok oda) — ikisi de aynı sınıf için
+    // açık bir ana-derslik tercihidir. Yalnız CLASS_HOME_ROOM'a bakmak, kullanıcı çok-odalı
+    // tercih girdiğinde otomatik tek-oda kısıtının onu sessizce ezmesine yol açıyordu.
+    if (c.type !== 'CLASS_HOME_ROOM' && c.type !== 'STUDENTS_SET_HOME_ROOMS') continue;
     const cl = (c.params as { class?: unknown }).class;
     if (typeof cl === 'string') explicit.add(cl.trim().toLocaleLowerCase('tr'));
   }
-  for (const cls of school.classes) {
+  for (const cls of ctx.classes) {
     if (cls.homeRoomId == null) continue;
     if (explicit.has(cls.name.trim().toLocaleLowerCase('tr'))) continue;
     const roomName = roomById.get(cls.homeRoomId);

@@ -130,7 +130,7 @@ def make_context(extra_teachers=None, extra_classes=None, existing_constraints=N
 
 def format_context(ctx: dict) -> str:
     constraints = ctx.get("constraints", [])
-    return (
+    block = (
         f"[CONTEXT]\n"
         f"TEACHERS: {json.dumps(ctx['teachers'], ensure_ascii=False)}\n"
         f"CLASSES: {json.dumps(ctx['classes'], ensure_ascii=False)}\n"
@@ -139,8 +139,20 @@ def format_context(ctx: dict) -> str:
         f"DAYS: {json.dumps(ctx['days'], ensure_ascii=False)}\n"
         f"HOURS_PER_DAY: {ctx['hoursPerDay']}\n"
         f"CONSTRAINTS: {json.dumps(constraints, ensure_ascii=False)}\n"
-        f"[/CONTEXT]"
     )
+    # KOŞULLU alan — yalnız son üretim başarısızsa. Anahtar SIRASI (reason, message,
+    # [unplaced], [total]) server/app/inference.py:_failure_json ile BİREBİR aynıdır.
+    # Yokken blok mevcut formatla byte-eş → 232K örnek geçerli kalır (regen gerekmez).
+    failure = ctx.get("lastGenerationFailure")
+    if failure is not None:
+        d = {"reason": failure["reason"], "message": failure["message"]}
+        if failure.get("unplaced") is not None:
+            d["unplaced"] = failure["unplaced"]
+        if failure.get("total") is not None:
+            d["total"] = failure["total"]
+        block += f"LAST_GENERATION_FAILURE: {json.dumps(d, ensure_ascii=False)}\n"
+    block += "[/CONTEXT]"
+    return block
 
 def make_user_msg(ctx: dict, request: str) -> str:
     return f"{format_context(ctx)}\n\n[USER_REQUEST]\n{request}\n[/USER_REQUEST]"
@@ -1770,17 +1782,19 @@ def gen_max_gaps_between_activities(n: int) -> list[dict]:
         ]
         request = random.choice(templates)
         ctx = make_context()
+        # MAX_GAPS_BETWEEN_ACTIVITIES FET'in VARSAYILAN modunda desteklenmiyor (handler her zaman
+        # atlar; üretimi de kilitleyebilir). 'eklendi' demek yalan olur → dürüstçe desteklenmediğini
+        # söyleyip desteklenen alternatifleri öner (model yanlış garanti vermeyi öğrenmesin).
         payload = {
-            "constraints": [{
-                "type": "MAX_GAPS_BETWEEN_ACTIVITIES",
-                "weight": 80,
-                "active": True,
-                "params": {"activityIds": ids, "maxGaps": max_g},
-            }],
-            "confidence": round(random.uniform(0.82, 0.91), 2),
-            "explanation": f"{ids_str} aktiviteleri arası en fazla {max_g} boş ders kısıtlaması eklendi.",
-            "warnings": [],
-            "unresolved": [],
+            "kind": "query",
+            "answer": (
+                f"Aktiviteler arası 'en fazla {max_g} boşluk' kısıtını (MAX_GAPS_BETWEEN_ACTIVITIES) "
+                f"FET varsayılan modda doğrudan uygulayamıyor, bu yüzden ekleyemiyorum. Bunun yerine "
+                f"sınıf/öğretmen bazında günlük azami boşluk (CLASS_MAX_GAPS_PER_DAY / "
+                f"TEACHER_MAX_GAPS_PER_DAY) ya da aktiviteler arası ASGARİ boşluk "
+                f"(MIN_GAPS_BETWEEN_ACTIVITIES) tanımlayabilirim. Hangisini istersin?"
+            ),
+            "confidence": round(random.uniform(0.80, 0.90), 2),
         }
         out.append(example(ctx, request, payload))
     return out
@@ -3023,6 +3037,203 @@ def gen_constraint_relax(n: int) -> list[dict]:
         out.append(example(ctx, request, payload))
     return out
 
+def _failure_prefix(failure: dict) -> str:
+    """buildFailurePrefix (electron/ai/mock-server.ts) ile aynı teşhis cümlesi."""
+    reason = failure["reason"]
+    if reason == "NO_SOLUTION":
+        return "Son üretim başarısız oldu: FET tüm kısıtları aynı anda sağlayamadı (çözüm bulunamadı). "
+    if reason == "PARTIAL":
+        if failure.get("unplaced") is not None and failure.get("total") is not None:
+            return (
+                f"Son üretimde {failure['total']} dersten {failure['unplaced']} tanesi "
+                f"yerleştirilemedi. "
+            )
+        return "Son üretim kısmen tamamlandı; bazı dersler yerleştirilemedi. "
+    if reason == "TIMEOUT":
+        return "Son üretim zaman aşımına uğradı — çözüm uzayı çok karmaşık. "
+    return f"Son üretim başarısız oldu: {failure['message']} "
+
+
+def gen_generation_failure_feedback(n: int) -> list[dict]:
+    """
+    YENİ YETENEK: FET bir programı üretemediğinde, başarısızlık bilgisi CONTEXT'e
+    LAST_GENERATION_FAILURE alanı olarak gelir. Kullanıcı "neden olmadı / düzelt /
+    çöz / yardım et" gibi kısa bir tepkiyle dahi AI'dan teşhis + somut çözüm bekler.
+
+    Bu generator modele şunu öğretir:
+      • CONTEXT'te LAST_GENERATION_FAILURE varsa, cevabı GERÇEK nedene göre kur.
+      • NO_SOLUTION / TIMEOUT + katı (weight=100) kısıt varsa → set_constraint_weight
+        ile gevşetme öner (data_mutation).
+      • PARTIAL → ya gevşet ya da bir güne ders saati ekle (schedule_update).
+      • Katı kısıt yoksa → ders dağıtımı/gün-saat rehberliği (query).
+      • Veri eksikse (NO_ACTIVITIES/NO_TEACHERS/...) → ne ekleneceğini söyle (query).
+    """
+    out = []
+    constraint_examples = [
+        ("Selim hoca tercih edilen derslikler: 201", "TEACHER_PREFERRED_ROOMS"),
+        ("Müzik Müzik Sınıfında yapılsın", "SUBJECT_PREFERRED_ROOM"),
+        ("9A Cuma yok", "CLASS_NOT_AVAILABLE"),
+        ("Ahmet hoca Cuma boş", "TEACHER_NOT_AVAILABLE"),
+        ("Kimya günde en fazla 2 saat", "SUBJECT_MAX_HOURS_DAILY"),
+        ("Tüm öğretmenler haftada en fazla 4 gün", "ALL_TEACHERS_MAX_DAYS_PER_WEEK"),
+        ("Beden son derste olsun", "SUBJECT_LAST_HOUR_OF_DAY"),
+        ("9A en fazla 6 saat günde", "CLASS_MAX_HOURS_DAILY"),
+    ]
+    followup_phrases = [
+        "neden olmadı?",
+        "neden üretemedin?",
+        "olmadı ki",
+        "çöz hadi",
+        "düzelt",
+        "nasıl çözerim bunu?",
+        "yardım et, program çıkmadı",
+        "ne yapmalıyım?",
+        "niye çözülmedi?",
+        "öneri ver",
+        "programı çıkaramadık, ne önerirsin?",
+        "bunu nasıl düzeltiriz?",
+    ]
+
+    def strict_constraints():
+        active = []
+        for i in range(random.randint(3, 7)):
+            desc, ctype = random.choice(constraint_examples)
+            active.append({
+                "id": i + 1, "type": ctype, "weight": 100,
+                "active": True, "description": desc,
+            })
+        return active
+
+    for _ in range(n):
+        ctx = make_context()
+        request = random.choice(followup_phrases)
+        roll = random.random()
+
+        # %18 — veri eksikliği (pre-flight) → rehberlik (query, action yok)
+        if roll < 0.18:
+            reason, guide = random.choice([
+                ("NO_ACTIVITIES",
+                 "Henüz hiç ders ataması yok. Önce her sınıfa hangi dersten kaç saat verileceğini ekle "
+                 "(örn \"9A sınıfına 5 saat Matematik ekle\"), sonra tekrar üretelim."),
+                ("NO_TEACHERS",
+                 "Henüz öğretmen tanımlı değil. Önce öğretmenleri ekleyelim "
+                 "(örn \"Ahmet Yılmaz, Matematik öğretmeni ekle\"), sonra üretiriz."),
+                ("NO_CLASSES",
+                 "Henüz sınıf tanımlı değil. Önce sınıfları ekle "
+                 "(örn \"9A, 9B, 10A sınıflarını ekle\"), sonra üretelim."),
+                ("NO_SCHEDULE",
+                 "Gün/saat planı eksik. Önce hangi günler ve günde kaç ders saati olduğunu belirle, "
+                 "sonra üretiriz."),
+            ])
+            ctx["constraints"] = []
+            ctx["lastGenerationFailure"] = {"reason": reason, "message": guide}
+            payload = {
+                "kind": "query",
+                "answer": guide,
+                "confidence": round(random.uniform(0.82, 0.9), 2),
+            }
+            out.append(example(ctx, request, payload))
+            continue
+
+        # %20 — katı kısıt YOK → ders dağıtımı/gün-saat rehberliği (query)
+        if roll < 0.38:
+            reason = random.choice(["NO_SOLUTION", "PARTIAL", "TIMEOUT"])
+            failure = {"reason": reason, "message": "Çözüm bulunamadı."}
+            if reason == "PARTIAL":
+                total = random.randint(20, 60)
+                failure = {
+                    "reason": "PARTIAL",
+                    "message": f"Program tamamlanamadı: {random.randint(1, 8)}/{total} ders yerleştirilemedi.",
+                    "unplaced": random.randint(1, 8),
+                    "total": total,
+                }
+            ctx["constraints"] = []
+            ctx["lastGenerationFailure"] = failure
+            answer = _failure_prefix(failure) + (
+                "Şu an gevşetilebilecek katı kısıtlama yok (aktif tüm kısıtlamalar 90 altında). "
+                "Muhtemel sebep ders dağıtımı: bir öğretmenin/sınıfın haftalık ders saati toplam slot sayısını "
+                "aşıyor olabilir, ya da bir güne sığmayacak kadar çok ders var. Çözüm için günlere ders saati "
+                "ekleyebilir (örn \"Cuma gününe 1 saat ekle\") veya bir sınıfın ders saatini azaltabilirsin. "
+                "İstersen birlikte bakalım."
+            )
+            payload = {
+                "kind": "query",
+                "answer": answer,
+                "confidence": round(random.uniform(0.78, 0.85), 2),
+            }
+            out.append(example(ctx, request, payload))
+            continue
+
+        # %20 — PARTIAL + bir güne saat ekleme önerisi (schedule_update)
+        if roll < 0.58:
+            total = random.randint(20, 60)
+            unplaced = random.randint(1, max(1, total // 6))
+            failure = {
+                "reason": "PARTIAL",
+                "message": f"Program tamamlanamadı: {unplaced}/{total} ders yerleştirilemedi.",
+                "unplaced": unplaced,
+                "total": total,
+            }
+            ctx["constraints"] = strict_constraints()
+            ctx["lastGenerationFailure"] = failure
+            day = random.choice(ctx["days"])
+            payload = {
+                "kind": "schedule_update",
+                "action": "add_hours_to_day",
+                "params": {"day": day, "count": 1},
+                "explanation": _failure_prefix(failure) + (
+                    f"Yerleşemeyen dersler için yer açmak adına {day} gününe 1 ders saati eklemeyi öneriyorum. "
+                    f"Onayla, sonra programı tekrar üretelim."
+                ),
+                "confidence": round(random.uniform(0.72, 0.82), 2),
+            }
+            out.append(example(ctx, request, payload))
+            continue
+
+        # %42 — NO_SOLUTION / TIMEOUT / PARTIAL + katı kısıt → gevşetme (data_mutation)
+        reason = random.choice(["NO_SOLUTION", "NO_SOLUTION", "TIMEOUT", "PARTIAL"])
+        if reason == "PARTIAL":
+            total = random.randint(20, 60)
+            unplaced = random.randint(1, max(1, total // 6))
+            failure = {
+                "reason": "PARTIAL",
+                "message": f"Program tamamlanamadı: {unplaced}/{total} ders yerleştirilemedi.",
+                "unplaced": unplaced,
+                "total": total,
+            }
+        else:
+            failure = {
+                "reason": reason,
+                "message": "Çözüm bulunamadı." if reason == "NO_SOLUTION" else "Zaman aşımı.",
+            }
+        active_constraints = strict_constraints()
+        ctx["constraints"] = active_constraints
+        ctx["lastGenerationFailure"] = failure
+        chosen = sorted(active_constraints, key=lambda c: -c["weight"])[:min(5, len(active_constraints))]
+        actions = [
+            {
+                "op": "set_constraint_weight",
+                "params": {"constraintId": c["id"], "weight": 70},
+                "description": f"\"{c['description']}\" → ağırlık {c['weight']} → 70 (esnek)",
+            }
+            for c in chosen
+        ]
+        payload = {
+            "kind": "data_mutation",
+            "actions": actions,
+            "explanation": _failure_prefix(failure) + (
+                f"Bunun en muhtemel sebebi, ağırlığı 100 (katı/zorunlu) olan "
+                f"{len(active_constraints)} kısıtlama. Aşağıdaki {len(chosen)} kısıtlamanın ağırlığını "
+                f"70'e düşürürsek FET bunları 'tercih' olarak görür, tam tatmin edemese bile size en "
+                f"yakın çözümü bulur. Onayla, programı tekrar üretelim."
+            ),
+            "requiresConfirmation": True,
+            "confidence": round(random.uniform(0.78, 0.9), 2),
+        }
+        out.append(example(ctx, request, payload))
+    return out
+
+
 def gen_set_setting(n: int) -> list[dict]:
     """
     Kullanıcı ayarları AI üzerinden değiştirebilsin.
@@ -4079,9 +4290,11 @@ def gen_pair_subjects_consecutive(n: int) -> list[dict]:
 
 def gen_subject_spread_days(n: int) -> list[dict]:
     """
-    "Matematik 4 saat ama farklı 4 günde olsun" → 2-constraint combo:
-    1) add_activity (veya update_activity) ile weeklyHours=4, blockDuration=1
-    2) add_constraint SUBJECT_MAX_HOURS_DAILY {subject, maxHours=1}
+    "Matematik 4 saat ama farklı 4 günde olsun" → SADECE update_activity:
+    weeklyHours=N + blockDuration=1. Sistem aynı dersin bloklarını otomatik olarak farklı günlere
+    dağıtır (xml-builder appendMinDaysBetweenActivities, MinDays=1). SUBJECT_MAX_HOURS_DAILY EKLEME:
+    FET o kısıtı doğrudan desteklemiyor (handler her zaman atlar) → 'farklı güne yayar' garantisi
+    yalan olurdu. Doğru mekanizma blockDuration=1 + otomatik MinDaysBetween.
     """
     out = []
     for _ in range(n):
@@ -4113,22 +4326,13 @@ def gen_subject_spread_days(n: int) -> list[dict]:
                         "weeklyHours": hours,
                         "blockDuration": 1,
                     },
-                    "description": f"{cls} {subj.lower()}: {hours} saat / blok 1",
-                },
-                {
-                    "op": "add_constraint",
-                    "params": {
-                        "type": "SUBJECT_MAX_HOURS_DAILY",
-                        "weight": 100,
-                        "params": {"subject": subj, "maxHours": 1},
-                    },
-                    "description": f"{subj} günde en fazla 1 saat (farklı günlere yayılır)",
+                    "description": f"{cls} {subj.lower()}: {hours} saat, 1'er saatlik bloklar",
                 },
             ],
             "explanation": (
-                f"{cls} sınıfının {subj} dersini haftalık {hours} saat ve günde 1 saat olarak yapılandıracağım. "
-                f"weeklyHours={hours} + blockDuration=1 + SUBJECT_MAX_HOURS_DAILY=1 kombinasyonu FET'in dersi "
-                f"{hours} ayrı güne yaymasını zorunlu kılar."
+                f"{cls} sınıfının {subj} dersini haftalık {hours} saat ve 1'er saatlik {hours} ayrı blok "
+                f"olarak ayarlıyorum (blockDuration=1). Sistem aynı dersin bloklarını otomatik olarak farklı "
+                f"günlere dağıtır (günde 1 blok), böylece ders {hours} ayrı güne yayılır."
             ),
             "requiresConfirmation": True,
             "confidence": round(random.uniform(0.80, 0.90), 2),
@@ -5593,6 +5797,7 @@ GENERATORS = {
     "run_solver":                                 (gen_run_solver, 250),
     "per_class_subject_room":                     (gen_per_class_subject_room, 250),
     "constraint_relax":                           (gen_constraint_relax, 200),
+    "generation_failure_feedback":                (gen_generation_failure_feedback, 240),
     "set_setting":                                (gen_set_setting, 100),
     "generic_add_constraint":                     (gen_generic_add_constraint, 150),
 

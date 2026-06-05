@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { classesRepo } from '../db/repositories/classes.js';
 import { classYearsRepo } from '../db/repositories/class_years.js';
 import { safeHandler, validate, err } from './_common.js';
+import { isGenerationActive } from './generate.js';
 import { ClassInputSchema, ClassPatchSchema } from './_schemas.js';
 
 const YearCreateSchema = z.object({
@@ -91,6 +92,10 @@ export function registerClassesHandlers(): void {
     async (_e, id: number, opts?: { kind?: string }) => {
       if (typeof id !== 'number' || !Number.isInteger(id) || id < 1) {
         return err('VALIDATION', 'Geçersiz kimlik.');
+      }
+      // Üretim sürerken sınıf/düzey silme → biterken FK INSERT çökmesi/program kaybı (bkz. teachers.ts).
+      if (isGenerationActive()) {
+        return err('BUSY', 'Program üretimi sürerken veri silinemez. Üretim bitince (veya iptal edince) tekrar deneyin.');
       }
       return safeHandler('classes:delete', () => {
         if (opts?.kind === 'year') {

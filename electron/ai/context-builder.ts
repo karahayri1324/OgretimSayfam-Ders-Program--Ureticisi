@@ -7,6 +7,7 @@ import { daysRepo } from '../db/repositories/days.js';
 import { hoursRepo } from '../db/repositories/hours.js';
 import { dayHoursRepo } from '../db/repositories/day_hours.js';
 import { constraintsRepo } from '../db/repositories/constraints.js';
+import { getGenerationFailureContext } from './generation-feedback.js';
 
 export function buildAIContext(): AIContext {
   const teachers = teachersRepo.list().map((t) => t.name);
@@ -35,7 +36,21 @@ export function buildAIContext(): AIContext {
     description: describeConstraint(c),
   }));
 
-  return { teachers, classes, subjects, rooms, days, hoursPerDay, constraints };
+  // Son üretim başarısızsa AI'a taşı: model "neden olmadı / düzelt" isteğinde gerçek nedeni
+  // bilir ve CONSTRAINTS'e bakıp somut çözüm önerir. Başarılı/temizken alan hiç eklenmez
+  // (serving katmanı bu alanı yalnız varsa CONTEXT'e yazar → mevcut eğitim formatı bozulmaz).
+  const lastGenerationFailure = getGenerationFailureContext() ?? undefined;
+
+  return {
+    teachers,
+    classes,
+    subjects,
+    rooms,
+    days,
+    hoursPerDay,
+    constraints,
+    ...(lastGenerationFailure ? { lastGenerationFailure } : {}),
+  };
 }
 
 function describeConstraint(c: {

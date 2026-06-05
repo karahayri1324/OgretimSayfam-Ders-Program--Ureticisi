@@ -33,6 +33,19 @@ def _j(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def _failure_json(f: Any) -> str:
+    """Son-üretim-hatasını CONTEXT satırı için JSON'a çevirir.
+
+    Anahtar SIRASI sabit (reason, message, [unplaced], [total]) ve generate_dataset.py
+    format_context() ile BİREBİR aynıdır — aksi halde model dağıtım-dışı (OOD) girdi alır."""
+    d: dict[str, Any] = {"reason": f.reason, "message": f.message}
+    if f.unplaced is not None:
+        d["unplaced"] = f.unplaced
+    if f.total is not None:
+        d["total"] = f.total
+    return _j(d)
+
+
 def build_messages(payload: AIRequest) -> list[dict[str, str]]:
     """Electron payload'ını modelin eğitildiği OpenAI `messages` formatına çevirir.
 
@@ -60,8 +73,14 @@ def build_messages(payload: AIRequest) -> list[dict[str, str]]:
         f"DAYS: {_j(c.days)}\n"
         f"HOURS_PER_DAY: {c.hoursPerDay}\n"
         f"CONSTRAINTS: {_j(c.constraints)}\n"
-        "[/CONTEXT]"
     )
+    # KOŞULLU alan: yalnız son üretim başarısızsa eklenir. Yokken blok mevcut eğitim
+    # formatıyla byte-eş (dataset'in büyük çoğunluğu bu durumdadır → regen gerekmez).
+    if c.lastGenerationFailure is not None:
+        context_block += (
+            f"LAST_GENERATION_FAILURE: {_failure_json(c.lastGenerationFailure)}\n"
+        )
+    context_block += "[/CONTEXT]"
     msgs.append(
         {
             "role": "user",
