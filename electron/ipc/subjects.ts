@@ -1,5 +1,11 @@
 import { ipcMain } from 'electron';
 import { subjectsRepo } from '../db/repositories/subjects.js';
+import { activitiesRepo } from '../db/repositories/activities.js';
+import {
+  pruneConstraintsByName,
+  renameConstraintReferences,
+  pruneConstraintsByActivityIds,
+} from '../db/constraint-maintenance.js';
 import { safeHandler, validate, err } from './_common.js';
 import { isGenerationActive } from './generate.js';
 import { SubjectInputSchema, SubjectPatchSchema } from './_schemas.js';
@@ -28,7 +34,12 @@ export function registerSubjectsHandlers(): void {
       const existing = subjectsRepo.get(id);
       if (!existing) throw new Error('Ders bulunamadı.');
       subjectsRepo.update(id, v.data);
-      return { id };
+      // Rename cascade — AI yoluyla parite (kısıtlar adı snapshot saklar).
+      const renamed =
+        v.data.name !== undefined && v.data.name !== existing.name
+          ? renameConstraintReferences('subject', existing.name, v.data.name)
+          : 0;
+      return { id, renamedConstraints: renamed };
     });
   });
 
@@ -41,8 +52,18 @@ export function registerSubjectsHandlers(): void {
       return err('BUSY', 'Program üretimi sürerken veri silinemez. Üretim bitince (veya iptal edince) tekrar deneyin.');
     }
     return safeHandler('subjects:delete', () => {
+      const existing = subjectsRepo.get(id);
+      if (!existing) throw new Error('Ders bulunamadı.');
+      // Aktiviteler cascade ile silinmeden ÖNCE id'lerini topla ki kısıt budaması yapılabilsin.
+      const affectedActs = activitiesRepo
+        .list()
+        .filter((a) => a.subjectId === id)
+        .map((a) => a.id);
       subjectsRepo.delete(id);
-      return { id };
+      const pruned =
+        pruneConstraintsByName('subject', existing.name) +
+        pruneConstraintsByActivityIds(affectedActs);
+      return { id, prunedConstraints: pruned };
     });
   });
 }

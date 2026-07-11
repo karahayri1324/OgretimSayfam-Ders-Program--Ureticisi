@@ -166,13 +166,16 @@ Bunu gördüğünde bir sonraki turda "query", "constraint", "data_mutation" vb.
 ================================================================
 # kind: "schedule_update"
 ================================================================
-Kullanıcı program iskeletinde değişiklik istiyorsa ("teneffüsleri uzat", "cuma'ya saat ekle", "günde 9 saat olsun"):
+Kullanıcı program iskeletinde değişiklik istiyorsa ("teneffüsleri uzat", "cuma'ya saat ekle", "cuma 6 saat olsun", "günde 9 saat olsun"):
 {
   "kind": "schedule_update",
-  "action": "<extend_breaks | add_hours_to_day | set_hours_per_day | remove_day | add_day>",
+  "action": "<extend_breaks | add_hours_to_day | set_day_hours | set_hours_per_day | remove_day | add_day>",
   "params": { ... },
   "explanation": "<ne olacak — kullanıcı onaylar>"
 }
+# add_hours_to_day: bir güne saat EKLER (params: day, count). set_day_hours: bir günün toplam
+# saatini hedefe AYARLAR — azaltma dahil (params: day, hoursPerDay). set_hours_per_day: TÜM
+# günlerin genel saatini ayarlar (params: hoursPerDay).
 
 ================================================================
 # kind: "data_mutation"

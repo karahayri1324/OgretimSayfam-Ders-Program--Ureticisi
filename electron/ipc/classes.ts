@@ -2,6 +2,12 @@ import { ipcMain } from 'electron';
 import { z } from 'zod';
 import { classesRepo } from '../db/repositories/classes.js';
 import { classYearsRepo } from '../db/repositories/class_years.js';
+import { activitiesRepo } from '../db/repositories/activities.js';
+import {
+  pruneConstraintsByName,
+  renameConstraintReferences,
+  pruneConstraintsByActivityIds,
+} from '../db/constraint-maintenance.js';
 import { safeHandler, validate, err } from './_common.js';
 import { isGenerationActive } from './generate.js';
 import { ClassInputSchema, ClassPatchSchema } from './_schemas.js';
@@ -83,7 +89,12 @@ export function registerClassesHandlers(): void {
       const existing = classesRepo.get(id);
       if (!existing) throw new Error('Sınıf bulunamadı.');
       classesRepo.update(id, v.data);
-      return { id, kind: 'class' as const };
+      // Rename cascade — AI yoluyla parite (kısıtlar adı snapshot saklar).
+      const renamed =
+        v.data.name !== undefined && v.data.name !== existing.name
+          ? renameConstraintReferences('class', existing.name, v.data.name)
+          : 0;
+      return { id, kind: 'class' as const, renamedConstraints: renamed };
     });
   });
 
@@ -102,8 +113,18 @@ export function registerClassesHandlers(): void {
           classYearsRepo.delete(id);
           return { id, kind: 'year' as const };
         }
+        const existing = classesRepo.get(id);
+        if (!existing) throw new Error('Sınıf bulunamadı.');
+        // Aktiviteler cascade ile silinmeden ÖNCE id'lerini topla (kısıt budaması için).
+        const affectedActs = activitiesRepo
+          .list()
+          .filter((a) => a.classId === id)
+          .map((a) => a.id);
         classesRepo.delete(id);
-        return { id, kind: 'class' as const };
+        const pruned =
+          pruneConstraintsByName('class', existing.name) +
+          pruneConstraintsByActivityIds(affectedActs);
+        return { id, kind: 'class' as const, prunedConstraints: pruned };
       });
     },
   );

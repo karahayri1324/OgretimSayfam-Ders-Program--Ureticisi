@@ -6,6 +6,7 @@ import {
   getGenerationFailure,
   getGenerationFailureContext,
   parseUnplacedFromMessage,
+  summarizeFetError,
 } from '../electron/ai/generation-feedback.js';
 
 function baseCtx(overrides: Partial<AIContext> = {}): AIContext {
@@ -120,5 +121,43 @@ describe('Round-7 — mock-server LAST_GENERATION_FAILURE farkındalığı', () 
       res.kind === 'data_mutation' &&
       (res.actions ?? []).some((a) => a.op === 'set_constraint_weight');
     expect(hasRelax).toBe(false);
+  });
+});
+
+describe('summarizeFetError — FET ham çıktısından gerçek neden özeti (rawError → modele)', () => {
+  it('anlamlı FET satırını ayıklar, gürültüyü atar', () => {
+    const raw = [
+      'Translation for specified language not loaded',
+      'Your FET version: 6.8.5',
+      'Cannot optimize for teacher Ahmet Yılmaz, because you have constraint teacher max gaps per week with weight below 100',
+      'Some other noise',
+    ].join('\n');
+    const s = summarizeFetError(raw);
+    expect(s).toBeTruthy();
+    expect(s).toMatch(/Cannot optimize for teacher Ahmet Yılmaz/);
+    expect(s).not.toMatch(/Translation for specified/);
+  });
+
+  it('anlamlı satır yoksa null döner', () => {
+    expect(summarizeFetError('sadece gürültü satırı\nsürüm notu')).toBeNull();
+    expect(summarizeFetError('')).toBeNull();
+    expect(summarizeFetError(undefined)).toBeNull();
+  });
+
+  it('getGenerationFailureContext message\'a FET özetini iliştirir (alan yapısı korunur)', () => {
+    clearGenerationFailure();
+    recordGenerationFailure({
+      reason: 'NO_SOLUTION',
+      message: 'Kısıtlamalar çok sert, çözüm bulunamadı.',
+      rawError: 'Cannot precompute - data is wrong - aborting\nThe activities with ids 2 and 4 must be simultaneous but they have common teachers',
+    });
+    const ctx = getGenerationFailureContext();
+    expect(ctx).toBeTruthy();
+    expect(ctx!.reason).toBe('NO_SOLUTION');
+    expect(ctx!.message).toMatch(/\[FET: /);
+    expect(ctx!.message).toMatch(/Cannot precompute/);
+    // UI mesajı sade kalır (ham FET metni sızmaz).
+    expect(getGenerationFailure()!.message).toBe('Kısıtlamalar çok sert, çözüm bulunamadı.');
+    clearGenerationFailure();
   });
 });

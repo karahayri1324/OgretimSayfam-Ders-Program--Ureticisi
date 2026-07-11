@@ -2,12 +2,14 @@ import { ipcMain } from 'electron';
 import { daysRepo } from '../db/repositories/days.js';
 import { hoursRepo } from '../db/repositories/hours.js';
 import { dayHoursRepo } from '../db/repositories/day_hours.js';
-import { safeHandler, validate } from './_common.js';
+import { safeHandler, validate, err } from './_common.js';
+import { isGenerationActive } from './generate.js';
 import { shiftClock, shiftsFor, adjustOverflows } from '../utils/clock.js';
 import {
   pruneFixedTimeLocksBeyondHour,
   pruneConstraintsForRemovedDays,
 } from '../db/constraint-maintenance.js';
+import { effectiveMaxHourCount } from '../db/schedule-effective-hours.js';
 import {
   BulkAdjustBreaksSchema,
   DaysSchema,
@@ -15,6 +17,12 @@ import {
   SetDayHoursSchema,
 } from './_schemas.js';
 import type { Hour } from '../../src/lib/types.js';
+
+// Üretim sürerken gün/saat düzeni değişirse sonuç eski indekslerle kaydedilir (tablo kayar)
+// ve güne bağlı kısıtlar üretim ortasında budanır. AI'ın aynı op'ları BUSY ile reddediliyor;
+// manuel yol da aynı şekilde korunmalı (tur-9 dersi: paralel yol atlanmasın).
+const GEN_BUSY_MSG =
+  'Program üretimi sürerken gün/saat düzeni değiştirilemez. Üretim bitince (veya iptal edince) tekrar deneyin.';
 
 export function registerScheduleHandlers(): void {
   ipcMain.handle('schedule:get', async () =>
@@ -28,6 +36,7 @@ export function registerScheduleHandlers(): void {
   ipcMain.handle('schedule:setDays', async (_e, raw) => {
     const v = validate(DaysSchema, raw);
     if (!v.ok) return v.error;
+    if (isGenerationActive()) return err('BUSY', GEN_BUSY_MSG);
     return safeHandler('schedule:setDays', () => {
       // Gün KALDIRILIRSA o güne bağlı kısıtlar (kilit/müsaitlik/ders-yasak) aksi halde FET-build'de
       // sessizce skip edilirdi (AI delete_day/set_days yolundaki korumanın manuel karşılığı).
@@ -43,11 +52,14 @@ export function registerScheduleHandlers(): void {
   ipcMain.handle('schedule:setHours', async (_e, raw) => {
     const v = validate(HoursSchema, raw);
     if (!v.ok) return v.error;
+    if (isGenerationActive()) return err('BUSY', GEN_BUSY_MSG);
     return safeHandler('schedule:setHours', () => {
       const result = hoursRepo.replaceAll(v.data);
       // Saat sayısı azaldıysa aralık-dışı ACTIVITY_FIXED_TIME kilitleri sessizce düşerdi (AI
-      // set_hours_per_day/set_hour_times yolundaki korumanın manuel karşılığı). No-op if artmışsa.
-      pruneFixedTimeLocksBeyondHour(v.data.length);
+      // set_hours_per_day/set_hour_times yolundaki korumanın manuel karşılığı). Eşik GLOBAL
+      // sayı DEĞİL efektif max olmalı: güne-özel override globalden uzunsa (örn. Cuma 10 saat),
+      // sadece saat ADI düzeltilen bir kayıtta Cuma-9/10 kilitleri yanlışlıkla silinirdi.
+      pruneFixedTimeLocksBeyondHour(effectiveMaxHourCount());
       return result;
     });
   });
@@ -55,23 +67,33 @@ export function registerScheduleHandlers(): void {
   ipcMain.handle('schedule:setDayHours', async (_e, raw) => {
     const v = validate(SetDayHoursSchema, raw);
     if (!v.ok) return v.error;
-    return safeHandler('schedule:setDayHours', () =>
-      dayHoursRepo.replaceForDay(v.data.dayId, v.data.entries),
-    );
+    if (isGenerationActive()) return err('BUSY', GEN_BUSY_MSG);
+    return safeHandler('schedule:setDayHours', () => {
+      const result = dayHoursRepo.replaceForDay(v.data.dayId, v.data.entries);
+      // Override kısalmış/kaldırılmış olabilir → efektif max düştüyse aralık-dışı kalan
+      // saat-kilitleri buda (yoksa DB'de aktif görünür ama FET'e hiç gitmez).
+      pruneFixedTimeLocksBeyondHour(effectiveMaxHourCount());
+      return result;
+    });
   });
 
   ipcMain.handle('schedule:clearDayHours', async (_e, dayId: number) => {
     if (typeof dayId !== 'number' || !Number.isInteger(dayId) || dayId < 1) {
       return { ok: false as const, error: { code: 'VALIDATION', message: 'Geçersiz gün kimliği.' } };
     }
-    return safeHandler('schedule:clearDayHours', () =>
-      dayHoursRepo.replaceForDay(dayId, []),
-    );
+    if (isGenerationActive()) return err('BUSY', GEN_BUSY_MSG);
+    return safeHandler('schedule:clearDayHours', () => {
+      const result = dayHoursRepo.replaceForDay(dayId, []);
+      // Uzun günün override'ı kalkınca efektif max düşebilir → aralık-dışı kilitleri buda.
+      pruneFixedTimeLocksBeyondHour(effectiveMaxHourCount());
+      return result;
+    });
   });
 
   ipcMain.handle('schedule:bulkAdjustBreaks', async (_e, raw) => {
     const v = validate(BulkAdjustBreaksSchema, raw);
     if (!v.ok) return v.error;
+    if (isGenerationActive()) return err('BUSY', GEN_BUSY_MSG);
     return safeHandler('schedule:bulkAdjustBreaks', () => {
       const { deltaMinutes, mode, dayIds } = v.data;
 

@@ -6,9 +6,9 @@ type State = {
   loading: boolean;
   load: () => Promise<void>;
   addConstraint: (input: ConstraintInput) => Promise<boolean>;
-  toggleConstraint: (id: number, active: boolean) => Promise<void>;
-  deleteConstraint: (id: number) => Promise<void>;
-  setWeight: (id: number, weight: number) => Promise<void>;
+  toggleConstraint: (id: number, active: boolean) => Promise<boolean>;
+  deleteConstraint: (id: number) => Promise<boolean>;
+  setWeight: (id: number, weight: number) => Promise<boolean>;
 };
 
 export const useConstraintsStore = create<State>((set, get) => ({
@@ -40,6 +40,7 @@ export const useConstraintsStore = create<State>((set, get) => ({
         ),
       });
     }
+    return res.ok;
   },
 
   deleteConstraint: async (id) => {
@@ -47,6 +48,7 @@ export const useConstraintsStore = create<State>((set, get) => ({
     if (res.ok) {
       set({ constraints: get().constraints.filter((c) => c.id !== id) });
     }
+    return res.ok;
   },
 
   setWeight: async (id, weight) => {
@@ -59,5 +61,6 @@ export const useConstraintsStore = create<State>((set, get) => ({
         ),
       });
     }
+    return res.ok;
   },
 }));

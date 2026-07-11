@@ -112,7 +112,15 @@ export default function Timetable() {
 
   useEffect(() => {
     if (!pendingExport) return;
-    if (!result || entityList.length === 0) return;
+    if (!result) return;
+    // Sınıf export'u istendiğinde görünüm 'class' DEĞİLSE önce ona geç: entityList 'view'a
+    // bağlı; kullanıcı öğretmen/derslik sekmesindeyken sınıf entityList'te yok ve '9A bulunamadı'
+    // hatası veriyordu. View değişince entityList güncellenir, effect (deps'te) yeniden çalışır.
+    if (pendingExport.class && view !== 'class') {
+      setView('class');
+      return;
+    }
+    if (entityList.length === 0) return;
     const fmt = pendingExport.format.toLowerCase();
     let needSelect = false;
     if (pendingExport.class) {
@@ -136,7 +144,7 @@ export default function Timetable() {
     if (needSelect) setExportAfterSelect(fmt);
     else runExport(fmt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingExport, result, entityList]);
+  }, [pendingExport, result, entityList, view]);
 
   useEffect(() => {
     if (!exportAfterSelect) return;

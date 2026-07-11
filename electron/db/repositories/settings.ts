@@ -8,7 +8,10 @@ export const WRITABLE_SETTING_KEYS = new Set([
   'aiTimeoutSec',
   'aiMaxToolIterations',
   'fetTimeLimitSec',
-  'fetBinaryPath',
+  // NOT: 'fetBinaryPath' bilinçli olarak YAZILABİLİR DEĞİL. (1) runner fetBinaryPath()'i
+  // platform-sabit resource yolundan çözer, bu ayarı hiç okumaz → yazılırsa ölü/yanıltıcı.
+  // (2) Güvenlik: AI set_setting veya settings API'si bu yolu değiştirebilseydi ve okunsaydı,
+  // keyfi bir binary'yi (örn. /bin/sh) FET yerine çalıştırmak mümkün olurdu (RCE yüzeyi).
   'theme',
   'language',
 ]);

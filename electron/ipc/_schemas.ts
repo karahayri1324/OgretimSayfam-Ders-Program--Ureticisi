@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { WRITABLE_SETTING_KEYS } from '../db/repositories/settings.js';
+import { MAX_WEEKLY_HOURS, MAX_BLOCK_DURATION } from '../../src/lib/limits.js';
 
 const nullableString = z
   .union([z.string(), z.null()])
@@ -45,8 +46,8 @@ export const ActivityInputSchema = z.object({
   classId: intId,
   subjectId: intId,
   teacherId: z.union([intId, z.null()]).optional(),
-  weeklyHours: z.number().int().min(1).max(40),
-  blockDuration: z.number().int().min(1).max(8).default(1),
+  weeklyHours: z.number().int().min(1).max(MAX_WEEKLY_HOURS),
+  blockDuration: z.number().int().min(1).max(MAX_BLOCK_DURATION).default(1),
   notes: nullableString,
 });
 

@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron';
 import { constraintsRepo } from '../db/repositories/constraints.js';
+import { normalizeConstraintParams } from '../db/entity-resolve.js';
 import { safeHandler, validate, err } from './_common.js';
 import { ConstraintInputSchema } from './_schemas.js';
 
@@ -12,7 +13,16 @@ export function registerConstraintsHandlers(): void {
     const v = validate(ConstraintInputSchema, raw);
     if (!v.ok) return v.error;
     return safeHandler('constraints:add', () => {
-      const id = constraintsRepo.add(v.data);
+      // AI 'constraint' kind'ının ve UI formunun yazma yolu burası: params doğrulanmadan
+      // yazılırsa typo'lu/hayalet referanslı kısıt DB'ye girer, listede aktif görünür ama
+      // FET-build'de sessizce atlanır. Entity/gün referanslarını kanonikleştir; bilinmeyende
+      // net VALIDATION hatası dön (AI data_mutation add_constraint yolu ile aynı davranış).
+      const id = constraintsRepo.add({
+        ...v.data,
+        params: normalizeConstraintParams(
+          (v.data.params ?? {}) as Record<string, unknown>,
+        ),
+      });
       return { id };
     });
   });

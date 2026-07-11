@@ -142,7 +142,11 @@ export async function runFet(
       }
     });
 
-    proc.on('exit', async (code, signal) => {
+    // 'exit' process sonlanınca ateşlenir ama stdout/stderr pipe'ları henüz tüm veriyi flush
+    // etmemiş olabilir → son FET satırları (çoğu zaman kritik hata/sonuç satırı) stdoutBuf'ta
+    // eksik kalıp yanlış sınıflandırmaya yol açardı. 'close' TÜM stdio kapandığında ateşlenir;
+    // buffer'lar o an tamdır. Bu yüzden sınıflandırmayı 'close'ta yap.
+    proc.on('close', async (code, signal) => {
       if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
       const duration = Date.now() - start;
 

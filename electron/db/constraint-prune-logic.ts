@@ -34,8 +34,8 @@ function norm(s: string): string {
 }
 
 // Türkçe-duyarsız karşılaştırma (mutation-executor/tools'taki deburr ile aynı) — saf modülün
-// kendi kendine yeterli ve test edilebilir kalması için burada kopya.
-function deburr(s: string): string {
+// kendi kendine yeterli ve test edilebilir kalması için burada tanımlı; dışarıya da export edilir.
+export function deburr(s: string): string {
   return s
     .toLocaleLowerCase('tr')
     .replace(/ı/g, 'i')

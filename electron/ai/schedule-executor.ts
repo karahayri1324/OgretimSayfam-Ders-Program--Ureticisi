@@ -6,8 +6,10 @@ import {
   pruneFixedTimeLocksBeyondHour,
   pruneConstraintsForRemovedDays,
 } from '../db/constraint-maintenance.js';
+import { effectiveMaxHourCount } from '../db/schedule-effective-hours.js';
 import { shiftClock, parseHM } from '../utils/clock.js';
 import { log } from '../utils/logger.js';
+import { MAX_HOURS_PER_DAY, MIN_HOURS_PER_DAY } from '../../src/lib/limits.js';
 import type { AIScheduleUpdateResponse, Hour } from '../../src/lib/types.js';
 
 
@@ -151,7 +153,9 @@ function extendBreaks(params: Record<string, unknown>): ScheduleUpdateApplyResul
   };
 }
 
-const MAX_HOURS_PER_DAY = 12;
+// MAX_HOURS_PER_DAY artık limits.ts'ten (20) — manuel UI ve AI data_mutation ile tutarlı.
+// Eskiden burada 12 sabitiydi: aynı okul UI'dan 20 saat tanımlayabilirken schedule_update
+// 12'de reddediyordu (tutarsız kapı).
 
 function addHoursToDay(params: Record<string, unknown>): ScheduleUpdateApplyResult {
   const dayName = requireString(params, 'day', 'name', 'dayName');
@@ -227,6 +231,67 @@ function addHoursToDay(params: Record<string, unknown>): ScheduleUpdateApplyResu
     ok: true,
     action: 'add_hours_to_day',
     message: `${target.name} gününe ${count} ders saati eklendi (toplam ${baseline.length}).`,
+    data: snapshot(),
+  };
+}
+
+// Bir GÜNÜN toplam ders saati sayısını hedef değere AYARLAR (ekle veya çıkar) — kullanıcının
+// Gün/Saat sayfasındaki güne-özel düzenleme (schedule:setDayHours) yeteneğinin AI karşılığı.
+// add_hours_to_day yalnız EKLEYEBİLİYOR; "Cuma 6 saat olsun" gibi mutlak/azaltma isteği için
+// bu op gerekli (parity_gap). Aralık-dışı kalan saat-kilitleri budanır.
+function setDayHours(params: Record<string, unknown>): ScheduleUpdateApplyResult {
+  const dayName = requireString(params, 'day', 'name', 'dayName');
+  if (!dayName) throw new Error("'day' parametresi gerekli.");
+  const target = requireNumber(params, 'hoursPerDay', 'count', 'hours', 'n');
+  if (target === null || target < MIN_HOURS_PER_DAY) {
+    throw new Error(`Günlük ders saati en az ${MIN_HOURS_PER_DAY} olmalı.`);
+  }
+  if (target > MAX_HOURS_PER_DAY) {
+    throw new Error(`Bir günde en fazla ${MAX_HOURS_PER_DAY} ders saati olabilir.`);
+  }
+
+  const allDays = daysRepo.list();
+  const day = allDays.find((d) => deburr(d.name) === deburr(dayName));
+  if (!day) throw new Error(`Gün bulunamadı: '${dayName}'`);
+
+  const globalHours = hoursRepo.list();
+  const existing = dayHoursRepo.listByDay(day.id);
+  const src =
+    existing.length > 0
+      ? existing.map((d, i) => ({
+          orderIndex: d.orderIndex ?? i,
+          name: d.name ?? `${i + 1}. Ders`,
+          startTime: d.startTime,
+          endTime: d.endTime,
+        }))
+      : globalHours.map((h, i) => ({
+          orderIndex: i,
+          name: h.name ?? `${i + 1}. Ders`,
+          startTime: h.startTime,
+          endTime: h.endTime,
+        }));
+
+  const next: Array<{ orderIndex: number; name: string; startTime: string | null; endTime: string | null }> = [];
+  for (let i = 0; i < target; i++) {
+    if (i < src.length) {
+      next.push({ orderIndex: i, name: src[i]!.name, startTime: src[i]!.startTime, endTime: src[i]!.endTime });
+      continue;
+    }
+    // Eksik saatleri önceki dersin bitişinden 10 dk teneffüsle türet (add_hours_to_day mantığı).
+    const prev = next[next.length - 1];
+    const start = prev?.endTime ? shiftClock(prev.endTime, 10) : null;
+    const end = start ? shiftClock(start, 40) : null;
+    next.push({ orderIndex: i, name: `${i + 1}. Ders`, startTime: start, endTime: end });
+  }
+
+  dayHoursRepo.replaceForDay(day.id, next);
+  // Güne-özel düzen global düzenden kısaldıysa efektif max düşebilir → aralık-dışı kilitleri buda.
+  const pruned = pruneFixedTimeLocksBeyondHour(effectiveMaxHourCount());
+  const lockNote = pruned > 0 ? ` ${pruned} adet artık geçersiz saat-kilidi kaldırıldı.` : '';
+  return {
+    ok: true,
+    action: 'set_day_hours',
+    message: `'${day.name}' günü ${target} ders saatine ayarlandı.${lockNote}`,
     data: snapshot(),
   };
 }
@@ -354,6 +419,7 @@ const HANDLERS: Record<
 > = {
   extend_breaks: extendBreaks,
   add_hours_to_day: addHoursToDay,
+  set_day_hours: setDayHours,
   set_hours_per_day: setHoursPerDay,
   remove_day: removeDay,
   add_day: addDay,

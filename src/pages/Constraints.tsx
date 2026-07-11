@@ -33,12 +33,21 @@ export default function Constraints() {
 
   async function handleDelete(c: Constraint) {
     if (!window.confirm(tr.constraints.deleteConfirm)) return;
-    await deleteConstraint(c.id);
-    toast.success(tr.common.deleted);
+    // Başarıya göre bildir: eskiden silme başarısız olsa bile koşulsuz 'silindi' toast'ı
+    // basılıyor, kısıt listede kalıyor ve kullanıcı sildiğini sanıyordu.
+    const ok = await deleteConstraint(c.id);
+    if (ok) toast.success(tr.common.deleted);
+    else toast.error(tr.common.error);
+  }
+
+  async function handleToggle(c: Constraint, active: boolean) {
+    const ok = await toggleConstraint(c.id, active);
+    if (!ok) toast.error(tr.common.error);
   }
 
   async function handleWeightChange(c: Constraint, weight: number) {
-    await setWeight(c.id, weight);
+    const ok = await setWeight(c.id, weight);
+    if (!ok) toast.error(tr.common.error);
   }
 
   return (
@@ -67,7 +76,7 @@ export default function Constraints() {
             <ConstraintItem
               key={c.id}
               c={c}
-              onToggle={(active) => toggleConstraint(c.id, active)}
+              onToggle={(active) => handleToggle(c, active)}
               onDelete={() => handleDelete(c)}
               onWeight={(w) => handleWeightChange(c, w)}
             />

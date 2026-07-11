@@ -15,6 +15,7 @@ import {
 import { tr } from '../../lib/i18n';
 import { cn } from '../../lib/cn';
 import { formatConstraint, constraintTypeLabel } from '../../lib/formatConstraint';
+import { normalizePageRoute } from '../../lib/pages';
 import { Logo } from '../Logo';
 import { useAIChatStore } from '../../store/ai-chat';
 import { useConstraintsStore } from '../../store/constraints';
@@ -162,6 +163,7 @@ export default function AIPanel() {
   const addMessage = useAIChatStore((s) => s.addMessage);
   const updateMessage = useAIChatStore((s) => s.updateMessage);
   const clearMessages = useAIChatStore((s) => s.clear);
+  const loadHistory = useAIChatStore((s) => s.loadHistory);
   const pendingPrompt = useAIChatStore((s) => s.pendingPrompt);
   const consumePendingPrompt = useAIChatStore((s) => s.consumePendingPrompt);
   const panelOpenSignal = useAIChatStore((s) => s.panelOpenSignal);
@@ -180,6 +182,14 @@ export default function AIPanel() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const applyingRef = useRef<Set<string>>(new Set());
+
+  // Açılışta kalıcı sohbet geçmişini UI'a yükle: model bağlamına DB'deki son turlar zaten
+  // gönderiliyor; UI boş kalırsa kullanıcı 'yeni sohbet' sanıp modelin neden eski bağlamı
+  // taşıdığını anlamıyordu. loadHistory yalnız bir kez (mesaj yokken) doldurur.
+  useEffect(() => {
+    void loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -215,6 +225,10 @@ export default function AIPanel() {
 
   useEffect(() => {
     if (!pendingPrompt) return;
+    // Panel meşgulken (loading) 'send' isteğini TÜKETME — aksi halde consumePendingPrompt onu
+    // temizliyor, doSend ise 'loading' guard'ıyla erken dönüp isteği sessizce düşürüyordu.
+    // loading false olunca bu effect tekrar çalışır ve pending'i işler.
+    if (pendingPrompt.mode === 'send' && loading) return;
     const pending = consumePendingPrompt();
     if (!pending) return;
     if (pending.mode === 'send') {
@@ -230,7 +244,7 @@ export default function AIPanel() {
       }, 50);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingPrompt]);
+  }, [pendingPrompt, loading]);
 
   function responseText(res: AIResponse): string {
     const kind = res.kind ?? 'constraint';
@@ -455,17 +469,25 @@ export default function AIPanel() {
             .getState()
             .setPendingExport({ format, class: cls });
           navigate('/timetable');
+          // Dürüstlük: class verilmezse tek dosyada tüm okul değil, o an GÖRÜNTÜLENEN program
+          // export edilir (toplu export ayrı bir özellik). Yanıltıcı 'tüm sınıflar' yerine bunu de.
           toastSuccess(
             `${format.toUpperCase()} export hazırlanıyor`,
-            cls ? `${cls} sınıfı için` : 'tüm sınıflar',
+            cls ? `${cls} sınıfı için` : 'görüntülenen program için',
           );
         }
 
         for (const na of navActions) {
-          const raw = String((na.params as { page?: string }).page ?? '').toLowerCase();
-          const page = raw.startsWith('/') ? raw : `/${raw}`;
-          navigate(page);
-          toastInfo('Sayfaya yönlendiriliyor', page);
+          // Ham AI sayfa adını whitelist'e karşı doğrula: geçersizse boş ekran/takılma yerine
+          // net uyarı ver (navigate_to executor'ı applyMutations'a girmediğinden main-process
+          // whitelist'i bu yolda çalışmıyordu — burada aynı listeyle doğrula).
+          const route = normalizePageRoute((na.params as { page?: string }).page);
+          if (!route) {
+            toastError('Geçersiz sayfa', `AI bilinmeyen bir sayfaya yönlendirmek istedi.`);
+            continue;
+          }
+          navigate(route);
+          toastInfo('Sayfaya yönlendiriliyor', route);
         }
 
         if (cancelActions.length > 0) {

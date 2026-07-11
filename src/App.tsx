@@ -67,6 +67,9 @@ export default function App() {
         <Route path="timetable" element={<Timetable />} />
         <Route path="advanced" element={<Advanced />} />
         <Route path="settings" element={<Settings />} />
+        {/* Catch-all: bilinmeyen rota (örn. AI'ın ürettiği geçersiz sayfa) boş ekran
+            bırakmasın — welcome'a düş (savunma derinliği; navigate_to zaten whitelist'li). */}
+        <Route path="*" element={<Navigate to="/welcome" replace />} />
       </Route>
     </Routes>
   );

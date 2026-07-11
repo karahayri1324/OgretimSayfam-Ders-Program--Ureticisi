@@ -1,5 +1,9 @@
 import { ipcMain } from 'electron';
 import { roomsRepo } from '../db/repositories/rooms.js';
+import {
+  pruneConstraintsByName,
+  renameConstraintReferences,
+} from '../db/constraint-maintenance.js';
 import { safeHandler, validate, err } from './_common.js';
 import { isGenerationActive } from './generate.js';
 import { RoomInputSchema, RoomPatchSchema } from './_schemas.js';
@@ -28,7 +32,12 @@ export function registerRoomsHandlers(): void {
       const existing = roomsRepo.get(id);
       if (!existing) throw new Error('Derslik bulunamadı.');
       roomsRepo.update(id, v.data);
-      return { id };
+      // Rename cascade — AI yoluyla parite (kısıtlar adı snapshot saklar).
+      const renamed =
+        v.data.name !== undefined && v.data.name !== existing.name
+          ? renameConstraintReferences('room', existing.name, v.data.name)
+          : 0;
+      return { id, renamedConstraints: renamed };
     });
   });
 
@@ -41,8 +50,11 @@ export function registerRoomsHandlers(): void {
       return err('BUSY', 'Program üretimi sürerken veri silinemez. Üretim bitince (veya iptal edince) tekrar deneyin.');
     }
     return safeHandler('rooms:delete', () => {
+      const existing = roomsRepo.get(id);
+      if (!existing) throw new Error('Derslik bulunamadı.');
       roomsRepo.delete(id);
-      return { id };
+      const pruned = pruneConstraintsByName('room', existing.name);
+      return { id, prunedConstraints: pruned };
     });
   });
 }

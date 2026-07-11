@@ -1,6 +1,7 @@
 
 import type { Constraint, ConstraintType } from '../../../src/lib/types.js';
 import type { BuilderContext, SkippedConstraint } from '../types.js';
+import { clampRequired100Weight } from './requires-100-weight.js';
 
 export type ConstraintSection = 'time' | 'space';
 
@@ -1562,7 +1563,13 @@ export function dispatchConstraint(
   if (!c.active) {
     return null;
   }
-  return handler(c, ctx);
+  const nodes = handler(c, ctx);
+  if (nodes) {
+    // FET'in %100 şart koştuğu ailelerde <100 ağırlık TÜM üretimi abort ettirir; merkezi
+    // clamp handler'lardaki her yazım yolunu (sentezlenenler dahil) tek noktadan kapsar.
+    for (const n of nodes) clampRequired100Weight(n);
+  }
+  return nodes;
 }
 
 export type { SkippedConstraint };

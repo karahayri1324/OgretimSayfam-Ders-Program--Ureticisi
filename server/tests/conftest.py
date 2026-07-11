@@ -29,6 +29,9 @@ def _reset_global_settings():
     db.set_app_setting("default_block_message", "")
     db.set_app_setting("rate_limit_message", "")
     db.set_app_setting("default_rate_limit_per_hour", "100")
+    # login/register throttle sayaçları da paylaşımlı DB'de birikir; testler arası sıfırla ki
+    # register IP-limiti (5/saat) art arda register yapan testleri yanlışlıkla 429'lamasın.
+    db.execute("DELETE FROM login_failures")
     yield
 
 

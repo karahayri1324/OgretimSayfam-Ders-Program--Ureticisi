@@ -98,11 +98,24 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def _limit_body_size(request: Request, call_next):
         cl = request.headers.get("content-length")
-        if cl is not None and cl.isdigit() and int(cl) > _MAX_BODY_BYTES:
-            return JSONResponse(
-                status_code=413,
-                content={"error": "payload_too_large", "message": "İstek gövdesi çok büyük."},
-            )
+        too_large = JSONResponse(
+            status_code=413,
+            content={"error": "payload_too_large", "message": "İstek gövdesi çok büyük."},
+        )
+        if cl is not None and cl.isdigit():
+            if int(cl) > _MAX_BODY_BYTES:
+                return too_large
+        else:
+            # Content-Length yok (Transfer-Encoding: chunked) → boyut başlıktan bilinemez. Eski hâl
+            # bu isteği hiç denetlemiyordu; kötü niyetli istemci chunked göndererek 4MB sınırını
+            # baypas edebiliyordu. Stream'i sınıra kadar oku, aşınca tamponlamadan reddet; aşmıyorsa
+            # topladığımız gövdeyi cache'le ki downstream (pydantic) tekrar okuyabilsin.
+            body = b""
+            async for chunk in request.stream():
+                body += chunk
+                if len(body) > _MAX_BODY_BYTES:
+                    return too_large
+            request._body = body  # noqa: SLF001 — starlette gövde cache'i; body() bunu döndürür
         return await call_next(request)
 
     @app.exception_handler(HTTPException)

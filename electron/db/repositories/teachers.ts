@@ -136,7 +136,7 @@ export const teachersRepo = {
       db.prepare('DELETE FROM teachers WHERE id = ?').run(id);
       const dupRows = db
         .prepare(
-          `SELECT id FROM activities
+          `SELECT id, class_id, subject_id, weekly_hours FROM activities
            WHERE school_id = ? AND teacher_id IS NULL AND split_group_id IS NULL
              AND id NOT IN (
                SELECT MIN(id) FROM activities
@@ -144,8 +144,36 @@ export const teachersRepo = {
                GROUP BY class_id, subject_id
              )`,
         )
-        .all(schoolId, schoolId) as { id: number }[];
+        .all(schoolId, schoolId) as {
+        id: number;
+        class_id: number;
+        subject_id: number;
+        weekly_hours: number;
+      }[];
       if (dupRows.length === 0) return;
+      // Duplikeleri silmeden önce saatlerini tutulan (MIN id) satıra EKLE — aksi halde
+      // öğretmen silme sınıfın müfredat saatini sessizce eritiyordu (örn. 2+4 saat → 2 saat).
+      const addHours = db.prepare(
+        `UPDATE activities SET weekly_hours = weekly_hours + ?
+         WHERE school_id = ? AND teacher_id IS NULL AND split_group_id IS NULL
+           AND class_id = ? AND subject_id = ?
+           AND id = (
+             SELECT MIN(id) FROM activities
+             WHERE school_id = ? AND teacher_id IS NULL AND split_group_id IS NULL
+               AND class_id = ? AND subject_id = ?
+           )`,
+      );
+      for (const r of dupRows) {
+        addHours.run(
+          r.weekly_hours,
+          schoolId,
+          r.class_id,
+          r.subject_id,
+          schoolId,
+          r.class_id,
+          r.subject_id,
+        );
+      }
       const dupIds = dupRows.map((r) => r.id);
       const placeholders = dupIds.map(() => '?').join(',');
       db.prepare(`DELETE FROM activities WHERE id IN (${placeholders})`).run(...dupIds);

@@ -152,7 +152,10 @@ def build_messages(payload: dict) -> list[dict]:
                                  f"result: {j(t['result'])}\n[/TOOL_RESULT]")})
     return msgs
 
-# 1) build_messages(payload) → 2) chat template (Qwen3) → 3) generate
+# 1) build_messages(payload) → 2) modelin KENDİ chat template'i (LFM2.5) → 3) generate
+#    ÖNEMLİ: serving, modelin eğitildiği chat template'ini kullanmalı. Model LFM2.5-8B-A1B
+#    (lfm2_moe) olarak fine-tune edildi → tokenizer'ın LFM2.5 chat template'i uygulanır.
+#    Yanlış template (ör. Qwen3) uygularsanız model OOD girdi alır ve kalite çöker.
 # 4) modelin ürettiği assistant metnini JSON parse et → 5) HTTP gövdesinde döndür
 ```
 

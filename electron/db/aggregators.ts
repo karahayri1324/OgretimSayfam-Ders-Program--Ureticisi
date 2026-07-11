@@ -41,22 +41,7 @@ export function gatherSchoolData(): SchoolBundle {
   };
 }
 
-export type AIContext = {
-  teachers: string[];
-  classes: string[];
-  subjects: string[];
-  rooms: string[];
-  days: string[];
-  hoursPerDay: number;
-};
-
-export function buildAIContext(): AIContext {
-  return {
-    teachers: teachersRepo.list().map((t) => t.name),
-    classes: classesRepo.list().map((c) => c.name),
-    subjects: subjectsRepo.list().map((s) => s.name),
-    rooms: roomsRepo.list().map((r) => r.name),
-    days: daysRepo.list().map((d) => d.name),
-    hoursPerDay: hoursRepo.list().length,
-  };
-}
+// NOT: Buradaki eski buildAIContext (bayat hoursPerDay=global saat sayısı; CONSTRAINTS alanı
+// yok) KALDIRILDI. Kanonik ve tek kullanılan sürüm electron/ai/context-builder.ts'te
+// (day_hours farkında, CONSTRAINTS dahil, INFERENCE_CONTRACT ile uyumlu). İki paralel
+// tanımdan biri yanlışlıkla import edilirse model OOD context alırdı — o yüzden tek bıraktık.

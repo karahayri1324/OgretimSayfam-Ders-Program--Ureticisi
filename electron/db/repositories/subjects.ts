@@ -1,5 +1,9 @@
 import { getDb } from '../connection.js';
 import { schoolsRepo } from './schools.js';
+import {
+  cleanupOrphanGroups,
+  splitGroupIdsForSubject,
+} from '../split-group-maintenance.js';
 import type { Subject, SubjectInput } from '../../../src/lib/types.js';
 
 type SubjectRow = {
@@ -85,6 +89,15 @@ export const subjectsRepo = {
   },
 
   delete(id: number): void {
-    getDb().prepare('DELETE FROM subjects WHERE id = ?').run(id);
+    const db = getDb();
+    const schoolId = schoolsRepo.getActiveId();
+    // Aktiviteler FK cascade ile silinir; aynı split-gruptaki diğer branşların aktiviteleri
+    // yetim kalabilir. Silmeden önce etkilenen grupları toplayıp sonrasında temizle.
+    const trx = db.transaction(() => {
+      const groups = splitGroupIdsForSubject(db, schoolId, id);
+      db.prepare('DELETE FROM subjects WHERE id = ? AND school_id = ?').run(id, schoolId);
+      cleanupOrphanGroups(db, schoolId, groups);
+    });
+    trx();
   },
 };

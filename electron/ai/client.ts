@@ -167,6 +167,48 @@ async function singleRoundtrip(
   }
 }
 
+// Tool sonucunu sunucunun kabul edeceği boyuta (güvenli 40KB marj; sunucu limiti 50KB) kırp.
+// Dizi sonuçlarında sığdığı kadar baş öğeyi tutup gizlenen sayıyı bildirir; diğer türlerde
+// serileştirmeyi kısaltır. Kırpma modele "sonuç kısaltıldı" sinyali de verir.
+const TOOL_RESULT_MAX = 40_000;
+function capInner(value: unknown): unknown {
+  let s: string;
+  try {
+    s = JSON.stringify(value);
+  } catch {
+    return value;
+  }
+  if (s.length <= TOOL_RESULT_MAX) return value;
+  if (Array.isArray(value)) {
+    const items: unknown[] = [];
+    let acc = 0;
+    for (const item of value) {
+      const is = JSON.stringify(item)?.length ?? 0;
+      if (acc + is > TOOL_RESULT_MAX - 300) break;
+      items.push(item);
+      acc += is;
+    }
+    return {
+      truncated: true,
+      total: value.length,
+      shown: items.length,
+      note: `Sonuç çok büyük (${value.length} öğe); ilk ${items.length} öğe gösteriliyor. Daha dar bir sorgu (ör. tek sınıf/öğretmen) verin.`,
+      items,
+    };
+  }
+  return {
+    truncated: true,
+    note: 'Tool sonucu boyut sınırını aştığı için kısaltıldı; daha dar bir sorgu verin.',
+    preview: s.slice(0, TOOL_RESULT_MAX - 300),
+  };
+}
+
+// ToolResult = { result } | { error }; error dalına dokunma (küçük), result dalının içeriğini kırp.
+function capToolResult(r: ToolResult): ToolResult {
+  if ('error' in r) return r;
+  return { result: capInner(r.result) };
+}
+
 export const aiClient = {
   async parse({ text, context, history = [] }: ParseRequest): Promise<AIResponse> {
     return singleRoundtrip(text, context, [], history);
@@ -206,7 +248,10 @@ export const aiClient = {
         ok: !('error' in result),
         iteration: i + 1,
       });
-      toolHistory.push({ role: 'tool', tool: toolName, args, result, reasoning });
+      // Büyük tool sonuçları (örn. yüzlerce kısıtlı listActiveConstraints) sunucunun 50KB
+      // sınırını aşıp bir sonraki turu 422 ile düşürüyordu. İstemcide güvenli bir marjla
+      // (40KB) kırp — dizi sonuçlarında baş kısmı + kaç öğenin gizlendiğini bildir.
+      toolHistory.push({ role: 'tool', tool: toolName, args, result: capToolResult(result), reasoning });
     }
 
     log.warn('AI tool iterasyon limiti aşıldı', { max: maxIterations });

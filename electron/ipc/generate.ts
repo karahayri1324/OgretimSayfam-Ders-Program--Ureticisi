@@ -198,6 +198,7 @@ export function registerGenerateHandlers(getWindow: () => BrowserWindow): void {
           recordGenerationFailure({
             reason: fetResult.errorCode as GenerationFailureReason,
             message: fetResult.message,
+            rawError: fetResult.rawError,
             ...(counts ?? {}),
           });
         }

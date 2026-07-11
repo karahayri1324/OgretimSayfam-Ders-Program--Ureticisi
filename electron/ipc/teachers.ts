@@ -1,5 +1,9 @@
 import { ipcMain } from 'electron';
 import { teachersRepo } from '../db/repositories/teachers.js';
+import {
+  pruneConstraintsByName,
+  renameConstraintReferences,
+} from '../db/constraint-maintenance.js';
 import { safeHandler, validate, err } from './_common.js';
 import { isGenerationActive } from './generate.js';
 import { TeacherInputSchema, TeacherPatchSchema } from './_schemas.js';
@@ -34,7 +38,13 @@ export function registerTeachersHandlers(): void {
       const existing = teachersRepo.get(id);
       if (!existing) throw new Error('Öğretmen bulunamadı.');
       teachersRepo.update(id, v.data);
-      return { id };
+      // Kısıtlar adı snapshot olarak saklar; rename cascade'i olmazsa eski ada atıf yapan
+      // kısıtlar FET-build'de sessizce atlanır (AI yolunda zaten var — parite).
+      const renamed =
+        v.data.name !== undefined && v.data.name !== existing.name
+          ? renameConstraintReferences('teacher', existing.name, v.data.name)
+          : 0;
+      return { id, renamedConstraints: renamed };
     });
   });
 
@@ -44,8 +54,13 @@ export function registerTeachersHandlers(): void {
     }
     if (isGenerationActive()) return err('BUSY', GEN_BUSY_MSG);
     return safeHandler('teachers:delete', () => {
+      const existing = teachersRepo.get(id);
+      if (!existing) throw new Error('Öğretmen bulunamadı.');
       teachersRepo.delete(id);
-      return { id };
+      // Silinen öğretmenin adına bağlı kısıtlar temizlenmezse listede aktif görünür,
+      // FET-build'de sessizce atlanır ve aynı adla yeni öğretmen eklenirse yeniden canlanır.
+      const pruned = pruneConstraintsByName('teacher', existing.name);
+      return { id, prunedConstraints: pruned };
     });
   });
 }

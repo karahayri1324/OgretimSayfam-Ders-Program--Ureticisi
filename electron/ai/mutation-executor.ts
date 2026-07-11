@@ -11,8 +11,21 @@ import { constraintsRepo } from '../db/repositories/constraints.js';
 import {
   pruneFixedTimeLocksBeyondHour,
   pruneConstraintsForRemovedDays,
+  pruneConstraintsByName,
+  renameConstraintReferences,
+  pruneConstraintsByActivityIds,
 } from '../db/constraint-maintenance.js';
-import { planConstraintRename } from '../db/constraint-prune-logic.js';
+import {
+  effectiveMaxHourCount,
+  effectiveHourCountForDay,
+} from '../db/schedule-effective-hours.js';
+import { findByName, normalizeConstraintParams } from '../db/entity-resolve.js';
+import { VALID_PAGE_SLUGS, normalizePageRoute } from '../../src/lib/pages.js';
+import {
+  MAX_WEEKLY_HOURS,
+  MAX_BLOCK_DURATION,
+  MAX_HOURS_PER_DAY,
+} from '../../src/lib/limits.js';
 import { settingsRepo, WRITABLE_SETTING_KEYS } from '../db/repositories/settings.js';
 import { timetablesRepo } from '../db/repositories/timetables.js';
 import { getDb } from '../db/connection.js';
@@ -39,38 +52,8 @@ function deburr(s: string): string {
     .replace(/ö/g, 'o');
 }
 
-function findByName<T extends { id: number; name: string }>(
-  needle: string,
-  list: T[],
-): T | null {
-  const target = deburr(needle.trim());
-  if (!target) return null;
-  for (const item of list) if (deburr(item.name) === target) return item;
-  for (const item of list) if (deburr(item.name).includes(target)) return item;
-  // 3. fallback (aranan ad, entity adını ALT-DİZE olarak içeriyor — örn. "Matematik dersi" →
-  // "Matematik"): kısa adlı entity'ler ("M" odası, "9" sınıfı) bu kuralla YANLIŞ eşleşiyordu
-  // (örn. "Matematik 1" → 'm' içerdiği için "M" odası). Yalnız >=3 karakterlik adları değerlendir
-  // ve birden çok aday varsa EN UZUN (en spesifik) olanı seç.
-  let best: T | null = null;
-  let bestLen = 0;
-  for (const item of list) {
-    const n = deburr(item.name);
-    if (n.length >= 3 && target.includes(n) && n.length > bestLen) {
-      best = item;
-      bestLen = n.length;
-    }
-  }
-  if (best) return best;
-  const parts = target.split(/\s+/).filter((p) => p.length >= 3);
-  for (const item of list) {
-    const lowName = deburr(item.name);
-    for (const p of parts) {
-      const re = new RegExp(`\\b${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
-      if (re.test(lowName)) return item;
-    }
-  }
-  return null;
-}
+// findByName / canonicalDayName / normalizeConstraintParams artık db/entity-resolve.ts'te —
+// manuel constraints:add IPC yolu da aynı normalizasyonu kullanıyor (paralel yol kalmasın).
 
 function requireString(params: Record<string, unknown>, key: string): string {
   const v = params[key];
@@ -78,82 +61,6 @@ function requireString(params: Record<string, unknown>, key: string): string {
     throw new Error(`'${key}' parametresi gerekli (string).`);
   }
   return v.trim();
-}
-
-// Ham AI gün adını ('pazartesi','Carsamba','CUMA') KANONIK days tablosu adına ('Pazartesi')
-// çevirir. FET handler'ları (xml-builder dayByName) günü TAM eşler; ham string FET-build'de
-// sessizce unknownDays'e düşüp kısıtı KAYBEDİYORDU (#12). Bulunamazsa null.
-function canonicalDayName(raw: unknown): string | null {
-  if (typeof raw !== 'string' || !raw.trim()) return null;
-  const days = daysRepo.list();
-  const exact = days.find((d) => d.name === raw.trim());
-  if (exact) return exact.name;
-  const fuzzy = days.find((d) => deburr(d.name) === deburr(raw));
-  return fuzzy ? fuzzy.name : null;
-}
-
-// Bir entity ad alanını ('teacher'/'class'/'subject'/'room') KANONIK DB adına çözer ve var
-// olduğunu DOĞRULAR. FET, kısıt referanslarını ada-göre tam eşler; ayrıca constraint-mapper.ts
-// referans-doğrulama katmanı ölü kod olduğundan add_constraint hayalet entity'leri sessizce
-// DB'ye yazıp AI'a gerçek kısıt gibi sunuyordu (FET'te skip → AI/DB ↔ FET kalıcı sapma, #9).
-function resolveEntityField(
-  p: Record<string, unknown>,
-  key: string,
-  list: { id: number; name: string }[],
-  label: string,
-): void {
-  const v = p[key];
-  if (typeof v !== 'string' || !v.trim()) return;
-  const hit = findByName(v, list);
-  if (!hit) throw new Error(`${label} bulunamadı: '${v}'`);
-  p[key] = hit.name;
-}
-
-// add_constraint/add_activity_constraint param'larını DB'ye yazmadan ÖNCE normalleştir:
-// gün adlarını kanonikleştir, entity referanslarını doğrula+kanonikleştir. Böylece kısıt ya
-// gerçekten uygulanır ya da net hatayla reddedilir — sessiz kayıp olmaz.
-function normalizeConstraintParams(raw: Record<string, unknown>): Record<string, unknown> {
-  const p: Record<string, unknown> = { ...raw };
-
-  if ('day' in p && typeof p.day === 'string') {
-    const c = canonicalDayName(p.day);
-    if (!c) throw new Error(`Gün bulunamadı: '${String(p.day)}'`);
-    p.day = c;
-  }
-  if (Array.isArray(p.days)) {
-    p.days = p.days.map((d) => {
-      const c = canonicalDayName(d);
-      if (!c) throw new Error(`Gün bulunamadı: '${String(d)}'`);
-      return c;
-    });
-  }
-  if (Array.isArray(p.slots)) {
-    p.slots = p.slots.map((s) => {
-      if (s && typeof s === 'object' && 'day' in (s as Record<string, unknown>)) {
-        const so = s as Record<string, unknown>;
-        const c = canonicalDayName(so.day);
-        if (!c) throw new Error(`Gün bulunamadı: '${String(so.day)}'`);
-        return { ...so, day: c };
-      }
-      return s;
-    });
-  }
-
-  resolveEntityField(p, 'teacher', teachersRepo.list(), 'Öğretmen');
-  resolveEntityField(p, 'class', classesRepo.list(), 'Sınıf');
-  resolveEntityField(p, 'subject', subjectsRepo.list(), 'Branş');
-  resolveEntityField(p, 'room', roomsRepo.list(), 'Derslik');
-  if (Array.isArray(p.rooms)) {
-    const rooms = roomsRepo.list();
-    p.rooms = p.rooms.map((r) => {
-      if (typeof r !== 'string' || !r.trim()) return r;
-      const hit = findByName(r, rooms);
-      if (!hit) throw new Error(`Derslik bulunamadı: '${r}'`);
-      return hit.name;
-    });
-  }
-
-  return p;
 }
 
 function requireConstraintType(params: Record<string, unknown>): ConstraintType {
@@ -249,6 +156,27 @@ function optInt(params: Record<string, unknown>, key: string): number | undefine
 
 const userHourToSlotIndex = (hour: number): number => hour - 1;
 
+// Aktivite saat/blok değerlerini manuel IPC şemasıyla AYNI sınırlara denetle (tek kaynak:
+// limits.ts). AI yolu eskiden yalnız alt sınırı (>=1) kontrol ediyor, üst sınırı hiç
+// uygulamıyordu → model 100 saatlik ders yazabiliyor, manuel form 40'ta duruyordu.
+function assertActivityBounds(weeklyHours: number, blockDuration: number): void {
+  if (weeklyHours < 1 || weeklyHours > MAX_WEEKLY_HOURS) {
+    throw new Error(
+      `Haftalık ders saati 1-${MAX_WEEKLY_HOURS} arasında olmalı (verilen: ${weeklyHours}).`,
+    );
+  }
+  if (blockDuration < 1 || blockDuration > MAX_BLOCK_DURATION) {
+    throw new Error(
+      `Blok süresi 1-${MAX_BLOCK_DURATION} arasında olmalı (verilen: ${blockDuration}).`,
+    );
+  }
+  if (blockDuration > weeklyHours) {
+    throw new Error(
+      `Blok süresi (${blockDuration}) haftalık saatten (${weeklyHours}) büyük olamaz.`,
+    );
+  }
+}
+
 function ensureSubject(name: string): number {
   const existing = findByName(name, subjectsRepo.list());
   if (existing) return existing.id;
@@ -273,58 +201,9 @@ function ensureClass(name: string, yearName?: string | null): number {
 }
 
 
-function pruneConstraintsByName(field: 'teacher' | 'class' | 'subject' | 'room', name: string): number {
-  const target = deburr(name);
-  let removed = 0;
-  for (const c of constraintsRepo.list()) {
-    const p = c.params as Record<string, unknown>;
-    let hit = typeof p[field] === 'string' && deburr(p[field] as string) === target;
-    if (!hit && field === 'room' && Array.isArray(p['rooms'])) {
-      hit = (p['rooms'] as unknown[]).some((r) => typeof r === 'string' && deburr(r) === target);
-    }
-    if (hit) {
-      constraintsRepo.delete(c.id);
-      removed++;
-    }
-  }
-  return removed;
-}
-
-// Entity YENİDEN ADLANDIRILINCA, kısıtlar adı snapshot olarak params_json'da sakladığından
-// (FET handler'ları referansları ADA göre çözer, eşleşmezse sessizce skip eder), eski ada atıf
-// yapan kısıtları YENİ ada güncelle. Aksi halde zararsız görünen bir rename, kullanıcının açıkça
-// koyduğu kısıtları sessizce ölü bırakıyordu. delete yolundaki pruneConstraintsByName'in rename
-// karşılığı. Güncellenen kısıt sayısını döner.
-function renameConstraintReferences(
-  field: 'teacher' | 'class' | 'subject' | 'room',
-  oldName: string,
-  newName: string,
-): number {
-  const updates = planConstraintRename(constraintsRepo.list(), field, oldName, newName);
-  for (const u of updates) constraintsRepo.updateParams(u.id, u.params);
-  return updates.length;
-}
-
-function pruneConstraintsByActivityIds(ids: number[]): number {
-  if (ids.length === 0) return 0;
-  const idset = new Set(ids);
-  let removed = 0;
-  for (const c of constraintsRepo.list()) {
-    const p = c.params as Record<string, unknown>;
-    const single = typeof p['activityId'] === 'number' && idset.has(p['activityId'] as number);
-    const many =
-      Array.isArray(p['activityIds']) &&
-      (p['activityIds'] as unknown[]).some((x) => typeof x === 'number' && idset.has(x as number));
-    const pair =
-      (typeof p['firstActivityId'] === 'number' && idset.has(p['firstActivityId'] as number)) ||
-      (typeof p['secondActivityId'] === 'number' && idset.has(p['secondActivityId'] as number));
-    if (single || many || pair) {
-      constraintsRepo.delete(c.id);
-      removed++;
-    }
-  }
-  return removed;
-}
+// pruneConstraintsByName / renameConstraintReferences / pruneConstraintsByActivityIds artık
+// db/constraint-maintenance.ts'te — manuel IPC yolları da aynı fonksiyonları kullanıyor
+// (tur-9 dersi: sertleştirme tek yolda kalmasın).
 
 function activityIdsForClass(classId: number): number[] {
   return activitiesRepo.list().filter((a) => a.classId === classId).map((a) => a.id);
@@ -334,17 +213,10 @@ function activityIdsForSubject(subjectId: number): number[] {
   return activitiesRepo.list().filter((a) => a.subjectId === subjectId).map((a) => a.id);
 }
 
-function clearDayHourOverrides(): string {
-  try {
-    const had = dayHoursRepo.list().length > 0;
-    if (had) {
-      dayHoursRepo.clearAll();
-      return ' (güne özel saat ayarları sıfırlandı)';
-    }
-  } catch {
-  }
-  return '';
-}
+// NOT: Eskiden global saat op'ları TÜM güne-özel override'ları clearAll ile siliyordu.
+// Manuel eşdeğeri (schedule:setHours) override'lara dokunmaz — güne-özel planlar bağımsız ve
+// yetkili kalır. Paralel yolları hizaladık: override'lar korunur, yalnız aralık-dışı kalan
+// saat-kilitleri efektif max'a göre budanır (schedule-effective-hours.ts).
 
 function resolveHomeRoomId(params: Record<string, unknown>): number | null {
   const idVal = optInt(params, 'homeRoomId');
@@ -595,8 +467,7 @@ const handlers: Record<DataMutationOp, Handler> = {
     const teacherName = optString(params, 'teacher');
     const weeklyHours = optInt(params, 'weeklyHours') ?? 1;
     const blockDuration = optInt(params, 'blockDuration') ?? 1;
-    if (weeklyHours < 1) throw new Error(`Haftalık ders saati en az 1 olmalı (verilen: ${weeklyHours}).`);
-    if (blockDuration < 1) throw new Error(`Blok süresi en az 1 olmalı (verilen: ${blockDuration}).`);
+    assertActivityBounds(weeklyHours, blockDuration);
     const notes = optString(params, 'notes') ?? null;
 
     const classId = ensureClass(className, optString(params, 'year'));
@@ -674,8 +545,7 @@ const handlers: Record<DataMutationOp, Handler> = {
     }
     const weeklyHours = optInt(params, 'weeklyHours') ?? existing.weeklyHours;
     const blockDuration = optInt(params, 'blockDuration') ?? existing.blockDuration;
-    if (weeklyHours < 1) throw new Error(`Haftalık ders saati en az 1 olmalı (verilen: ${weeklyHours}).`);
-    if (blockDuration < 1) throw new Error(`Blok süresi en az 1 olmalı (verilen: ${blockDuration}).`);
+    assertActivityBounds(weeklyHours, blockDuration);
     const teacherName = optString(params, 'teacher');
     let teacherId: number | null = existing.teacherId;
     if (teacherName !== undefined) {
@@ -783,6 +653,11 @@ const handlers: Record<DataMutationOp, Handler> = {
 
   add_hour(params) {
     const current = hoursRepo.list();
+    // Günlük saat tavanını manuel UI (20) ve schedule_update ile hizala — eskiden AI data_mutation
+    // add_hour sınırsızca saat ekleyebiliyordu (FET slot indeksi 1..20'yi aşan saatler geçersiz).
+    if (current.length >= MAX_HOURS_PER_DAY) {
+      throw new Error(`Bir günde en fazla ${MAX_HOURS_PER_DAY} ders saati olabilir.`);
+    }
     const name = optString(params, 'name') ?? `${current.length + 1}. Ders`;
     const startTime = optString(params, 'startTime') ?? null;
     const endTime = optString(params, 'endTime') ?? null;
@@ -793,8 +668,7 @@ const handlers: Record<DataMutationOp, Handler> = {
       ...current.map((h) => ({ name: h.name, startTime: h.startTime, endTime: h.endTime })),
       { name, startTime, endTime },
     ]);
-    const cleared = clearDayHourOverrides();
-    return `'${name}' ders saati eklendi.${cleared}`;
+    return `'${name}' ders saati eklendi. (Güne özel saat planları korunur.)`;
   },
 
   delete_hour(params) {
@@ -816,9 +690,9 @@ const handlers: Record<DataMutationOp, Handler> = {
     hoursRepo.replaceAll(
       next.map((h) => ({ name: h.name, startTime: h.startTime, endTime: h.endTime })),
     );
-    const cleared = clearDayHourOverrides();
-    const prunedLocks = pruneFixedTimeLocksBeyond(next.length);
-    return `'${removedName}' ders saati kaldırıldı.${cleared}${prunedLocks}`;
+    // Güne-özel override'lar korunur; eşik efektif max (uzun günün kilitleri yanlışlıkla silinmesin).
+    const prunedLocks = pruneFixedTimeLocksBeyond(effectiveMaxHourCount());
+    return `'${removedName}' ders saati kaldırıldı. (Güne özel saat planları korunur.)${prunedLocks}`;
   },
 
   set_hour_times(params) {
@@ -836,9 +710,9 @@ const handlers: Record<DataMutationOp, Handler> = {
       entries.push({ name, startTime, endTime });
     }
     hoursRepo.replaceAll(entries);
-    const cleared = clearDayHourOverrides();
-    const prunedLocks = pruneFixedTimeLocksBeyond(entries.length);
-    return `${entries.length} ders saati güncellendi (isim/başlangıç/bitiş).${cleared}${prunedLocks}`;
+    // Güne-özel override'lar korunur; eşik efektif max (uzun günün kilitleri yanlışlıkla silinmesin).
+    const prunedLocks = pruneFixedTimeLocksBeyond(effectiveMaxHourCount());
+    return `${entries.length} ders saati güncellendi (isim/başlangıç/bitiş). (Güne özel saat planları korunur.)${prunedLocks}`;
   },
 
   clear_day_hours(params) {
@@ -850,7 +724,10 @@ const handlers: Record<DataMutationOp, Handler> = {
       return `'${day.name}' zaten genel ders saati planını kullanıyor. Atlandı.`;
     }
     dayHoursRepo.replaceForDay(day.id, []);
-    return `'${day.name}' günü genel ders saati planına döndürüldü.`;
+    // Uzun günün override'ı kalkınca efektif max düşebilir → aralık-dışı kilitleri buda,
+    // yoksa kilit DB'de aktif görünür ama FET'e hiç gitmez (sessiz kayıp).
+    const prunedLocks = pruneFixedTimeLocksBeyond(effectiveMaxHourCount());
+    return `'${day.name}' günü genel ders saati planına döndürüldü.${prunedLocks}`;
   },
 
   link_teacher_subject(params) {
@@ -1131,24 +1008,24 @@ const handlers: Record<DataMutationOp, Handler> = {
     const day = requireString(params, 'day');
     const hour = optInt(params, 'hour');
     if (hour == null || hour < 1) throw new Error("'hour' 1+ olmalı.");
-    // ÜST SINIR: hour, programın günlük ders saati sayısını aşamaz. Aşarsa ACTIVITY_FIXED_TIME
-    // kısıtı DB'ye yazılır, "uygulandı" denir AMA FET-build'de "Bilinmeyen saat" diye SESSİZCE
-    // düşer (handlers.ts) — AI uyguladığını sanır, kural hiç işlemez. FET effectiveHoursPerDay =
-    // max(global saat, güne-özel override). Bu üst sınırı aşan saati baştan reddet.
-    const maxHour = (() => {
-      let maxDay = 0;
-      const byDay = new Map<number, number>();
-      for (const r of dayHoursRepo.list()) {
-        const c = (byDay.get(r.dayId) ?? 0) + 1;
-        byDay.set(r.dayId, c);
-        if (c > maxDay) maxDay = c;
-      }
-      return Math.max(hoursRepo.list().length, maxDay);
-    })();
-    if (maxHour > 0 && hour > maxHour) {
+
+    // FET ACTIVITY_FIXED_TIME handler'ı gün adını KANONIK days tablosu adıyla (tam) eşler;
+    // ham AI/kullanıcı string'i ('pazartesi') saklanırsa kilit FET-build'de sessizce düşer.
+    const dayObj =
+      daysRepo.list().find((d) => d.name === day) ??
+      daysRepo.list().find((d) => deburr(d.name) === deburr(day));
+    if (!dayObj) throw new Error(`Gün bulunamadı: '${day}'`);
+    const canonicalDay = dayObj.name;
+
+    // ÜST SINIR: hour, HEDEF GÜNÜN efektif ders saati sayısını aşamaz. Tüm günlerin max'ına
+    // bakmak yanıltıcıydı: kısa güne (örn. Salı 8 saat, Cuma 10 iken Salı 9. saate) konan kilit
+    // kabul edilir, o slot aynı anda %100 break + %100 sabit-zaman olur → FET NO_SOLUTION ve
+    // kullanıcı hangi kilidin suçlu olduğunu göremezdi.
+    const dayMax = effectiveHourCountForDay(dayObj.id);
+    if (dayMax > 0 && hour > dayMax) {
       throw new Error(
-        `Saat ${hour} geçersiz: program günde en fazla ${maxHour} ders saati içeriyor. ` +
-          `Önce gün/saat planına saat ekleyin ya da 1-${maxHour} arası bir saat verin.`,
+        `Saat ${hour} geçersiz: '${canonicalDay}' günü ${dayMax} ders saati içeriyor. ` +
+          `1-${dayMax} arası bir saat verin ya da önce o günün saat planını genişletin.`,
       );
     }
 
@@ -1189,14 +1066,6 @@ const handlers: Record<DataMutationOp, Handler> = {
       );
     }
     const act = matches[0]!;
-
-    // FET ACTIVITY_FIXED_TIME handler'ı gün adını KANONIK days tablosu adıyla (tam) eşler;
-    // ham AI/kullanıcı string'i ('pazartesi') saklanırsa kilit FET-build'de sessizce düşer.
-    const dayObj =
-      daysRepo.list().find((d) => d.name === day) ??
-      daysRepo.list().find((d) => deburr(d.name) === deburr(day));
-    if (!dayObj) throw new Error(`Gün bulunamadı: '${day}'`);
-    const canonicalDay = dayObj.name;
 
     const existing = constraintsRepo.list().find(
       (c) =>
@@ -1605,10 +1474,18 @@ const handlers: Record<DataMutationOp, Handler> = {
       );
     }
 
+    // YALNIZ swap edilen KONUMLARDAKİ eski kilitleri sil: A'nın (day1/hour1) ve B'nin (day2/hour2)
+    // kilidini kaldır ki yerlerine yeni hedef kilitler yazılabilsin. Aktivitenin BAŞKA saatlerdeki
+    // (swap dışı) manuel kilitlerini KORU — eskiden aktivitenin tüm ACTIVITY_FIXED_TIME'ları
+    // koşulsuz siliniyordu, çok-saatli/çok-kilitli derste swap dışı kilitler sessizce yok oluyordu.
     for (const c of constraintsRepo.list()) {
       if (c.type !== 'ACTIVITY_FIXED_TIME') continue;
-      const aid = (c.params as { activityId?: number }).activityId;
-      if (aid === dbActivityA || aid === dbActivityB) {
+      const p = c.params as { activityId?: number; day?: string; hour?: number };
+      const isAOld =
+        p.activityId === dbActivityA && p.day === dayObj1.name && p.hour === hour1;
+      const isBOld =
+        p.activityId === dbActivityB && p.day === dayObj2.name && p.hour === hour2;
+      if (isAOld || isBOld) {
         constraintsRepo.delete(c.id);
       }
     }
@@ -1705,18 +1582,14 @@ const handlers: Record<DataMutationOp, Handler> = {
   },
 
   navigate_to(params) {
-    const raw = requireString(params, 'page').toLowerCase();
-    const page = raw.startsWith('/') ? raw.slice(1) : raw;
-    const valid = [
-      'welcome', 'subjects', 'classes', 'rooms', 'teachers', 'activities',
-      'schedule', 'constraints', 'generate', 'timetable', 'advanced', 'settings',
-    ];
-    if (!valid.includes(page)) {
+    const raw = requireString(params, 'page');
+    const route = normalizePageRoute(raw);
+    if (!route) {
       throw new Error(
-        `Geçersiz sayfa: '${page}'. Geçerli: ${valid.join(', ')}`,
+        `Geçersiz sayfa: '${raw}'. Geçerli: ${VALID_PAGE_SLUGS.join(', ')}`,
       );
     }
-    return `/${page} sayfasına yönlendiriliyor.`;
+    return `${route} sayfasına yönlendiriliyor.`;
   },
 
   clear_split(params) {

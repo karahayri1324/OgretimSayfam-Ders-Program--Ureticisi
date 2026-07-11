@@ -171,13 +171,6 @@ function buildContext(school: SchoolBundle): BuilderContext {
     splitGroupsByClass.set(a.classId, cmap);
   }
 
-  const subgroupCountByClass = new Map<number, number>();
-  for (const [classId, cmap] of splitGroupsByClass) {
-    let maxN = 0;
-    for (const [, arr] of cmap) maxN = Math.max(maxN, arr.length);
-    subgroupCountByClass.set(classId, maxN);
-  }
-
   const studentsNameByActivity = new Map<number, string>();
   for (const a of school.activities) {
     const cls = classById.get(a.classId);
@@ -189,7 +182,12 @@ function buildContext(school: SchoolBundle): BuilderContext {
     const cmap = splitGroupsByClass.get(a.classId);
     const arr = cmap?.get(a.splitGroupId) ?? [];
     const idx = arr.indexOf(a.id);
-    if (idx < 0) {
+    // Sınıf-içi tek üye iki durumda oluşur: (a) yetim grup (silme sonrası artık DB katmanı
+    // temizliyor ama eski/dış veri gelebilir), (b) sınıflar-arası merge — grup üyeleri farklı
+    // sınıflarda, her sınıfta 1'er üye. İki durumda da '<sınıf>_gN' Students_List'te TANIMSIZ
+    // kalır ve fet-cl dosyayı reddeder. Tam sınıf adını kullan: yetim grup normal derse döner,
+    // merge'de SameStartingTime kısıtı (appendSplitGroupConstraints) ortak dersi zaten bağlar.
+    if (idx < 0 || arr.length < 2) {
       studentsNameByActivity.set(a.id, cls.name);
       continue;
     }

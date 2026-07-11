@@ -182,8 +182,11 @@ function RoomDialog({
     setSubmitting(true);
     for (const n of parsedNames) {
       await onSubmit({
+        // Düzenleme modunda mevcut kapasiteyi KORU; her kayıtta 30'a sıfırlamak AI ile veya
+        // elle ayarlanmış kapasiteyi (dersliğin adını/binasını düzeltince) sessizce siliyordu.
+        // Yeni derslik(ler) için makul varsayılan 30.
         name: n,
-        capacity: 30,
+        capacity: room?.capacity ?? 30,
         building: building.trim() || null,
         notes: notes.trim() || null,
       });

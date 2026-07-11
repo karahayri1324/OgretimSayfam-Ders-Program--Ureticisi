@@ -1,5 +1,6 @@
 import { getDb } from '../connection.js';
 import { schoolsRepo } from './schools.js';
+import { cleanupOrphanGroup } from '../split-group-maintenance.js';
 import type { Activity, ActivityInput } from '../../../src/lib/types.js';
 
 type ActivityRow = {
@@ -230,21 +231,3 @@ export const activitiesRepo = {
   },
 };
 
-function cleanupOrphanGroup(
-  db: ReturnType<typeof getDb>,
-  schoolId: number,
-  groupId: number,
-): void {
-  const cnt = (
-    db
-      .prepare(
-        'SELECT COUNT(*) AS c FROM activities WHERE school_id = ? AND split_group_id = ?',
-      )
-      .get(schoolId, groupId) as { c: number }
-  ).c;
-  if (cnt < 2) {
-    db.prepare(
-      'UPDATE activities SET split_group_id = NULL WHERE school_id = ? AND split_group_id = ?',
-    ).run(schoolId, groupId);
-  }
-}

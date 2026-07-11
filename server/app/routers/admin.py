@@ -12,6 +12,7 @@ from ..models import (
     AdminSettingsView,
     AdminUserPatch,
     AdminUserView,
+    BlockRequest,
 )
 from ..views import admin_user_view
 
@@ -66,11 +67,12 @@ def patch_user(user_id: int, body: AdminUserPatch) -> AdminUserView:
 
 
 @router.post("/users/{user_id}/block", response_model=AdminUserView)
-def block_user(user_id: int, body: dict | None = None) -> AdminUserView:
+def block_user(user_id: int, body: BlockRequest | None = None) -> AdminUserView:
     _get_user_or_404(user_id)
     fields: dict[str, object] = {"status": "blocked"}
-    if body and isinstance(body.get("message"), str):
-        fields["block_message"] = body["message"]
+    # message artık BlockRequest ile 2000 karaktere sınırlı (pydantic doğrular).
+    if body is not None and body.message is not None:
+        fields["block_message"] = body.message
     repo.update_user(user_id, fields)
     return admin_user_view(_get_user_or_404(user_id))
 

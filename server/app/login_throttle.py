@@ -16,29 +16,52 @@ def _iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def is_locked(key: str) -> bool:
-    k = key.lower()
-    since = _iso(datetime.now(timezone.utc) - _WINDOW)
+def _count_since(key: str, window: timedelta) -> int:
+    since = _iso(datetime.now(timezone.utc) - window)
     row = db.query_one(
         "SELECT COUNT(*) AS c FROM login_failures WHERE throttle_key = ? AND created_at > ?",
-        (k, since),
+        (key.lower(), since),
     )
-    return bool(row) and int(row["c"]) >= _MAX_FAILS
+    return int(row["c"]) if row else 0
 
 
-def record_failure(key: str) -> None:
-    k = key.lower()
+def _record(key: str, window: timedelta) -> None:
     now = datetime.now(timezone.utc)
     db.execute(
         "INSERT INTO login_failures (throttle_key, created_at) VALUES (?, ?)",
-        (k, _iso(now)),
+        (key.lower(), _iso(now)),
     )
     # Pencerenin iki katından eski kayıtları temizle (tablo sınırsız büyümesin).
     db.execute(
         "DELETE FROM login_failures WHERE created_at < ?",
-        (_iso(now - _WINDOW * 2),),
+        (_iso(now - window * 2),),
     )
+
+
+def is_locked(key: str) -> bool:
+    return _count_since(key, _WINDOW) >= _MAX_FAILS
+
+
+def record_failure(key: str) -> None:
+    _record(key, _WINDOW)
 
 
 def clear(key: str) -> None:
     db.execute("DELETE FROM login_failures WHERE throttle_key = ?", (key.lower(),))
+
+
+# --- Kayıt (register) throttle: kota baypasını engeller -----------------------------------
+# /register kimlik doğrulaması olmadan sınırsız hesap açmaya izin veriyordu ve her yeni hesap
+# taze bir saatlik kota alıyordu → tek kullanıcı sınırsız hesap açarak saatlik kotayı fiilen
+# baypas edebiliyordu. Aynı SQLite tablosunu 'register|<ip>' namespace'iyle yeniden kullanarak
+# IP başına saatlik kayıt sayısını sınırla (worker'lar arası paylaşımlı).
+_REGISTER_WINDOW = timedelta(hours=1)
+_REGISTER_MAX = 5
+
+
+def register_blocked(ip: str) -> bool:
+    return _count_since(f"register|{ip}", _REGISTER_WINDOW) >= _REGISTER_MAX
+
+
+def record_register(ip: str) -> None:
+    _record(f"register|{ip}", _REGISTER_WINDOW)

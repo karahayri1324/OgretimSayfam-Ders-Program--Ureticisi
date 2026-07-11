@@ -38,6 +38,7 @@ DAYS_VARIANTS = {
     "Perşembe": ["Perşembe", "perşembe", "Per", "per"],
     "Cuma": ["Cuma", "cuma", "Cum", "cum"],
     "Cumartesi": ["Cumartesi", "cumartesi", "Cmt", "cmt", "haftanın son günü"],
+    "Pazar": ["Pazar", "pazar", "Paz", "paz"],
 }
 
 ORDINAL_HOUR = {
@@ -168,6 +169,102 @@ def example(ctx: dict, request: str, payload: dict) -> dict:
             {"role": "assistant", "content": make_assistant_msg(payload)},
         ]
     }
+
+# FET'in Weight_Percentage < 100 gördüğünde ÜRETİMİN TAMAMINI abort ettiği kısıt tipleri
+# (bkz. electron/fet/constraints/requires-100-weight.ts — fet-cl 6.8.5 ground-truth). Bu tiplere
+# 60/80/90 gibi ağırlık üretmek modeli üretimi kilitleyen kısıt önermeye eğitir. Yazma öncesi
+# (_normalize_example) merkezi olarak 100'e zorlanır; böylece 41 generator tek tek düzeltilmeden
+# TÜM örneklerde tutarlı olur. Kod tarafı (handlers.ts clamp) zaten çalışan modeli korur; bu ise
+# YENİDEN eğitilen modelin en baştan doğru ağırlığı öğrenmesini sağlar.
+REQUIRES_100_TYPES = {
+    "BREAK_TIMES",
+    "TEACHER_NOT_AVAILABLE",
+    "TEACHER_NOT_AVAILABLE_INTERVAL",
+    "TEACHER_NOT_FIRST_HOUR",
+    "TEACHER_NOT_LAST_HOUR",
+    "TEACHER_MIN_REST_BETWEEN_DAYS",
+    "CLASS_NOT_AVAILABLE",
+    "CLASS_NOT_FIRST_HOUR",
+    "TEACHER_MAX_GAPS_PER_DAY",
+    "TEACHER_MAX_GAPS_PER_WEEK",
+    "TEACHERS_MAX_GAPS_PER_WEEK",
+    "CLASS_MAX_GAPS_PER_WEEK",
+    "CLASS_MAX_GAPS_PER_DAY",
+    "STUDENTS_MAX_GAPS_PER_WEEK",
+    "CLASS_EARLY_MAX_BEGINNINGS",
+    "STUDENTS_EARLY_MAX_BEGINNINGS",
+    "ACTIVITY_ENDS_STUDENTS_DAY",
+    "ACTIVITIES_OCCUPY_MAX_DIFFERENT_ROOMS",
+    "TEACHER_MAX_BUILDING_CHANGES_PER_DAY",
+    "TEACHER_MAX_BUILDING_CHANGES_PER_WEEK",
+    "TEACHER_MIN_GAPS_BETWEEN_BUILDING_CHANGES",
+    "CLASS_MAX_BUILDING_CHANGES_PER_DAY",
+    "CLASS_MIN_GAPS_BETWEEN_BUILDING_CHANGES",
+}
+
+
+def _clamp_constraint_weights(obj: dict) -> bool:
+    """Bir assistant-payload dict'indeki REQUIRES_100 kısıt ağırlıklarını 100'e sabitler.
+    Hem 'constraint' kind'ının constraints[] listesini hem data_mutation add_constraint /
+    add_activity_constraint action'larının params.type/weight'ini kapsar. Değişiklik olduysa True."""
+    changed = False
+    for c in obj.get("constraints", []) or []:
+        if isinstance(c, dict) and c.get("type") in REQUIRES_100_TYPES and c.get("weight", 100) != 100:
+            c["weight"] = 100
+            changed = True
+    for a in obj.get("actions", []) or []:
+        if not isinstance(a, dict):
+            continue
+        p = a.get("params", {})
+        if not isinstance(p, dict):
+            continue
+        if p.get("type") in REQUIRES_100_TYPES and p.get("weight", 100) != 100:
+            p["weight"] = 100
+            changed = True
+    return changed
+
+
+_FIX_PATTERNS = [
+    # Şablon birleşim hatası: day_phrase "haftanın ilk günü" döndürüp şablon " günü" eklerse
+    # "... günü günü" oluşuyordu (bulgu: ~609 örnek).
+    (re.compile(r"\bgünü günü\b"), "günü"),
+    # teacher_phrase "Ahmet hoca" döndürüp şablon "hocayı/hocam" eklerse çift-unvan oluşuyordu
+    # (bulgu: ~376 örnek). Ardışık ikinci unvanı at, ekli biçimi koru.
+    (re.compile(r"\b(hoca|hocam|öğretmen|öğretmeni)\s+(hoca|hocam|öğretmen)(yı|ya|nın|dan|i|e|in|den)?\b", re.IGNORECASE),
+     lambda mm: (mm.group(1) + (mm.group(3) or "")) if mm.group(3) else mm.group(1)),
+]
+
+def _fix_turkish(text: str) -> str:
+    """Yaygın şablon-birleşim ve locale artefaktlarını düzeltir (system prompt'a UYGULANMAZ).
+    - Python str.lower() 'İ'yi 'i'+U+0307 (combining dot) yapar → 'i̇ngilizce'. Combining
+      dot'u kaldır (bulgu: ~554 örnek). - 'günü günü', çift-unvan gibi birleşim hataları."""
+    if not text:
+        return text
+    text = text.replace("̇", "")  # combining dot above (İ.lower() artefaktı)
+    for pat, repl in _FIX_PATTERNS:
+        text = pat.sub(repl, text)
+    return text
+
+
+def _normalize_example(ex: dict) -> dict:
+    """Yazma öncesi merkezi normalize (tüm generator'ları tek noktadan kapsar):
+    (1) REQUIRES_100 kısıt ağırlıklarını FET zorunluluğuna göre 100'e sabitler,
+    (2) yaygın Türkçe şablon/locale artefaktlarını düzeltir. SYSTEM mesajına DOKUNMAZ
+    (inference-contract byte-eşliği bozulmasın)."""
+    for m in ex.get("messages", []):
+        role = m.get("role")
+        if role == "system":
+            continue  # byte-eş korunmalı
+        content = m.get("content", "")
+        if role == "assistant":
+            try:
+                obj = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                obj = None
+            if isinstance(obj, dict) and _clamp_constraint_weights(obj):
+                content = json.dumps(obj, ensure_ascii=False)
+        m["content"] = _fix_turkish(content)
+    return ex
 
 HARD_PHRASES = ["olmasın", "yasak", "asla", "kesinlikle", "müsait değil", "yapmasın", "girmesin", "alamaz", "olmamalı"]
 SOFT_PHRASES = ["olsa iyi olur", "olmasa iyi olur", "tercih ederim", "tercih ederiz", "iyi olur", "tercihen", "tercih olarak", "öncelikli olarak"]
@@ -4894,7 +4991,63 @@ def gen_schedule_update(n: int) -> list[dict]:
     for i in range(n):
         ctx = make_context()
         D = ctx["days"]
-        choice = i % 3
+        # 6 aksiyon dengeli dağıtılır. set_day_hours / remove_day / add_day eskiden 0 örnekti
+        # (system_prompt vaat ediyor ama model hiç görmemişti) — parity ve kontrat uyumu için eklendi.
+        choice = i % 6
+        if choice == 3:
+            # set_day_hours: bir günün TOPLAM saatini hedefe ayarla (azaltma dahil) — "cuma 6 saat olsun".
+            day = random.choice(D)
+            hpd = random.choice([4, 5, 6, 7, 9, 10])
+            request = random.choice([
+                f"{day_phrase(day)} günü {hpd} saat olsun",
+                f"{day_phrase(day)} {hpd} ders saatine ayarla",
+                f"{day_phrase(day)} gününde {hpd} ders olsun",
+                f"Sadece {day_phrase(day)} {hpd} saatlik olsun",
+            ])
+            payload = {
+                "kind": "schedule_update",
+                "action": "set_day_hours",
+                "params": {"day": day, "hoursPerDay": hpd},
+                "explanation": f"{day} günü {hpd} ders saatine ayarlanacak. Onaylıyor musunuz?",
+                "confidence": round(random.uniform(0.83, 0.94), 2),
+            }
+            out.append(example(ctx, request, payload))
+            continue
+        if choice == 4:
+            # add_day: haftaya yeni bir gün ekle.
+            candidates = [d for d in ["Cumartesi", "Pazar"] if d not in D] or ["Cumartesi"]
+            day = random.choice(candidates)
+            request = random.choice([
+                f"{day_phrase(day)} gününü de ekle",
+                f"Programa {day_phrase(day)} ekle",
+                f"{day_phrase(day)} da ders günü olsun",
+            ])
+            payload = {
+                "kind": "schedule_update",
+                "action": "add_day",
+                "params": {"day": day},
+                "explanation": f"{day} günü çalışma günlerine eklenecek. Onaylıyor musunuz?",
+                "confidence": round(random.uniform(0.84, 0.94), 2),
+            }
+            out.append(example(ctx, request, payload))
+            continue
+        if choice == 5:
+            # remove_day: bir günü haftadan çıkar.
+            day = random.choice(D)
+            request = random.choice([
+                f"{day_phrase(day)} gününü kaldır",
+                f"{day_phrase(day)} günü ders olmasın, çıkar",
+                f"{day_phrase(day)} gününü programdan sil",
+            ])
+            payload = {
+                "kind": "schedule_update",
+                "action": "remove_day",
+                "params": {"day": day},
+                "explanation": f"{day} günü çalışma günlerinden çıkarılacak. O güne bağlı kısıtlar da temizlenecek. Onaylıyor musunuz?",
+                "confidence": round(random.uniform(0.82, 0.93), 2),
+            }
+            out.append(example(ctx, request, payload))
+            continue
         if choice == 0:
             mins = random.choice([5, 10, 15, 5, 10, 20])
             if random.random() < 0.4:
@@ -5748,7 +5901,7 @@ GENERATORS = {
     "combinations":               (gen_combinations, 200),
     "ambiguous":                  (gen_ambiguous, 150),
     "edge_cases":                 (gen_edge_cases, 150),
-    "schedule_update":            (gen_schedule_update, 120),
+    "schedule_update":            (gen_schedule_update, 240),
     "teacher_min_hours_daily":                    (gen_teacher_min_hours_daily, 60),
     "teacher_not_available_interval":             (gen_teacher_not_available_interval, 80),
     "teacher_min_days_per_week":                  (gen_teacher_min_days_per_week, 60),
@@ -5883,8 +6036,32 @@ def _name_tokens():
         _NAME_TOKENS = sorted(toks, key=len, reverse=True)
     return _NAME_TOKENS
 
+_SIG_DAY_TOKENS = None
+_SIG_ORD_TOKENS = None
+def _sig_variant_tokens():
+    """Gün adı ve ordinal-sözcük varyantlarını (uzun→kısa) döndürür — imza maskeleme için."""
+    global _SIG_DAY_TOKENS, _SIG_ORD_TOKENS
+    if _SIG_DAY_TOKENS is None:
+        days = set()
+        for variants in DAYS_VARIANTS.values():
+            days.update(variants)
+        _SIG_DAY_TOKENS = sorted(days, key=len, reverse=True)
+        ords = set()
+        for words in ORDINAL_HOUR.values():
+            for w in words:
+                if not w.endswith("."):  # "1." zaten sayı-maskesiyle yakalanır
+                    ords.add(w)
+        _SIG_ORD_TOKENS = sorted(ords, key=len, reverse=True)
+    return _SIG_DAY_TOKENS, _SIG_ORD_TOKENS
+
 def request_signature(line: str) -> tuple:
-    """(kind, maskelenmiş_ilk_user_request) — leakage-free gruplama anahtarı."""
+    """(kind, maskelenmiş_ilk_user_request) — leakage-free gruplama anahtarı.
+
+    Entity adları, GÜN adları (Pazartesi/pzt/haftanın ilk günü…), ORDİNAL sözcükler
+    (birinci/ilk/son…) ve sayılar maskelenir. Gün/ordinal maskeleme kritik: eskiden yalnız
+    'salı'→'çarşamba' ya da 'birinci'→'ikinci' değişen kopyalar FARKLI imza sayılıp biri train
+    diğeri eval'e düşüyordu (eval'in ~%25'i train'in yüzey-varyantıydı = leakage). Aynı şablonun
+    tüm gün/ordinal varyantları artık tek imzaya çöker → aynı split'e gider."""
     obj = json.loads(line)
     user = next((m["content"] for m in obj["messages"] if m["role"] == "user"), "")
     m = re.search(r"\[USER_REQUEST\]\s*(.*?)\s*\[/USER_REQUEST\]", user, re.S)
@@ -5892,6 +6069,13 @@ def request_signature(line: str) -> tuple:
     for name in _name_tokens():
         if name in sig:
             sig = sig.replace(name, "§")
+    day_toks, ord_toks = _sig_variant_tokens()
+    low = sig.lower()
+    for tok in day_toks:
+        low = low.replace(tok.lower(), "¤")
+    for tok in ord_toks:
+        low = re.sub(rf"\b{re.escape(tok.lower())}\b", "¤", low)
+    sig = low
     sig = re.sub(r"\d+", "#", sig)
     sig = re.sub(r"\s+", " ", sig).strip().lower()
     asst = [mm["content"] for mm in obj["messages"] if mm["role"] == "assistant"]
@@ -5912,7 +6096,7 @@ def main():
         path = DS / f"{name}.jsonl"
         with path.open("w", encoding="utf-8") as f:
             for ex in examples:
-                f.write(json.dumps(ex, ensure_ascii=False) + "\n")
+                f.write(json.dumps(_normalize_example(ex), ensure_ascii=False) + "\n")
         print(f"  ✓ {name:32s} {len(examples):>5} örnek")
         total += len(examples)
 

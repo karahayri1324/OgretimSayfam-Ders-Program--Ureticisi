@@ -25,7 +25,20 @@ def _client_ip(request: Request) -> str:
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
-def register(body: RegisterRequest) -> AuthResponse:
+def register(body: RegisterRequest, request: Request) -> AuthResponse:
+    # IP başına saatlik kayıt sınırı: aksi halde tek kullanıcı sınırsız hesap açıp her hesapla
+    # taze saatlik kota alarak rate-limit'i baypas edebilir.
+    ip = _client_ip(request)
+    if login_throttle.register_blocked(ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "error": "too_many_registrations",
+                "message": "Bu ağdan çok fazla kayıt denemesi yapıldı. Lütfen bir süre sonra tekrar deneyin.",
+            },
+            headers={"Retry-After": "3600"},
+        )
+    login_throttle.record_register(ip)
     try:
         user = repo.create_user(
             email=str(body.email),

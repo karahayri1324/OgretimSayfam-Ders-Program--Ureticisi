@@ -59,8 +59,12 @@ def build_messages(payload: AIRequest) -> list[dict[str, str]]:
 
     msgs: list[dict[str, str]] = [{"role": "system", "content": sys}]
 
+    # GÜVENLİK: history istemciden gelir; 'system' rolüne İZİN VERİLMEZ. Aksi halde kötü niyetli
+    # bir istemci geçmişe sahte bir system mesajı enjekte edip gerçek system prompt'u ezebilir /
+    # sızdırabilir (prompt injection). Electron app zaten yalnız user/assistant gönderir, bu yüzden
+    # filtre eğitim formatını (byte-eş) bozmaz — yalnız kötüye kullanım yolunu kapatır.
     for h in payload.history:
-        if h.role in ("user", "assistant", "system"):
+        if h.role in ("user", "assistant"):
             msgs.append({"role": h.role, "content": h.text})
 
     c = payload.context

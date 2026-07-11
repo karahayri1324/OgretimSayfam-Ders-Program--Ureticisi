@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, it } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { mockParseSync, type AIContext } from '../electron/ai/mock-server.js';
 import type { AIResponse } from '../src/lib/types.js';
 
@@ -82,7 +82,7 @@ function pickRandom<T>(arr: T[], n: number, seed = 42): T[] {
   return copy.slice(0, n);
 }
 
-function runValidation(sampleSize = 200): void {
+function runValidation(sampleSize = 200): number {
   const all: Sample[] = [];
   const files = fs.readdirSync(DS).filter((f) => f.endsWith('.jsonl'));
   for (const file of files) {
@@ -198,17 +198,20 @@ function runValidation(sampleSize = 200): void {
   }
 
   const overallPct = ((fullMatch + partial) / total) * 100;
-  if (overallPct < 50) {
-    console.log(
-      `\nUYARI: Hedef %50 altında — production LLM ile %95+'a çıkmalı.`,
-    );
-  } else {
-    console.log(`\nOK: Mock coverage %${anyPct} — hedef (%50) sağlandı.`);
-  }
+  console.log(`\nMock coverage: %${anyPct} (regresyon eşiği: %${MIN_COVERAGE_PCT}).`);
+  return overallPct;
 }
 
-describe('Mock Coverage Validator (200 random dataset örnek)', () => {
-  it('mock-server, dataset örneklerinin %50+ kategorisini tutarlı parse eder', () => {
-    runValidation(200);
+// mock-server üretimde KULLANILMAZ (gerçek istekler VPS'teki fine-tuned LLM'e gider); bu yalnız
+// test-only deterministik bir yaklaşımlayıcıdır. Eşik gerçek ölçülen coverage'a göre bir
+// REGRESYON GUARD'ıdır (eskiden test assertion'sızdı ve iddia edilen %50 tutmadığı halde yeşil
+// geçiyordu). Seed sabit → sonuç deterministik; mock-server bir refactor ile bozulursa bu alt
+// sınır yakalar. Kaliteyi yükseltmek istemek = mock parser'ı geliştirmek (ayrı iş).
+const MIN_COVERAGE_PCT = 24;
+
+describe('Mock Coverage Validator (200 sabit-seed dataset örnek)', () => {
+  it(`mock-server, dataset örneklerinin en az %${MIN_COVERAGE_PCT}'sini doğru kategoriye parse eder (regresyon guard)`, () => {
+    const pct = runValidation(200);
+    expect(pct).toBeGreaterThanOrEqual(MIN_COVERAGE_PCT);
   });
 });

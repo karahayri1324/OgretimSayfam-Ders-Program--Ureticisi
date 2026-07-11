@@ -66,6 +66,12 @@ export default function Schedule() {
   );
   const [saving, setSaving] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  // Kullanıcı grid'de kaydedilmemiş bir düzenleme yaptıysa true; bu sırada dış kaynaklı store
+  // değişimi yerel state'i EZMEZ (kullanıcı düzenlemesi korunur). Kullanıcı düzenlemiyorsa
+  // (dirty=false) store dışarıdan değişince (AI gün/saat ekledi) yerel state yeniden senkronlanır.
+  // Eskiden 'initialized' bir kez set olunca senkron TAMAMEN duruyordu → AI'ın eklediği gün/saat,
+  // kullanıcı Schedule'da Kaydet'e basınca eski yerel state ile sessizce siliniyordu.
+  const [dirty, setDirty] = useState(false);
   const [bulkDelta, setBulkDelta] = useState(5);
 
   useEffect(() => {
@@ -73,7 +79,7 @@ export default function Schedule() {
   }, [load]);
 
   useEffect(() => {
-    if (initialized) return;
+    if (initialized && dirty) return;
     if (days.length > 0 || hours.length > 0) {
       if (days.length > 0) {
         // DB gün adları Türkçe ('Pazartesi'...) tutulur; seçim için DAY_DEFS slug id'sine eşle.
@@ -104,7 +110,7 @@ export default function Schedule() {
       }
       setInitialized(true);
     }
-  }, [days, hours, initialized]);
+  }, [days, hours, initialized, dirty]);
 
   const orderedSelected = useMemo(
     () => DAY_DEFS.filter((d) => selectedDays.has(d.id)),
@@ -131,6 +137,7 @@ export default function Schedule() {
   }, [dayHours]);
 
   function toggleDay(id: string) {
+    setDirty(true);
     setSelectedDays((cur) => {
       const next = new Set(cur);
       if (next.has(id)) next.delete(id);
@@ -141,6 +148,7 @@ export default function Schedule() {
 
   function changeHoursPerDay(n: number) {
     if (!Number.isFinite(n) || n < 1) return;
+    setDirty(true);
     const clamped = Math.max(1, Math.min(20, Math.floor(n)));
     setHoursPerDay(clamped);
     setHourRows((cur) => (clamped > cur.length ? buildDefaultHours(clamped, cur) : cur));
@@ -151,6 +159,7 @@ export default function Schedule() {
   }
 
   function updateRow(i: number, patch: Partial<HourRow>) {
+    setDirty(true);
     setHourRows((cur) => cur.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   }
 
@@ -174,8 +183,12 @@ export default function Schedule() {
     const okDays = await saveDays(dayPayload);
     const okHours = await saveHours(hourPayload);
     setSaving(false);
-    if (okDays && okHours) toast.success(tr.common.saved);
-    else toast.error(tr.common.error);
+    if (okDays && okHours) {
+      // Kaydedildi → yerel state artık store ile hizalı; dirty'yi temizle ki sonraki dış
+      // değişiklikler (AI gün/saat ekleme) yeniden senkronlanabilsin.
+      setDirty(false);
+      toast.success(tr.common.saved);
+    } else toast.error(tr.common.error);
   }
 
   async function applyBulkBreaks(scope: 'global' | number) {

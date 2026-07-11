@@ -148,6 +148,12 @@ class AdminUserPatch(BaseModel):
     demo_expires_at: str | None = Field(default=None, max_length=64)
 
 
+class BlockRequest(BaseModel):
+    # /block yolu eskiden ham dict alıp message'ı sınırsız yazıyordu — AdminUserPatch'e eklenen
+    # 2000-karakter DoS sınırının paralel yolu boş kalmıştı. Aynı sınırı burada da uygula.
+    message: str | None = Field(default=None, max_length=2000)
+
+
 class AdminSettingsView(BaseModel):
     default_rate_limit_per_hour: int
     default_block_message: str

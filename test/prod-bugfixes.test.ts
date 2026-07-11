@@ -84,16 +84,20 @@ describe('ACTIVITY_FIXED_TIME — çok-saatli aktivite (#1/#4)', () => {
   });
 });
 
-describe('EARLY_MAX_BEGINNINGS ağırlığı (#7)', () => {
-  it('kullanıcı ağırlığını kullanır (sabit 100 değil)', () => {
+describe('EARLY_MAX_BEGINNINGS ağırlığı (#7 → tur-11 revizyonu)', () => {
+  // Tur-1'deki #7 fix'i kullanıcı ağırlığını olduğu gibi geçiriyordu; fet-cl 6.8.5 ile ampirik
+  // doğrulandı ki bu aile <100 ağırlıkta ÜRETİMİN TAMAMINI abort ediyor ("Cannot optimize...
+  // early m.b.a.s.h. ... with weight percentage less than 100%"). Doğru davranış: 100'e clamp.
+  it('<100 ağırlığı 100e sabitler ve yorumda belirtir (FET zorunluluğu)', () => {
     const xml = buildFetXml(
       makeBundle({
         constraints: [constraint('CLASS_EARLY_MAX_BEGINNINGS', { class: '9A', maxBeginnings: 0 }, 80)],
       }),
     ).xml;
     expect(xml).toMatch(
-      /<ConstraintStudentsSetEarlyMaxBeginningsAtSecondHour>[\s\S]*?<Weight_Percentage>80<\/Weight_Percentage>/,
+      /<ConstraintStudentsSetEarlyMaxBeginningsAtSecondHour>[\s\S]*?<Weight_Percentage>100<\/Weight_Percentage>/,
     );
+    expect(xml).toMatch(/Ağırlık 80→100 sabitlendi/);
   });
 });
 
