@@ -148,8 +148,17 @@ async function singleRoundtrip(
       if (status === 429) {
         throw new AIError('AI_RATE_LIMIT', serverMsg || 'Saatlik istek limitinize ulaştınız.', e);
       }
+      // Kullanıcıya TEKNİK ayrıntı gösterme ("HTTP 502", axios metni, upstream jargonu).
+      // Sunucu zaten kullanıcıya yönelik Türkçe bir mesaj döndürüyor; varsa onu aynen göster.
+      // Teknik ayrıntı yalnız log'a gider — teşhis için orada, kullanıcının karşısında değil.
       const detail = serverMsg || (status ? `HTTP ${status}` : ax.message);
-      throw new AIError('AI_ERROR', `AI sunucusuna ulaşılamadı: ${detail}`, e);
+      log.warn('AI isteği başarısız', { status, detail });
+      throw new AIError(
+        'AI_ERROR',
+        serverMsg ||
+          'Yapay zekâ servisine şu anda ulaşılamıyor. Lütfen biraz sonra tekrar deneyin.',
+        e,
+      );
     }
   };
 
@@ -163,7 +172,12 @@ async function singleRoundtrip(
     // kotayı yeniden harcamadan net hata ver.
     const msg = err instanceof Error ? err.message : String(err);
     log.warn('AI yanıtı doğrulanamadı', { error: msg });
-    throw new AIError('AI_INVALID_RESPONSE', `AI yanıtı doğrulanamadı: ${msg}`, err);
+    // Şema ihlali ayrıntısı (zod yol/mesaj listesi) kullanıcı için anlamsız — log'da kalsın.
+    throw new AIError(
+      'AI_INVALID_RESPONSE',
+      'Yapay zekâ bu isteği şu anda işleyemedi. Lütfen isteğinizi biraz farklı ifade ederek tekrar deneyin.',
+      err,
+    );
   }
 }
 

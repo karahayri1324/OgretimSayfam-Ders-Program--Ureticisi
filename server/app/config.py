@@ -84,6 +84,13 @@ class Settings:
     upstream_max_tokens: int = field(
         default_factory=lambda: _env_int("UPSTREAM_MAX_TOKENS", 1536)
     )
+    # Qwen3.5 chat template varsayılan olarak `<think>` bloğunu AÇIK bırakır ve model
+    # düşünce metni üretir. Dataset'te think bloğu BOŞ eğitildiği için üretimde de
+    # kapatılmalı: aksi halde token israfı olur ve uzun JSON'lar max_tokens'a takılıp
+    # yarıda kesilir. Kapatınca çıktı doğrudan JSON ile başlar.
+    upstream_enable_thinking: bool = field(
+        default_factory=lambda: _env("UPSTREAM_ENABLE_THINKING", "0") == "1"
+    )
 
     system_prompt_path: str = field(
         default_factory=lambda: _env(

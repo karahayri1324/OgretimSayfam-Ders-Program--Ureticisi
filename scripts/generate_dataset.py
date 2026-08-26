@@ -2960,6 +2960,18 @@ def gen_run_solver(n: int) -> list[dict]:
             request = f"{random.choice(base_phrases)}."
 
         ctx = make_context()
+        # SAHTE KORELASYON DÜZELTMESİ: run_solver örnekleri eskiden HER ZAMAN boş
+        # CONSTRAINTS listesiyle üretiliyordu; gevşetme örnekleri (gen_constraint_relax /
+        # gen_generation_failure_feedback) ise HER ZAMAN 3-7 adet weight=100 kısıtla.
+        # Böylece kısıt listesi kusursuz bir ayırıcıya dönüştü ve model "3+ katı kısıt
+        # görürsem gevşetme öner" diye SAHTE bir kural öğrendi: gerçek okulda müsaitlik
+        # kısıtı hep 3+ olduğu için "programı üret" isteği sistematik olarak reddediliyordu.
+        # Artık run_solver örnekleri de dolu ve KATI kısıt listeleriyle geliyor → geçerli
+        # tek sinyal kullanıcının isteği (ve LAST_GENERATION_FAILURE'ın YOKLUĞU).
+        if random.random() < 0.75:
+            ctx["constraints"] = _existing_ctx_constraints(
+                ctx, random.randint(3, 8), hard_ratio=0.8
+            )
         payload = {
             "kind": "run_solver",
             "explanation": (
@@ -3096,12 +3108,21 @@ def gen_constraint_relax(n: int) -> list[dict]:
 
         active_constraints = []
         cnum = random.randint(3, 7)
+        # Ağırlıklar KARIŞIK olmalı. Eskiden hepsi 100'dü; "3-7 kısıt ve hepsi weight=100"
+        # deseni gevşetmenin tek ayırt edici işareti hâline gelmişti ve model bu deseni
+        # gördüğü her yerde (kullanıcı "üret" dese bile) gevşetme öneriyordu. Karışık
+        # ağırlık, gevşetmenin gerçek sinyalini kullanıcının isteğine bırakır.
+        n_hard = random.randint(2, max(2, cnum - 1))
+        weights = [100] * n_hard + [
+            random.choice([60, 80]) for _ in range(cnum - n_hard)
+        ]
+        random.shuffle(weights)
         for i in range(cnum):
             desc, ctype = random.choice(constraint_examples)
             active_constraints.append({
                 "id": i + 1,
                 "type": ctype,
-                "weight": 100,
+                "weight": weights[i],
                 "active": True,
                 "description": desc,
             })
@@ -3109,7 +3130,9 @@ def gen_constraint_relax(n: int) -> list[dict]:
 
         request = random.choice(relax_phrases)
 
-        chosen = sorted(active_constraints, key=lambda c: -c["weight"])[:min(5, len(active_constraints))]
+        # Yalnız KATI (100) olanlar gevşetilir — 60/80 zaten esnek, onlara dokunmak yanlış olur.
+        hard = [c for c in active_constraints if c["weight"] == 100]
+        chosen = hard[:min(5, len(hard))]
         actions = [
             {
                 "op": "set_constraint_weight",
@@ -3123,7 +3146,7 @@ def gen_constraint_relax(n: int) -> list[dict]:
             "actions": actions,
             "explanation": (
                 f"Programın üretilememesinin en muhtemel sebebi, ağırlığı 100 olan "
-                f"{len(active_constraints)} katı kısıtlama. Aşağıdaki {len(chosen)} "
+                f"{len(hard)} katı kısıtlama. Aşağıdaki {len(chosen)} "
                 f"kısıtlamanın ağırlığını 70'e düşürürsek FET bunları 'tercih' olarak "
                 f"görür, tam tatmin edemese bile size en yakın çözümü bulur. "
                 f"Onayla, programı tekrar üretelim."
@@ -3133,6 +3156,262 @@ def gen_constraint_relax(n: int) -> list[dict]:
         }
         out.append(example(ctx, request, payload))
     return out
+
+def gen_out_of_range_slot(n: int) -> list[dict]:
+    """CONTEXT'te olmayan GÜN veya SAAT istendiğinde sessizce uydurmayı bırak.
+
+    Sahada doğrulanmış iki hata:
+      • HOURS_PER_DAY=7 iken "9. saatte ders olmasın" denince model kısıtı sanki
+        geçerliymiş gibi üretiyordu (uyarı bile vermeden).
+      • DAYS listesinde Cumartesi yokken "Cumartesi" isteyince Cumartesi'li slot
+        üretiyordu; uygulama bunu FET aşamasında sessizce atıyor, kullanıcı ise
+        listede çalışmayan bir kısıt görüyor.
+    Doğru davranış: kısıtı ÜRETME, sınırı söyle, düzeltme öner.
+    """
+    out = []
+    for _ in range(n):
+        ctx = make_context()
+        H = ctx["hoursPerDay"]
+        D = ctx["days"]
+        who_kind = random.random()
+
+        if who_kind < 0.5:
+            # --- Aralık dışı SAAT ---
+            bad_hour = random.randint(H + 1, H + 3)
+            target = random.random()
+            if target < 0.4:
+                cls = random.choice(ctx["classes"])
+                request = f"{cls} {bad_hour}. saatte ders görmesin"
+                subject_txt = f"{cls} sınıfı"
+            elif target < 0.8:
+                t = random.choice(ctx["teachers"])
+                request = f"{first_name(t)} hoca {bad_hour}. saatte derse girmesin"
+                subject_txt = f"{first_name(t)} hoca"
+            else:
+                s = random.choice(ctx["subjects"])
+                request = f"{s} dersi {bad_hour}. saatte olmasın"
+                subject_txt = f"{s} dersi"
+            payload = {
+                "constraints": [],
+                "confidence": round(random.uniform(0.30, 0.45), 2),
+                "explanation": (
+                    f"Günde {H} ders saati tanımlı, yani {bad_hour}. saat yok. "
+                    f"{subject_txt} için bu kısıtlamayı ekleyemedim. "
+                    f"1-{H} arası bir saat söyle ya da önce günlük ders saatini artıralım."
+                ),
+                "warnings": [],
+                "unresolved": [
+                    f"{bad_hour}. saat CONTEXT'te yok (HOURS_PER_DAY={H}) — kısıtlama eklenmedi."
+                ],
+            }
+        else:
+            # --- Listede olmayan GÜN ---
+            missing = [d for d in ["Cumartesi", "Pazar"] if d not in D]
+            if not missing:
+                missing = ["Pazar"]
+            bad_day = random.choice(missing)
+            target = random.random()
+            if target < 0.5:
+                t = random.choice(ctx["teachers"])
+                request = f"{first_name(t)} hoca {bad_day} günü gelmesin"
+                subject_txt = f"{first_name(t)} hoca"
+            else:
+                cls = random.choice(ctx["classes"])
+                request = f"{cls} {bad_day} günü ders yapmasın"
+                subject_txt = f"{cls} sınıfı"
+            payload = {
+                "constraints": [],
+                "confidence": round(random.uniform(0.30, 0.45), 2),
+                "explanation": (
+                    f"Ders programında {bad_day} yok — tanımlı günler: "
+                    f"{', '.join(D)}. {subject_txt} zaten {bad_day} günü derse girmiyor, "
+                    f"bu yüzden kısıtlama eklemedim. {bad_day} gününü programa eklemek "
+                    f"istersen söyle."
+                ),
+                "warnings": [],
+                "unresolved": [
+                    f"'{bad_day}' CONTEXT'teki DAYS listesinde yok — kısıtlama eklenmedi."
+                ],
+            }
+        out.append(example(ctx, request, payload))
+    return out
+
+
+def gen_unknown_entity_reject(n: int) -> list[dict]:
+    """Olmayan SINIF / BRANŞ / DERSLİK referansını, öğretmendekiyle AYNI kararlılıkta reddet.
+
+    Sahada doğrulanmış asimetri: model olmayan öğretmeni doğru reddediyordu
+    ("'Zeynep Kaya' adında bir öğretmen bulamadım") ama olmayan sınıf/branş için
+    sessizce kısıt üretiyordu. Uygulama bunu FET aşamasında atıyor (handlers.ts),
+    yani kullanıcı listede duran ama hiçbir işe yaramayan bir kısıt görüyordu.
+    """
+    out = []
+    fake_classes = ["11C", "12F", "10Z", "9K", "13A", "8B"]
+    fake_subjects = ["Astronomi", "Latince", "Denizcilik", "Seramik", "Robotik"]
+    fake_rooms = ["Laboratuvar7", "Z-42", "Atölye9", "Salon B"]
+    for _ in range(n):
+        ctx = make_context()
+        roll = random.random()
+
+        if roll < 0.4:
+            unknown = random.choice([c for c in fake_classes if c not in ctx["classes"]]
+                                    or ["11C"])
+            ctx["classes"] = [c for c in ctx["classes"] if c != unknown]
+            request = random.choice([
+                f"{unknown} sınıfı son saatte ders görmesin",
+                f"{unknown} ilk derste boş olsun",
+                f"{unknown} günde en fazla 6 saat ders yapsın",
+            ])
+            label, kind_tr = unknown, "sınıf"
+            hint = f"Tanımlı sınıflar: {', '.join(ctx['classes'][:6])}."
+        elif roll < 0.75:
+            unknown = random.choice([s for s in fake_subjects if s not in ctx["subjects"]]
+                                    or ["Astronomi"])
+            ctx["subjects"] = [s for s in ctx["subjects"] if s != unknown]
+            request = random.choice([
+                f"{unknown} dersi ilk saatte olmasın",
+                f"{unknown} günde en fazla 2 saat olsun",
+                f"{unknown} Cuma günü olmasın",
+            ])
+            label, kind_tr = unknown, "branş"
+            hint = f"Tanımlı branşlar: {', '.join(ctx['subjects'][:6])}."
+        else:
+            unknown = random.choice([r for r in fake_rooms if r not in ctx["rooms"]]
+                                    or ["Laboratuvar7"])
+            ctx["rooms"] = [r for r in ctx["rooms"] if r != unknown]
+            request = random.choice([
+                f"{unknown} dersliği Cuma günü kullanılmasın",
+                f"{unknown} sadece Fen dersleri için olsun",
+            ])
+            label, kind_tr = unknown, "derslik"
+            hint = f"Tanımlı derslikler: {', '.join(ctx['rooms'][:6])}."
+
+        payload = {
+            "constraints": [],
+            "confidence": round(random.uniform(0.28, 0.42), 2),
+            "explanation": (
+                f"'{label}' adında bir {kind_tr} bulamadım, bu yüzden kısıtlamayı "
+                f"eklemedim. {hint} Adı kontrol et ya da önce bu {kind_tr}ı ekleyelim."
+            ),
+            "warnings": [],
+            "unresolved": [f"'{label}' adlı {kind_tr} sistemde yok"],
+        }
+        out.append(example(ctx, request, payload))
+    return out
+
+
+def gen_solve_vs_relax_contrast(n: int) -> list[dict]:
+    """KARŞIT ÖRNEKLER: aynı ağır context, farklı istek → farklı kind.
+
+    Sahada doğrulanmış hata: CONTEXT'te 3+ adet weight=100 müsaitlik kısıtı varken
+    "programı üret" denince model run_solver yerine gevşetme (data_mutation) öneriyordu —
+    ortada LAST_GENERATION_FAILURE olmamasına rağmen. Sebep, kısıt listesinin eğitimde
+    kind ile birebir örtüşmesiydi (run_solver hep boş liste, gevşetme hep 3-7 katı kısıt).
+
+    Bu generator aynı kısıt yoğunluğunu HER İKİ sınıfta da üretir; ayırt edici tek şey
+    kullanıcının isteği ve LAST_GENERATION_FAILURE'ın varlığıdır. Model böylece
+    "katı kısıt çokluğu" ile "üretim başarısız oldu" arasındaki farkı öğrenir.
+    """
+    out = []
+    solve_phrases = [
+        "Programı üret", "Şimdi üret", "Programı oluştur", "Hadi üret",
+        "Programı hazırla", "Çözücüyü çalıştır", "Üretime geç", "Programı yap",
+        "Tamam programı üret", "Artık üretebilirsin", "Programı kursana",
+        "Şimdi başlat", "FET'i çalıştır", "Programı üretebilir misin",
+        "Hazırız, üret", "Kısıtlar tamam, programı çıkar",
+    ]
+    relax_phrases = [
+        "Çözüm bulunamadı, ne yapabilirim?",
+        "Programı üretemedik, hangi kısıtlamaları gevşetebiliriz?",
+        "Kuralları gevşet, çözüm bulamıyor",
+        "Çözülemedi, ağırlıkları düşür",
+        "Öneri ver, programı kuramadık",
+        "Kısıtlamaları esnetelim, program çıkmıyor",
+    ]
+    failures = [
+        {"reason": "NO_SOLUTION", "message": "Çözüm bulunamadı."},
+        {"reason": "TIMEOUT", "message": "Süre limiti doldu, çözüm tamamlanamadı."},
+        {"reason": "PARTIAL", "message": "Bazı dersler yerleştirilemedi.",
+         "unplaced": 6, "total": 120},
+    ]
+
+    for _ in range(n):
+        ctx = make_context()
+        # Her iki kolda da AYNI yoğunlukta katı kısıt listesi.
+        cons = _existing_ctx_constraints(ctx, random.randint(3, 8), hard_ratio=0.85)
+        ctx["constraints"] = cons
+        hard = [c for c in cons if c["weight"] == 100]
+
+        roll = random.random()
+
+        # %55 — ağır kısıt listesi VAR ama hata YOK → doğru cevap run_solver.
+        # Bu kol, sahadaki hatayı doğrudan hedefleyen karşıt örnektir.
+        if roll < 0.55:
+            sec = random.choice([None, 60, 120, 150, 300])
+            request = random.choice(solve_phrases)
+            if sec:
+                request += f". {sec} saniye."
+            payload = {
+                "kind": "run_solver",
+                "explanation": (
+                    f"FET çözücüsünü {sec} saniye üst limitle başlatacağım. "
+                    f"Onayla, üretim başlasın."
+                ) if sec else (
+                    "FET çözücüsünü mevcut zaman limitiyle başlatacağım. "
+                    "Onayla, üretim başlasın."
+                ),
+                "confidence": round(random.uniform(0.88, 0.96), 2),
+            }
+            if sec:
+                payload["timeLimitSec"] = sec
+            out.append(example(ctx, request, payload))
+            continue
+
+        # %25 — kullanıcı AÇIKÇA gevşetme istiyor (hata alanı olmadan) → gevşetme.
+        if roll < 0.80:
+            request = random.choice(relax_phrases)
+        # %20 — LAST_GENERATION_FAILURE var + kısa tepki → gevşetme.
+        else:
+            ctx["lastGenerationFailure"] = random.choice(failures)
+            request = random.choice(
+                ["neden olmadı?", "düzelt", "çöz hadi", "ne yapmalıyım?", "öneri ver"]
+            )
+
+        if not hard:
+            # Gevşetilecek katı kısıt yoksa gevşetme öneremeyiz; dürüst rehberlik ver.
+            payload = {
+                "kind": "query",
+                "answer": (
+                    "Şu an ağırlığı 100 olan katı bir kısıtlama yok, yani sorun kısıt "
+                    "sertliğinden kaynaklanmıyor. Ders saati toplamı ile gün/saat "
+                    "kapasitesini karşılaştıralım mı?"
+                ),
+                "confidence": round(random.uniform(0.78, 0.88), 2),
+            }
+        else:
+            chosen = hard[:min(5, len(hard))]
+            payload = {
+                "kind": "data_mutation",
+                "actions": [
+                    {
+                        "op": "set_constraint_weight",
+                        "params": {"constraintId": c["id"], "weight": 70},
+                        "description": f"\"{c['description']}\" → ağırlık 100 → 70 (esnek)",
+                    }
+                    for c in chosen
+                ],
+                "explanation": (
+                    f"Ağırlığı 100 olan {len(hard)} katı kısıtlama var. Aşağıdaki "
+                    f"{len(chosen)} kısıtlamanın ağırlığını 70'e düşürürsek FET bunları "
+                    f"'tercih' olarak görür ve en yakın çözümü bulur. Onayla, programı "
+                    f"tekrar üretelim."
+                ),
+                "requiresConfirmation": True,
+                "confidence": round(random.uniform(0.78, 0.90), 2),
+            }
+        out.append(example(ctx, request, payload))
+    return out
+
 
 def _failure_prefix(failure: dict) -> str:
     """buildFailurePrefix (electron/ai/mock-server.ts) ile aynı teşhis cümlesi."""
@@ -5235,6 +5514,21 @@ def make_existing_constraints(ctx: dict, k: int) -> list:
     return out
 
 
+def _existing_ctx_constraints(ctx: dict, k: int, hard_ratio: float = 0.5) -> list:
+    """CONTEXT'e konacak mevcut kısıt listesi (yalnız gösterim şekli).
+
+    `hard_ratio`: bir kısıtın weight=100 (katı) olma olasılığı. Gevşetme örnekleriyle
+    AYNI dağılımda katı liste üretilebilsin diye ayarlanabilir — amaç kısıt listesinin
+    tek başına "gevşetme öner" sinyali OLMAMASI (bkz. gen_run_solver içindeki not).
+    """
+    out = []
+    for _, c_ctx in make_existing_constraints(ctx, k):
+        if random.random() < hard_ratio:
+            c_ctx = {**c_ctx, "weight": 100, "active": True}
+        out.append(c_ctx)
+    return out
+
+
 def gen_multi_turn_query(n: int) -> list[dict]:
     """Çok-turlu sorgu: tool_call → [TOOL_RESULT] → final query cevabı.
     Modele "tool sonucu geldikten sonra Türkçe cevap üret" davranışını öğretir."""
@@ -5999,6 +6293,13 @@ GENERATORS = {
     "schedule_settings_query":                    (gen_schedule_settings_query, 90),
     "teacher_search":                             (gen_teacher_search, 100),
     "list_constraints":                           (gen_list_constraints, 100),
+    # Sahada doğrulanmış "üret → gevşetme" sahte korelasyonunu kıran karşıt örnekler.
+    # Yüksek pay: hatanın kaynağı olan desen dataset'te çok baskındı.
+    "solve_vs_relax_contrast":                    (gen_solve_vs_relax_contrast, 200),
+    # Bağlam-dışı gün/saat isteklerini sessizce kabul etmeyi bırakma örnekleri.
+    "out_of_range_slot":                          (gen_out_of_range_slot, 150),
+    # Olmayan sınıf/branş/derslik referansını öğretmendekiyle aynı şekilde reddetme.
+    "unknown_entity_reject":                      (gen_unknown_entity_reject, 150),
 }
 
 SCALE = int(os.environ.get("DPO_DATASET_SCALE", "22"))

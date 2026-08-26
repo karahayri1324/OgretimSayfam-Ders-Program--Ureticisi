@@ -161,7 +161,7 @@ def run_live(rows: list[dict], endpoint: str, model: str, limit: int) -> None:
             resp = httpx.post(
                 endpoint,
                 json={"model": model, "messages": msgs, "temperature": 0.0,
-                      "max_tokens": 1024, "stream": False},
+                      "max_tokens": 1024, "stream": False, "chat_template_kwargs": {"enable_thinking": False}},
                 timeout=120,
             )
             content = resp.json()["choices"][0]["message"]["content"]
